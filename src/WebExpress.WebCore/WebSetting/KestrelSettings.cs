@@ -1,36 +1,31 @@
 ﻿using System;
-using System.Xml.Serialization;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
-namespace WebExpress.WebCore.Config
+namespace WebExpress.WebCore.WebSetting
 {
     /// <summary>
-    /// Optional fine-tuning of the underlying Kestrel server. The whole &lt;kestrel&gt; element as well
-    /// as every individual property is optional: any value that is left unset (<c>null</c>) keeps the
-    /// behavior the web server applied before this configuration block existed, so adding the element
-    /// can never change defaults a deployment did not explicitly opt into.
+    /// Optional fine-tuning of the underlying Kestrel server. The whole block as well as every
+    /// individual property is optional: any value that is left unset (<see langword="null"/>) keeps
+    /// the behavior the web server applied before this block existed, so adding the block can never
+    /// change defaults a deployment did not explicitly opt into.
     /// </summary>
-    [XmlRoot("kestrel", IsNullable = false)]
-    public sealed class KestrelConfig
+    public sealed class KestrelSettings
     {
         /// <summary>
         /// Allows synchronous IO on the request and response streams. WebExpress renders and sends
         /// responses synchronously, which is why this defaults to <c>true</c> when not specified.
         /// </summary>
-        [XmlElement("allowsynchronousio")]
         public bool? AllowSynchronousIO { get; set; }
 
         /// <summary>
         /// Allows the response headers to be compressed. Defaults to <c>true</c> when not specified.
         /// </summary>
-        [XmlElement("allowresponseheadercompression")]
         public bool? AllowResponseHeaderCompression { get; set; }
 
         /// <summary>
         /// Controls whether the <c>Server</c> response header is emitted. Disabling it reduces the
         /// information exposed about the host. Defaults to <c>true</c> when not specified.
         /// </summary>
-        [XmlElement("addserverheader")]
         public bool? AddServerHeader { get; set; }
 
         /// <summary>
@@ -40,28 +35,28 @@ namespace WebExpress.WebCore.Config
         /// HTTP/2 over TLS via ALPN and serves plain HTTP as HTTP/1.1. Set <c>Http2</c> on a plain
         /// (non-TLS) endpoint to enable cleartext HTTP/2 (h2c), which has no automatic upgrade path.
         /// </summary>
-        [XmlElement("protocols")]
+        /// <remarks>
+        /// Kept as text rather than bound to the enum directly, so a typo keeps the default instead
+        /// of failing the start-up - see <see cref="ResolveProtocols"/>.
+        /// </remarks>
         public string Protocols { get; set; }
 
         /// <summary>
         /// The maximum number of concurrent client connections. When not specified the Kestrel
         /// default (unlimited) is kept.
         /// </summary>
-        [XmlElement("maxconcurrentconnections")]
         public long? MaxConcurrentConnections { get; set; }
 
         /// <summary>
         /// The maximum allowed size of a request body, in bytes. When not specified the Kestrel
         /// default is kept.
         /// </summary>
-        [XmlElement("maxrequestbodysize")]
         public long? MaxRequestBodySize { get; set; }
 
         /// <summary>
         /// The maximum allowed size of the combined request headers, in bytes. When not specified
         /// the Kestrel default (32 KiB) is kept.
         /// </summary>
-        [XmlElement("maxrequestheaderstotalsize")]
         public int? MaxRequestHeadersTotalSize { get; set; }
 
         /// <summary>
@@ -69,49 +64,43 @@ namespace WebExpress.WebCore.Config
         /// are not counted against the regular connection limit. When not specified the Kestrel
         /// default is kept.
         /// </summary>
-        [XmlElement("maxconcurrentupgradedconnections")]
         public long? MaxConcurrentUpgradedConnections { get; set; }
 
         /// <summary>
         /// The maximum size of the request buffer, in bytes. When not specified the Kestrel default is kept.
         /// </summary>
-        [XmlElement("maxrequestbuffersize")]
         public long? MaxRequestBufferSize { get; set; }
 
         /// <summary>
         /// The maximum size of the response buffer, in bytes. When not specified the Kestrel default is kept.
         /// </summary>
-        [XmlElement("maxresponsebuffersize")]
         public long? MaxResponseBufferSize { get; set; }
 
         /// <summary>
         /// The maximum allowed size of the request line (request method, uri and protocol), in bytes.
         /// When not specified the Kestrel default is kept.
         /// </summary>
-        [XmlElement("maxrequestlinesize")]
         public int? MaxRequestLineSize { get; set; }
 
         /// <summary>
         /// The keep-alive timeout, in seconds. A value that closes idle connections after a period of
         /// inactivity. When not specified the Kestrel default is kept.
         /// </summary>
-        [XmlElement("keepalivetimeout")]
         public int? KeepAliveTimeout { get; set; }
 
         /// <summary>
         /// The amount of time, in seconds, the server waits for the request headers to be received in
         /// full before closing the connection. When not specified the Kestrel default is kept.
         /// </summary>
-        [XmlElement("requestheaderstimeout")]
         public int? RequestHeadersTimeout { get; set; }
 
         /// <summary>
         /// Resolves the configured <see cref="Protocols"/> name to the corresponding Kestrel
-        /// <see cref="HttpProtocols"/> value. Returns <c>null</c> when nothing was configured or the
-        /// value is not a recognised protocol name, so the caller keeps the Kestrel default instead
-        /// of silently applying an unintended restriction from a typo.
+        /// <see cref="HttpProtocols"/> value. Returns <see langword="null"/> when nothing was
+        /// configured or the value is not a recognised protocol name, so the caller keeps the
+        /// Kestrel default instead of silently applying an unintended restriction from a typo.
         /// </summary>
-        /// <returns>The parsed protocols, or <c>null</c> to keep the Kestrel default.</returns>
+        /// <returns>The parsed protocols, or <see langword="null"/> to keep the Kestrel default.</returns>
         public HttpProtocols? ResolveProtocols()
         {
             if (string.IsNullOrWhiteSpace(Protocols))
@@ -125,13 +114,6 @@ namespace WebExpress.WebCore.Config
                 && Enum.IsDefined(typeof(HttpProtocols), result)
                 ? result
                 : null;
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the class.
-        /// </summary>
-        public KestrelConfig()
-        {
         }
     }
 }

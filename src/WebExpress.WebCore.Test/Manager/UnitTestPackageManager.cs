@@ -1,11 +1,13 @@
 using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebPackage;
 using WebExpress.WebCore.WebPackage.Model;
 using WebExpress.WebCore.WebPlugin;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.Test.Manager
 {
@@ -599,12 +601,157 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A package ships its settings file under settings/; installing it deploys the file to
+        /// the settings directory of the server and reloads the configuration, so the plugin's
+        /// section is there before the plugin boots.
+        /// </summary>
+        [Fact]
+        public void InstallDeploysSettingsFileAndReloadsConfiguration()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+            var section = configuration.GetPluginSettings("withsettings");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", """{ "Plugins": { "withsettings": { "Greeting": "hello" } } }""");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.True(File.Exists(Path.Combine(settingsPath, "withsettings.settings.json")));
+                Assert.Equal("hello", section["Greeting"]);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(settingsPath, true);
+            }
+        }
+
+        /// <summary>
+        /// A settings file the administrator already has is theirs: a package update must not
+        /// overwrite it with the shipped default.
+        /// </summary>
+        [Fact]
+        public void InstallKeepsExistingSettingsFile()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            Directory.CreateDirectory(settingsPath);
+            File.WriteAllText(Path.Combine(settingsPath, "withsettings.settings.json"), """{ "Plugins": { "withsettings": { "Greeting": "edited" } } }""");
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", """{ "Plugins": { "withsettings": { "Greeting": "shipped" } } }""");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.Equal("edited", configuration.GetPluginSettings("withsettings")["Greeting"]);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(settingsPath, true);
+            }
+        }
+
+        /// <summary>
+        /// A settings file that does not parse is refused: once in the directory it would fail
+        /// every following start of the server, so the installation goes on without it.
+        /// </summary>
+        [Fact]
+        public void InstallRefusesInvalidSettingsFile()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "broken.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "broken", "1.0.0", "{ this is not json");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.False(Directory.Exists(settingsPath));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// Only a json file directly below settings/ is a settings file; an entry that tries to
+        /// leave the directory is ignored and never written anywhere.
+        /// </summary>
+        [Fact]
+        public void InstallIgnoresNestedSettingsEntry()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "nested.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "nested", "1.0.0", null, "settings/sub/escape.json");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.False(Directory.Exists(settingsPath));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
         /// Creates a simple package archive for tests.
         /// </summary>
         /// <param name="file">The package file path.</param>
         /// <param name="id">The package id.</param>
         /// <param name="version">The package version.</param>
-        private static void CreatePackageArchive(string file, string id, string version)
+        /// <param name="settings">The content of a settings file shipped as settings/{id}.settings.json, or null for none.</param>
+        /// <param name="settingsEntry">The entry name of the settings file, if it is to differ from the default.</param>
+        private static void CreatePackageArchive(string file, string id, string version, string settings = null, string settingsEntry = null)
         {
             using var zip = ZipFile.Open(file, ZipArchiveMode.Create);
             var specEntry = zip.CreateEntry($"{id}.spec");
@@ -621,6 +768,13 @@ namespace WebExpress.WebCore.Test.Manager
 
             // add minimal lib folder marker to resemble package layout
             zip.CreateEntry("lib/");
+
+            if (settings is not null || settingsEntry is not null)
+            {
+                var entry = zip.CreateEntry(settingsEntry ?? $"settings/{id}.settings.json");
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write(settings ?? "{}");
+            }
         }
 
         /// <summary>

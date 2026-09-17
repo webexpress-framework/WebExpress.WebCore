@@ -6,7 +6,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
-using WebExpress.WebCore.Setting;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebLog
 {
@@ -190,12 +190,12 @@ namespace WebExpress.WebCore.WebLog
         /// Starts logging
         /// </summary>
         /// <param name="settings">The log settings</param>
-        public void Begin(SettingLogItem settings)
+        public void Begin(LogSettings settings)
         {
-            Filename = settings.Filename;
+            Filename = settings.FileName;
 
             // a malformed configuration value must not crash startup; fall back to the current value
-            if (Enum.TryParse<LogMode>(settings.Modus, true, out var mode))
+            if (Enum.TryParse<LogMode>(settings.Mode, true, out var mode))
             {
                 LogMode = mode;
             }
@@ -209,9 +209,9 @@ namespace WebExpress.WebCore.WebLog
                 Encoding = Encoding.UTF8;
             }
 
-            if (!string.IsNullOrWhiteSpace(settings.Timepattern))
+            if (!string.IsNullOrWhiteSpace(settings.TimePattern))
             {
-                TimePattern = settings.Timepattern;
+                TimePattern = settings.TimePattern;
             }
 
             DebugMode = settings.Debug;

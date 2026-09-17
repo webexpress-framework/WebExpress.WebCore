@@ -1,14 +1,11 @@
-﻿using System.Xml.Serialization;
-
-namespace WebExpress.WebCore.Config
+﻿namespace WebExpress.WebCore.WebSetting
 {
     /// <summary>
-    /// Optional configuration of the session and its cookie. The whole &lt;session&gt; element and
-    /// every property in it is optional: a value left unset keeps the built-in default, so adding
-    /// the block never changes behavior a deployment did not opt into.
+    /// Optional settings of the session and its cookie. The whole block and every property in it
+    /// is optional: a value left unset keeps the built-in default, so adding the block never
+    /// changes behavior a deployment did not opt into.
     /// </summary>
-    [XmlRoot("session", IsNullable = false)]
-    public sealed class SessionConfig
+    public sealed class SessionSettings
     {
         /// <summary>
         /// The idle lifetime of a session in minutes, applied as a sliding window. It bounds both
@@ -16,7 +13,6 @@ namespace WebExpress.WebCore.Config
         /// applies; a non-positive value disables expiry, which also turns the cookie into a
         /// session cookie that dies when the browser closes rather than one that never expires.
         /// </summary>
-        [XmlElement("timeout")]
         public int? TimeoutMinutes { get; set; }
 
         /// <summary>
@@ -26,7 +22,6 @@ namespace WebExpress.WebCore.Config
         /// behind a TLS-terminating proxy and therefore sees plain http itself, so the cookie is
         /// still marked https-only towards the browser.
         /// </summary>
-        [XmlElement("secure")]
         public bool? Secure { get; set; }
     }
 }

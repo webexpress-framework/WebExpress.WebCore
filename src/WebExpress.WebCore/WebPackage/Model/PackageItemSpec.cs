@@ -91,5 +91,14 @@ namespace WebExpress.WebCore.WebPackage.Model
         /// </summary>
         [XmlElement("artifact", IsNullable = true)]
         public string[] Artifacts { get; set; }
+
+        /// <summary>
+        /// Gets or sets the settings files (json) the package ships. On installation they are
+        /// deployed to the settings directory of the server, where every plugin's file is merged
+        /// into one configuration - which is why a file must keep its values under
+        /// <c>Plugins:&lt;plugin id&gt;</c>.
+        /// </summary>
+        [XmlElement("settings", IsNullable = true)]
+        public string[] Settings { get; set; }
     }
 }

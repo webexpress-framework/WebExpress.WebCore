@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
@@ -918,9 +919,18 @@ namespace WebExpress.WebCore.WebPackage
                     Directory.CreateDirectory(extractedPath);
                 }
 
+                var deployedSettings = false;
+
                 foreach (var entry in zip.Entries)
                 {
                     var normalized = (entry.FullName ?? string.Empty).Replace('\\', '/').TrimStart('/');
+
+                    if (normalized.StartsWith(PackageBuilder.SettingsDirectory + "/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deployedSettings |= DeploySettings(entry, normalized);
+
+                        continue;
+                    }
 
                     if (!normalized.StartsWith("lib/", StringComparison.OrdinalIgnoreCase))
                     {
@@ -963,6 +973,98 @@ namespace WebExpress.WebCore.WebPackage
 
                     entry.ExtractToFile(targetFilePath, true);
                 }
+
+                // the configuration everyone holds is reloaded in place, so the plugin about to
+                // boot finds its settings without a restart
+                if (deployedSettings)
+                {
+                    _httpServerContext?.Configuration?.Reload();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Deploys a settings file of a package to the settings directory of the server. An
+        /// existing file is left alone: it is the administrator's by then, and a package update
+        /// must not undo the changes made to it.
+        /// </summary>
+        /// <param name="entry">The archive entry of the settings file.</param>
+        /// <param name="normalized">The entry path with forward slashes and no leading slash.</param>
+        /// <returns><see langword="true"/> when the file was written, <see langword="false"/> when it was skipped.</returns>
+        private bool DeploySettings(ZipArchiveEntry entry, string normalized)
+        {
+            var settingsPath = _httpServerContext?.SettingsPath;
+            var segments = normalized.Split('/');
+
+            // directory entries carry no file
+            if (string.IsNullOrEmpty(entry.Name) || string.IsNullOrWhiteSpace(settingsPath))
+            {
+                return false;
+            }
+
+            // only json files directly below the settings directory are settings; a nested path
+            // could escape the directory and another extension would never be merged
+            if (segments.Length != 2
+                || !segments[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                || segments[1].IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.ignored", entry.FullName));
+
+                return false;
+            }
+
+            var targetFilePath = Path.Combine(settingsPath, segments[1]);
+
+            if (File.Exists(targetFilePath))
+            {
+                _httpServerContext?.Log?.Debug(I18N.Translate("webexpress.webcore:packagemanager.settings.existing", segments[1]));
+
+                return false;
+            }
+
+            using var stream = entry.Open();
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            var content = buffer.ToArray();
+
+            // a file that does not parse is refused before it reaches the directory: once there,
+            // it would fail every following start of the server, not just this installation
+            if (!IsJson(content))
+            {
+                _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.invalid", entry.FullName));
+
+                return false;
+            }
+
+            Directory.CreateDirectory(settingsPath);
+            File.WriteAllBytes(targetFilePath, content);
+
+            _httpServerContext?.Log?.Info(I18N.Translate("webexpress.webcore:packagemanager.settings.deployed", segments[1]));
+
+            return true;
+        }
+
+        /// <summary>
+        /// Checks whether the content is a json document the configuration would accept: comments
+        /// and trailing commas included, as the json configuration provider allows them too.
+        /// </summary>
+        /// <param name="content">The content to check.</param>
+        /// <returns><see langword="true"/> when the content parses as json.</returns>
+        private static bool IsJson(byte[] content)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(content, new JsonDocumentOptions
+                {
+                    CommentHandling = JsonCommentHandling.Skip,
+                    AllowTrailingCommas = true
+                });
+
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
             }
         }
 

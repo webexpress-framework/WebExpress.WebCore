@@ -17,7 +17,6 @@ using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
-using WebExpress.WebCore.Config;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
@@ -25,6 +24,7 @@ using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebParameter;
+using WebExpress.WebCore.WebSetting;
 using WebExpress.WebCore.WebSitemap;
 using WebExpress.WebCore.WebSocket;
 using WebExpress.WebCore.WebStatusPage;
@@ -55,9 +55,9 @@ namespace WebExpress.WebCore
         private CancellationTokenSource ServerTokenSource { get; } = new CancellationTokenSource();
 
         /// <summary>
-        /// Gets or sets the configuration.
+        /// Gets or sets the settings of the server. Left unset, every value keeps its built-in default.
         /// </summary>
-        public HttpServerConfig Config { get; set; }
+        public HttpServerSettings Settings { get; set; }
 
         /// <summary>
         /// Gets the context.
@@ -108,7 +108,8 @@ namespace WebExpress.WebCore
                 context.PackagePath,
                 context.AssetPath,
                 context.DataPath,
-                context.ConfigPath,
+                context.SettingsPath,
+                context.Configuration,
                 context.Culture,
                 context.Log,
                 this
@@ -154,8 +155,8 @@ namespace WebExpress.WebCore
                 }
             );
 
-            // the <kestrel> configuration block is optional; a missing block or property keeps the built-in defaults
-            var kestrel = Config?.Kestrel;
+            // the kestrel settings block is optional; a missing block or property keeps the built-in defaults
+            var kestrel = Settings?.Kestrel;
 
             var serverOptions = new OptionsWrapper<KestrelServerOptions>(new KestrelServerOptions()
             {
@@ -206,7 +207,7 @@ namespace WebExpress.WebCore
 
             var protocols = kestrel?.ResolveProtocols();
 
-            foreach (var endpoint in Config.Endpoints)
+            foreach (var endpoint in Settings?.Endpoints ?? [])
             {
                 AddEndpoint(serverOptions, endpoint, protocols);
             }
@@ -229,7 +230,7 @@ namespace WebExpress.WebCore
         /// <param name="serverOptions">The server options.</param>
         /// <param name="endPoint">The endpoint.</param>
         /// <param name="protocols">The HTTP protocols to enable on the endpoint, or null to keep the Kestrel default.</param>
-        private void AddEndpoint(OptionsWrapper<KestrelServerOptions> serverOptions, EndpointConfig endPoint, HttpProtocols? protocols)
+        private void AddEndpoint(OptionsWrapper<KestrelServerOptions> serverOptions, EndpointSettings endPoint, HttpProtocols? protocols)
         {
             try
             {
@@ -497,7 +498,7 @@ namespace WebExpress.WebCore
 
             // secure tracks the request scheme by default; a deployment behind a tls proxy that
             // sees plain http can force it on through configuration
-            var secure = Config?.Session?.Secure ?? request.Scheme == UriScheme.Https;
+            var secure = Settings?.Session?.Secure ?? request.Scheme == UriScheme.Https;
 
             var cookie = new Cookie("session", session.Id.ToString())
             {

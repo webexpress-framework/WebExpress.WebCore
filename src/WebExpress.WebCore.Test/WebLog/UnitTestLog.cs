@@ -1,4 +1,4 @@
-﻿using WebExpress.WebCore.Setting;
+﻿using WebExpress.WebCore.WebSetting;
 using WebExpress.WebCore.WebLog;
 
 namespace WebExpress.WebCore.Test.WebLog
@@ -214,14 +214,14 @@ namespace WebExpress.WebCore.Test.WebLog
             try
             {
                 var log = new Log();
-                var settings = new SettingLogItem
+                var settings = new LogSettings
                 {
-                    Modus = "not-a-mode",
+                    Mode = "not-a-mode",
                     Debug = false,
                     Path = dir,
                     Encoding = "utf-8",
-                    Filename = "settings.log",
-                    Timepattern = "HH:mm:ss"
+                    FileName = "settings.log",
+                    TimePattern = "HH:mm:ss"
                 };
 
                 // act
@@ -249,14 +249,14 @@ namespace WebExpress.WebCore.Test.WebLog
             try
             {
                 var log = new Log();
-                var settings = new SettingLogItem
+                var settings = new LogSettings
                 {
-                    Modus = "override",
+                    Mode = "override",
                     Debug = false,
                     Path = dir,
                     Encoding = "utf-8",
-                    Filename = "settings.log",
-                    Timepattern = "HH:mm:ss"
+                    FileName = "settings.log",
+                    TimePattern = "HH:mm:ss"
                 };
 
                 // act

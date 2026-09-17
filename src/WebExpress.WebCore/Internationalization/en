@@ -7,8 +7,8 @@ app.workingdirectory=Working directory: {0}
 app.packagebase=Package directory: {0}
 app.assetbase=Asset directory: {0}
 app.database=Data directory: {0}
-app.configurationdirectory=Configuration directory: {0}
-app.configuration=Configuration: {0}
+app.settingsdirectory=Settings directory: {0}
+app.settings=Settings: {0}
 app.logdirectory=Log directory: {0}
 app.log=Log: {0}
 app.uri=Uri: {0}
@@ -57,6 +57,10 @@ packagemanager.save=The catalog is saved.
 packagemanager.packagenotfound=The package '{0}' was not found in the file system.
 packagemanager.boot.notfound=The plugin '{0}' is unknown.
 packagemanager.package=Package: '{0}'
+packagemanager.settings.deployed=The settings file '{0}' was deployed to the settings directory.
+packagemanager.settings.existing=The settings file '{0}' already exists in the settings directory and was kept.
+packagemanager.settings.ignored=The package entry '{0}' is not a settings file and was ignored.
+packagemanager.settings.invalid=The settings file '{0}' of the package is not valid json and was not deployed.
 
 pluginmanager.initialization=The plugin manager has been initialized.
 pluginmanager.load={0}.dll is loading. Version = '{1}'

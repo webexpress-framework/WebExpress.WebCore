@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 
@@ -7,7 +8,7 @@ namespace WebExpress.WebCore.WebPlugin
     /// <summary>
     /// Read-only descriptor of a loaded plugin that the framework passes around so components can
     /// learn which plugin they came from and read its metadata — id, name, manufacturer, version,
-    /// description, copyright, license, icon, and the .NET assembly it lives in.
+    /// description, copyright, license, icon, the .NET assembly it lives in - and its own settings.
     /// </summary>
     public interface IPluginContext : IContext
     {
@@ -55,5 +56,12 @@ namespace WebExpress.WebCore.WebPlugin
         /// Gets the icon of the plugin.
         /// </summary>
         IRoute Icon { get; }
+
+        /// <summary>
+        /// Gets the settings of the plugin: its own section of the merged configuration, so a
+        /// plugin reads <c>Settings["Key"]</c> or binds <c>Settings.Get&lt;MyOptions&gt;()</c>
+        /// without seeing - or clashing with - the values of the server or of another plugin.
+        /// </summary>
+        IConfiguration Settings { get; }
     }
 }

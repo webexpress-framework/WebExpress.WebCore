@@ -7,8 +7,8 @@ app.workingdirectory=Arbeitsverzeichnis: {0}
 app.packagebase=Paketverzeichnis: {0}
 app.assetbase=Assetverzeichnis: {0}
 app.database=Datenverzeichnis: {0}
-app.configurationdirectory=Konfigurationsverzeichnis: {0}
-app.configuration=Konfiguration: {0}
+app.settingsdirectory=Einstellungsverzeichnis: {0}
+app.settings=Einstellungen: {0}
 app.logdirectory=Logverzeichnis: {0}
 app.log=Log: {0}
 app.uri=Uri: {0}
@@ -57,6 +57,10 @@ packagemanager.save=Der Katalog wird gespeichert.
 packagemanager.packagenotfound=Das Paket '{0}' wurde nicht im Dateisystem gefunden.
 packagemanager.boot.notfound=Das Plugin '{0}' ist nicht bekannt.
 packagemanager.package=Package: '{0}'
+packagemanager.settings.deployed=Die Einstellungsdatei '{0}' wurde in das Einstellungsverzeichnis übernommen.
+packagemanager.settings.existing=Die Einstellungsdatei '{0}' existiert bereits im Einstellungsverzeichnis und wurde beibehalten.
+packagemanager.settings.ignored=Der Paketeintrag '{0}' ist keine Einstellungsdatei und wurde ignoriert.
+packagemanager.settings.invalid=Die Einstellungsdatei '{0}' des Pakets ist kein gültiges JSON und wurde nicht übernommen.
 
 pluginmanager.initialization=Der Pluginmanager wurde initialisiert.
 pluginmanager.load={0}.dll wird geladen. Version = '{1}'

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Primitives;
 using WebExpress.WebCore.Test.Data;
 using WebExpress.WebCore.Test.Fixture;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.Test.Server
 {
@@ -29,16 +30,16 @@ namespace WebExpress.WebCore.Test.Server
         /// <param name="whileAnswering">
         /// What a handler would do with the request - a sign-in, say - before the response leaves.
         /// </param>
-        /// <param name="config">Optional server configuration, e.g. to force the cookie's Secure flag.</param>
+        /// <param name="settings">Optional server settings, e.g. to force the cookie's Secure flag.</param>
         /// <returns>The response head and the request as the server materialised it.</returns>
-        private static async Task<(HttpResponseFeature Response, WebMessage.IRequest Request)> AnswerAsync(WebComponent.ComponentHub componentHub, string content, Action<WebMessage.IRequest> whileAnswering = null, WebExpress.WebCore.Config.HttpServerConfig config = null)
+        private static async Task<(HttpResponseFeature Response, WebMessage.IRequest Request)> AnswerAsync(WebComponent.ComponentHub componentHub, string content, Action<WebMessage.IRequest> whileAnswering = null, HttpServerSettings settings = null)
         {
             var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
             var httpContext = UnitTestFixture.CreateHttpContextMock(content);
             var responseFeature = new HttpResponseFeature();
             httpContext.Features.Set<IHttpResponseFeature>(responseFeature);
             httpContext.Features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(new MemoryStream()));
-            var server = new HttpServer(httpServerContext) { Config = config };
+            var server = new HttpServer(httpServerContext) { Settings = settings };
             componentHub.SitemapManager.Refresh();
 
             whileAnswering?.Invoke(httpContext.Request);
@@ -113,10 +114,10 @@ namespace WebExpress.WebCore.Test.Server
             // arrange
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
             var content = $"GET {Endpoint} HTTP/1.1\nCookie:\n\n";
-            var config = new WebExpress.WebCore.Config.HttpServerConfig { Session = new WebExpress.WebCore.Config.SessionConfig { Secure = true } };
+            var settings = new HttpServerSettings { Session = new SessionSettings { Secure = true } };
 
             // act
-            var (response, _) = await AnswerAsync(componentHub, content, config: config);
+            var (response, _) = await AnswerAsync(componentHub, content, settings: settings);
 
             // validation
             Assert.Contains("Secure", response.Headers.SetCookie.ToString());

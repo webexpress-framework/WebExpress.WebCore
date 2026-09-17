@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 
@@ -53,6 +54,11 @@ namespace WebExpress.WebCore.WebPlugin
         /// Gets the icon of the plugin.
         /// </summary>
         public IRoute Icon { get; internal set; }
+
+        /// <summary>
+        /// Gets the settings of the plugin.
+        /// </summary>
+        public IConfiguration Settings { get; internal set; }
 
         /// <summary>
         /// Initializes a new instance of the class.

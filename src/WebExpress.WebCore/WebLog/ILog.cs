@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
-using WebExpress.WebCore.Setting;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebLog
 {
@@ -121,7 +121,7 @@ namespace WebExpress.WebCore.WebLog
         /// Starts logging
         /// </summary>
         /// <param name="settings">The log settings</param>
-        public void Begin(SettingLogItem settings);
+        public void Begin(LogSettings settings);
 
         /// <summary>
         /// A dividing line with * characters

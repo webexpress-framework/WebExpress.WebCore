@@ -1,17 +1,18 @@
 ﻿using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using System.Xml.Serialization;
-using WebExpress.WebCore.Config;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPackage;
+using WebExpress.WebCore.WebSetting;
 
 [assembly: InternalsVisibleTo("WebExpress.WebCore.Test")]
 
@@ -161,7 +162,7 @@ namespace WebExpress.WebCore
 
             if (argumentDict.ContainsKey("help"))
             {
-                Console.WriteLine(Name + " [-port number | -config dateiname | -help]");
+                Console.WriteLine(Name + " [-port number | -config filename | -help]");
                 Console.WriteLine("Version: " + Version);
 
                 return 0;
@@ -203,22 +204,21 @@ namespace WebExpress.WebCore
                 return 0;
             }
 
-            // configuration
-            if (!argumentDict.ContainsKey("config"))
+            // settings
+            var settingsFile = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, SettingsLoader.DefaultDirectory, argumentDict.TryGetValue("config", out var configArgument) ? configArgument : SettingsLoader.DefaultMainFile));
+
+            if (!File.Exists(settingsFile))
             {
-                // check if there is a file called config.xml
-                if (!File.Exists(Path.Combine(Path.Combine(Environment.CurrentDirectory, "config"), "webexpress.config.xml")))
-                {
-                    Console.WriteLine("No configuration file was specified. Usage: " + Name + " -config filename");
+                Console.WriteLine($"The settings file '{settingsFile}' was not found. Usage: {Name} -config filename");
 
-                    return 1;
-                }
-
-                argumentDict.Add("config", "webexpress.config.xml");
+                return 1;
             }
 
             // initialization of the web server
-            OnInitialization(ArgumentParser.Current.GetValidArguments(args), Path.Combine(Path.Combine(Environment.CurrentDirectory, "config"), argumentDict["config"]));
+            if (!OnInitialization(ArgumentParser.Current.GetValidArguments(args), settingsFile))
+            {
+                return 1;
+            }
 
             // start the manager
             (_componentHub as ComponentHub).Execute();
@@ -246,20 +246,33 @@ namespace WebExpress.WebCore
         /// Initialization
         /// </summary>
         /// <param name="args">The valid arguments.</param>
-        /// <param name="configFile">The configuration file.</param>
-        private void OnInitialization(string args, string configFile)
+        /// <param name="settingsFile">The main settings file; its directory is the settings directory.</param>
+        /// <returns><see langword="true"/> when the server is ready to start, <see langword="false"/> when the settings could not be read.</returns>
+        private bool OnInitialization(string args, string settingsFile)
         {
-            // load configuration
-            using var reader = new FileStream(configFile, FileMode.Open);
-            var serializer = new XmlSerializer(typeof(HttpServerConfig));
-            var config = serializer.Deserialize(reader) as HttpServerConfig;
             var log = new Log();
+            IConfigurationRoot configuration;
 
+            // a broken settings file is the most likely reason for a failed start, so it is
+            // reported by name and stops the start instead of surfacing as a stack trace
+            try
+            {
+                configuration = SettingsLoader.Load(settingsFile, ex => log.Exception(ex));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"The settings could not be read: {ex.Message}");
+
+                return false;
+            }
+
+            var settings = configuration.GetServerSettings();
+            var settingsPath = Path.GetDirectoryName(settingsFile);
             var culture = CultureInfo.CurrentCulture;
 
             try
             {
-                culture = new CultureInfo(config.Culture);
+                culture = new CultureInfo(settings.Culture);
 
                 CultureInfo.CurrentCulture = culture;
             }
@@ -268,29 +281,19 @@ namespace WebExpress.WebCore
 
             }
 
-            var packageBase = string.IsNullOrWhiteSpace(config.PackageBase) ?
-                Environment.CurrentDirectory : Path.IsPathRooted(config.PackageBase) ?
-                config.PackageBase :
-                Path.Combine(Environment.CurrentDirectory, config.PackageBase);
-
-            var assetBase = string.IsNullOrWhiteSpace(config.AssetBase) ?
-                Environment.CurrentDirectory : Path.IsPathRooted(config.AssetBase) ?
-                config.AssetBase :
-                Path.Combine(Environment.CurrentDirectory, config.AssetBase);
-
-            var dataBase = string.IsNullOrWhiteSpace(config.DataBase) ?
-                Environment.CurrentDirectory : Path.IsPathRooted(config.DataBase) ?
-                config.DataBase :
-                Path.Combine(Environment.CurrentDirectory, config.DataBase);
+            var packageBase = ResolveDirectory(settings.PackagePath);
+            var assetBase = ResolveDirectory(settings.AssetPath);
+            var dataBase = ResolveDirectory(settings.DataPath);
 
             var context = new HttpServerContext
             (
-                new RouteEndpoint(config.Route),
-                config.Endpoints,
-                Path.GetFullPath(packageBase),
-                Path.GetFullPath(assetBase),
-                Path.GetFullPath(dataBase),
-                Path.GetDirectoryName(configFile),
+                new RouteEndpoint(settings.ContextPath),
+                settings.Endpoints,
+                packageBase,
+                assetBase,
+                dataBase,
+                settingsPath,
+                configuration,
                 culture,
                 log,
                 null
@@ -298,20 +301,20 @@ namespace WebExpress.WebCore
 
             _httpServer = new HttpServer(context)
             {
-                Config = config
+                Settings = settings
             };
 
             _componentHub = ComponentActivator.CreateInstance<ComponentHub>(_httpServer.HttpServerContext);
 
             // apply the configured session lifetime once the manager exists; left unset, its
             // built-in bounded default stands
-            if (config.Session?.TimeoutMinutes is int timeoutMinutes && _componentHub.SessionManager is not null)
+            if (settings.Session?.TimeoutMinutes is int timeoutMinutes && _componentHub.SessionManager is not null)
             {
                 _componentHub.SessionManager.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
             }
 
             // start logging
-            _httpServer.HttpServerContext.Log?.Begin(config.Log);
+            _httpServer.HttpServerContext.Log?.Begin(settings.Log);
 
             // log program start
             _httpServer.HttpServerContext.Log?.Separator('/');
@@ -320,38 +323,45 @@ namespace WebExpress.WebCore
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.version"), args: Version);
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.arguments"), args: args);
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.workingdirectory"), args: Environment.CurrentDirectory);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.packagebase"), args: config.PackageBase);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.assetbase"), args: config.AssetBase);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.database"), args: config.DataBase);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.configurationdirectory"), args: Path.GetDirectoryName(configFile));
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.configuration"), args: Path.GetFileName(configFile));
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.packagebase"), args: packageBase);
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.assetbase"), args: assetBase);
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.database"), args: dataBase);
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.settingsdirectory"), args: settingsPath);
+            foreach (var file in configuration.Providers.OfType<SettingsDirectoryConfigurationProvider>().SelectMany(x => x.EnumerateFiles()))
+            {
+                _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.settings"), args: Path.GetFileName(file));
+            }
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.logdirectory"), args: Path.GetDirectoryName(_httpServer.HttpServerContext.Log?.Filename));
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.log"), args: Path.GetFileName(_httpServer.HttpServerContext.Log?.Filename));
-            foreach (var v in config.Endpoints)
+            foreach (var v in settings.Endpoints)
             {
                 _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.uri"), args: v.Uri);
             }
 
             _httpServer.HttpServerContext.Log?.Separator('=');
 
-            if (!Directory.Exists(config.PackageBase))
-            {
-                Directory.CreateDirectory(config.PackageBase);
-            }
-
-            if (!Directory.Exists(config.AssetBase))
-            {
-                Directory.CreateDirectory(config.AssetBase);
-            }
-
-            if (!Directory.Exists(config.DataBase))
-            {
-                Directory.CreateDirectory(config.DataBase);
-            }
+            Directory.CreateDirectory(packageBase);
+            Directory.CreateDirectory(assetBase);
+            Directory.CreateDirectory(dataBase);
 
             Console.CancelKeyPress += OnCancel;
 
             Initialization?.Invoke(this, EventArgs.Empty);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Turns a configured directory into an absolute one. A relative directory is taken
+        /// relative to the working directory; an empty one is the working directory itself.
+        /// </summary>
+        /// <param name="directory">The configured directory.</param>
+        /// <returns>The absolute directory.</returns>
+        private static string ResolveDirectory(string directory)
+        {
+            return Path.GetFullPath(string.IsNullOrWhiteSpace(directory)
+                ? Environment.CurrentDirectory
+                : Path.Combine(Environment.CurrentDirectory, directory));
         }
 
         /// <summary>

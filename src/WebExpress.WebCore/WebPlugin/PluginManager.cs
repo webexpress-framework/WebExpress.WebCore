@@ -12,6 +12,7 @@ using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebPlugin.Model;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebPlugin
 {
@@ -190,7 +191,8 @@ namespace WebExpress.WebCore.WebPlugin
                         PluginName = assembly.GetName().Name.ToLower(),
                         Manufacturer = assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company,
                         Copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright,
-                        Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                        Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
+                        Settings = _httpServerContext?.Configuration?.GetPluginSettings(id)
                     };
 
                     var hasUnfulfilledDependencies = HasUnfulfilledDependencies(id, dependencies.Select(x => new ComponentId(x)));
@@ -316,7 +318,8 @@ namespace WebExpress.WebCore.WebPlugin
                             ? RouteEndpoint.Combine(_httpServerContext?.Route, icon)
                             : null,
                         Description = description,
-                        Version = type.Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                        Version = type.Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
+                        Settings = _httpServerContext?.Configuration?.GetPluginSettings(id)
                     };
 
                     hasUnfulfilledDependencies = HasUnfulfilledDependencies(id, dependencies.Select(x => new ComponentId(x)));

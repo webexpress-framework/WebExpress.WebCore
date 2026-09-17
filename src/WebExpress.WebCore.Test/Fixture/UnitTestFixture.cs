@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Configuration;
 using System.Globalization;
 using System.Net;
 using System.Reflection;
@@ -32,8 +33,13 @@ namespace WebExpress.WebCore.Test.Fixture
         /// <summary>
         /// Create a fake server context.
         /// </summary>
+        /// <param name="settingsPath">
+        /// The settings directory. Defaults to a directory of its own, so a test that deploys a
+        /// settings file never sees one left behind by another.
+        /// </param>
+        /// <param name="configuration">The configuration. Defaults to an empty one.</param>
         /// <returns>The server context.</returns>
-        public static IHttpServerContext CreateHttpServerContextMock()
+        public static IHttpServerContext CreateHttpServerContextMock(string settingsPath = null, IConfigurationRoot configuration = null)
         {
             return new HttpServerContext
             (
@@ -42,7 +48,8 @@ namespace WebExpress.WebCore.Test.Fixture
                 Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString()),
                 Environment.CurrentDirectory,
                 Environment.CurrentDirectory,
-                Environment.CurrentDirectory,
+                settingsPath ?? Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString()),
+                configuration ?? new ConfigurationBuilder().Build(),
                 CultureInfo.GetCultureInfo("en"),
                 new Log() { LogMode = LogMode.Off },
                 null
