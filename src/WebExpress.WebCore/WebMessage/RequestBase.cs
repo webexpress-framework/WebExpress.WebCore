@@ -22,6 +22,10 @@ namespace WebExpress.WebCore.WebMessage
     public abstract class RequestBase : IRequest
     {
         private readonly ParameterDictionary _param = [];
+        private Session _session;
+
+        internal Session ExistingSession { get => _session; set => _session = value; }
+        internal string QueryString { get; private set; }
 
         /// <summary>
         /// Gets the context of the web server.
@@ -49,9 +53,9 @@ namespace WebExpress.WebCore.WebMessage
         public UriEndpoint Uri { get; set; }
 
         /// <summary>
-        /// Gets the session.
+        /// Creates optional application state only when a caller needs it; authentication never depends on it.
         /// </summary>
-        public Session Session { get; private set; }
+        public Session Session => _session ??= WebEx.ComponentHub?.SessionManager?.GetSession(this);
 
         /// <summary>
         /// Gets the http version.
@@ -170,8 +174,9 @@ namespace WebExpress.WebCore.WebMessage
                 requestFeature.RawTarget
             );
 
-            ParseQueryParams(requestFeature.QueryString);
-            ParseSessionParams();
+            QueryString = requestFeature.QueryString;
+            ParseQueryParams(QueryString);
+            if (Header.Cookies.Any(x => x.Name == "session")) { ParseSessionParams(); }
         }
 
         /// <summary>
@@ -209,8 +214,6 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         private void ParseSessionParams()
         {
-            Session = WebEx.ComponentHub?.SessionManager?.GetSession(this);
-
             var property = Session?.GetProperty<SessionPropertyParameter>();
             if (property is not null && property.Params is not null)
             {

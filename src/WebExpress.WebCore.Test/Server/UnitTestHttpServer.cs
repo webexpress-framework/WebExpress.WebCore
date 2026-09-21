@@ -18,6 +18,73 @@ namespace WebExpress.WebCore.Test.Server
         private const string Endpoint = "/server/appa/api/2/testrestapib";
 
         /// <summary>
+        /// Prevents a missing HTTPS certificate from silently registering an unencrypted listener.
+        /// </summary>
+        /// <param name="scheme">The configured HTTPS spelling normalized by the URI parser.</param>
+        [Theory]
+        [InlineData("https")]
+        [InlineData("HTTPS")]
+        public void HttpsWithoutCertificateNeverRegistersPlainHttpListener(string scheme)
+        {
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
+            var options = new Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions();
+            var wrapper = new Microsoft.Extensions.Options.OptionsWrapper<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>(options);
+            var endpoint = new EndpointSettings
+            {
+                Uri = $"{scheme}://localhost:5001/",
+                PfxFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".pfx")
+            };
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var addEndpoint = typeof(HttpServer).GetMethod("AddEndpoint", flags, null,
+                [wrapper.GetType(), typeof(EndpointSettings), typeof(Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols?)], null);
+
+            addEndpoint.Invoke(server, [wrapper, endpoint, null]);
+
+            var listeners = typeof(Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions)
+                .GetProperty("CodeBackedListenOptions", flags).GetValue(options);
+            Assert.Empty((System.Collections.IEnumerable)listeners);
+        }
+
+        /// <summary>
+        /// Preserves normal and missing-route responses when startup constructs the server before its component hub.
+        /// </summary>
+        /// <param name="path">The application route whose response must survive the production startup order.</param>
+        /// <param name="status">The expected response status after the component hub becomes available.</param>
+        /// <returns>A task that completes after the HTTP response has been verified.</returns>
+        [Theory]
+        [InlineData(Endpoint, 400)]
+        [InlineData("/server/appa/no/such/route", 404)]
+        public async Task ProcessRequestAsync_ServerCreatedBeforeHub_PreservesResponse(string path, int status)
+        {
+            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var previousHub = WebEx.ComponentHub;
+            WebComponent.ComponentHub componentHub = null;
+            try
+            {
+                hubField.SetValue(null, null);
+                var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
+                componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+                componentHub.SitemapManager.Refresh();
+                var context = UnitTestFixture.CreateHttpContextMock($"GET {path} HTTP/1.1\r\nCookie:\r\n\r\n");
+                var response = new HttpResponseFeature();
+                using var output = new MemoryStream();
+                context.Features.Set<IHttpResponseFeature>(response);
+                context.Features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(output));
+
+                await server.ProcessRequestAsync(context);
+
+                Assert.Equal(status, response.StatusCode);
+                Assert.Null(((WebMessage.RequestBase)context.Request).ExistingSession);
+                Assert.DoesNotContain("session=", response.Headers.SetCookie.ToString());
+            }
+            finally
+            {
+                componentHub?.IdentityProviderManager.Dispose();
+                hubField.SetValue(null, previousHub);
+            }
+        }
+
+        /// <summary>
         /// Answers a request through the server and returns what the client would see of it.
         /// </summary>
         /// <remarks>
@@ -87,7 +154,7 @@ namespace WebExpress.WebCore.Test.Server
             var content = $"GET {Endpoint} HTTP/1.1\nCookie:\n\n";
 
             // act
-            var (response, request) = await AnswerAsync(componentHub, content);
+            var (response, request) = await AnswerAsync(componentHub, content, r => _ = r.Session);
 
             // validation
             var setCookie = response.Headers.SetCookie.ToString();
@@ -117,7 +184,7 @@ namespace WebExpress.WebCore.Test.Server
             var settings = new HttpServerSettings { Session = new SessionSettings { Secure = true } };
 
             // act
-            var (response, _) = await AnswerAsync(componentHub, content, settings: settings);
+            var (response, _) = await AnswerAsync(componentHub, content, r => _ = r.Session, settings: settings);
 
             // validation
             Assert.Contains("Secure", response.Headers.SetCookie.ToString());
@@ -136,7 +203,7 @@ namespace WebExpress.WebCore.Test.Server
             var content = $"GET {Endpoint} HTTP/1.1\nCookie:\n\n";
 
             // act
-            var (response, request) = await AnswerAsync(componentHub, content);
+            var (response, request) = await AnswerAsync(componentHub, content, r => _ = r.Session);
 
             // validation
             var setCookie = response.Headers.SetCookie.ToString();
@@ -158,7 +225,7 @@ namespace WebExpress.WebCore.Test.Server
             var content = $"GET {Endpoint} HTTP/1.1\nCookie: session={planted}\n\n";
 
             // act
-            var (response, request) = await AnswerAsync(componentHub, content);
+            var (response, request) = await AnswerAsync(componentHub, content, r => _ = r.Session);
 
             // validation
             var setCookie = response.Headers.SetCookie.ToString();
@@ -180,7 +247,7 @@ namespace WebExpress.WebCore.Test.Server
             var content = $"GET {Endpoint} HTTP/1.1\nCookie: session={issued.Id}\n\n";
 
             // act
-            var (response, request) = await AnswerAsync(componentHub, content);
+            var (response, request) = await AnswerAsync(componentHub, content, r => _ = r.Session);
 
             // validation
             Assert.Same(issued, request.Session);
@@ -188,35 +255,27 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
-        /// A client without a cookie signs in and gets back the id of the very session the
-        /// identity was bound to. The request creates its session before any handler runs and
-        /// the sign-in and the cookie must both refer to that one - were each to mint its own,
-        /// the client would come back with an id that never signed in.
+        /// Token cookies reach the wire even when login completes before a handler returns its response.
         /// </summary>
         [Fact]
-        public async Task ProcessRequestAsync_SignInWithoutCookie_CookieNamesTheSignedInSession()
+        public async Task ProcessRequestAsync_SignInIssuesTokenCookiesWithoutSession()
         {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identity = MockIdentityFactory.GetIdentity("Alice");
-            var content = $"GET {Endpoint} HTTP/1.1\nCookie:\n\n";
-            WebSession.Model.Session signedIn = null;
-
-            // act
-            var (response, request) = await AnswerAsync(componentHub, content, r =>
+            using var fixture = new AuthenticationFixture();
+            var pair = default(WebIdentity.IdentityTokenPair);
+            var (response, request) = await AnswerAsync(fixture.Hub, $"GET {Endpoint} HTTP/1.1\nCookie:\n\n", r =>
             {
-                signedIn = componentHub.IdentityManager.Login(identity, r);
+                ((WebMessage.RequestBase)r).ApplicationContext = fixture.Application;
+                pair = fixture.Manager.Login(MockIdentityFactory.GetIdentity("Alice"), r);
             });
-
-            // validation
-            Assert.NotNull(signedIn);
-            Assert.Same(signedIn, request.Session);
-            Assert.Contains($"session={signedIn.Id}", response.Headers.SetCookie.ToString());
-
-            var next = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={signedIn.Id}\n\n");
-            Assert.Equal(identity, componentHub.IdentityManager.GetCurrentIdentity(next));
+            var cookies = response.Headers.SetCookie.ToString();
+            Assert.Contains($"{WebIdentity.IdentityManager.AccessCookieName}={pair.AccessToken}", cookies);
+            Assert.Contains($"{WebIdentity.IdentityManager.RefreshCookieName}={pair.RefreshToken}", cookies);
+            Assert.Contains("SameSite=Lax", cookies);
+            Assert.Contains("Secure", cookies);
+            Assert.Contains("HttpOnly", cookies);
+            Assert.DoesNotContain("session=", cookies);
+            Assert.Null(((WebMessage.RequestBase)request).ExistingSession);
         }
-
         /// <summary>
         /// A request that never reaches a handler - here an unknown route - still hands the
         /// client its session id, since the login prompt and the redirect after a sign-in
@@ -230,7 +289,7 @@ namespace WebExpress.WebCore.Test.Server
             var content = $"GET /server/appa/no/such/route HTTP/1.1\nCookie: session={Guid.NewGuid()}\n\n";
 
             // act
-            var (response, request) = await AnswerAsync(componentHub, content);
+            var (response, request) = await AnswerAsync(componentHub, content, r => _ = r.Session);
 
             // validation
             Assert.Equal(404, response.StatusCode);

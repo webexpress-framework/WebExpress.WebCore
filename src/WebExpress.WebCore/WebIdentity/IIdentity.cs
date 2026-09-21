@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace WebExpress.WebCore.WebIdentity
 {
@@ -32,5 +33,21 @@ namespace WebExpress.WebCore.WebIdentity
         /// Gets the groups associated with the identity.
         /// </summary>
         IEnumerable<IIdentityGroup> Groups { get; }
+
+        /// <summary>
+        /// Preserves provider role names without requiring the provider on subsequent requests.
+        /// </summary>
+        IEnumerable<string> Roles => (Groups ?? []).Select(x => x.Name);
+
+        /// <summary>
+        /// Carries explicit permission identifiers in credential-free authorization snapshots.
+        /// </summary>
+        IEnumerable<string> Permissions => [];
+
+        /// <summary>
+        /// Preserves policy identifiers without deserializing executable CLR types from a token.
+        /// </summary>
+        IEnumerable<string> PolicyNames => (Groups ?? []).SelectMany(x => x.Policies ?? [])
+            .Select(x => x.GetType().FullName);
     }
 }

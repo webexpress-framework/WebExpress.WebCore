@@ -14,20 +14,18 @@ using WebExpress.WebCore.WebIdentity.Model;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
-using WebExpress.WebCore.WebSession.Model;
 
 namespace WebExpress.WebCore.WebIdentity
 {
     /// <summary>
     /// Management of identities (users).
     /// </summary>
-    public class IdentityManager : IIdentityManager
+    public partial class IdentityManager : IIdentityManager
     {
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly IdentityPermissionDictionary _permissionDictionary = [];
         private readonly IdentityPolicyDictionary _policyDictionary = [];
-        private readonly Dictionary<IApplicationContext, List<IIdentityProvider>> _identityProviders = [];
 
         /// <summary>
         /// Gets all permissions.
@@ -388,9 +386,9 @@ namespace WebExpress.WebCore.WebIdentity
         /// </returns>
         public IResponse CreateAuthenticationPrompt(IRequest request, IPageContext initiator, IIdentity identity = null)
         {
-            if (_identityProviders.TryGetValue(initiator?.ApplicationContext, out var list))
+            if (initiator?.ApplicationContext is not null)
             {
-                foreach (var provider in list)
+                foreach (var provider in GetProviders(initiator.ApplicationContext))
                 {
                     var response = provider.CreateAuthenticationPrompt(request, initiator, identity);
 
@@ -418,9 +416,9 @@ namespace WebExpress.WebCore.WebIdentity
         /// </returns>
         public IResponse CreateForbiddenResponse(IRequest request, IPageContext initiator, IIdentity identity)
         {
-            if (_identityProviders.TryGetValue(initiator?.ApplicationContext, out var list))
+            if (initiator?.ApplicationContext is not null)
             {
-                foreach (var provider in list)
+                foreach (var provider in GetProviders(initiator.ApplicationContext))
                 {
                     var response = provider.CreateForbiddenResponse(request, initiator, identity);
 
@@ -433,72 +431,6 @@ namespace WebExpress.WebCore.WebIdentity
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Login an identity.
-        /// </summary>
-        /// <remarks>
-        /// The session keeps its state but gets a new id, so the id the client signed in under -
-        /// one an attacker may have planted in the browser or observed on the wire - names
-        /// nothing once the identity is bound (session fixation).
-        /// </remarks>
-        /// <param name="identity">The identity.</param>
-        /// <param name="request">The request.</param>
-        /// <returns>The session of the logged-in identity, or null if the login process failed.</returns>
-        public Session Login(IIdentity identity, IRequest request)
-        {
-            if (identity is null)
-            {
-                return null;
-            }
-
-            var session = _componentHub?.SessionManager.GetSession(request);
-
-            // the id is replaced before the identity is bound, so the identity never lives
-            // under an id the client chose
-            _componentHub?.SessionManager.RegenerateId(session);
-
-            var authentification = session.GetOrCreateProperty<SessionPropertyAuthentification>(identity);
-
-            // verify that the identity was correctly bound to the session
-            if (authentification.Identity != identity)
-            {
-                return null;
-            }
-
-            return session;
-        }
-
-        /// <summary>
-        /// Logout an identity.
-        /// </summary>
-        /// <remarks>
-        /// The session keeps its state but gets a new id, the mirror image of the sign-in: a
-        /// copy of the id taken while the session was signed in - from a log, a leaked header,
-        /// a shared machine - resolves to nothing afterwards, not even to the anonymous
-        /// remainder of the session.
-        /// </remarks>
-        /// <param name="request">The request.</param>
-        public void Logout(IRequest request)
-        {
-            var session = _componentHub?.SessionManager.GetSession(request);
-            session.RemoveProperty<SessionPropertyAuthentification>();
-
-            _componentHub?.SessionManager.RegenerateId(session);
-        }
-
-        /// <summary>
-        /// Returns the current signed-in identity based on the provided request.
-        /// </summary>
-        /// <param name="request">The request to get the current identity for.</param>
-        /// <returns>The current signed-in identity.</returns>
-        public IIdentity GetCurrentIdentity(IRequest request)
-        {
-            var session = _componentHub?.SessionManager.GetSession(request);
-            var authentification = session.GetProperty<SessionPropertyAuthentification>();
-
-            return authentification?.Identity;
         }
 
         /// <summary>
@@ -527,8 +459,7 @@ namespace WebExpress.WebCore.WebIdentity
                 return false;
             }
 
-            // evaluate all associated groups using linq
-            return identity.Groups?.Any(group => CheckAccess(group, policy)) ?? false;
+            return policy is WebPolicies.AuthenticatedAccessPolicy || identity.PolicyNames.Contains(policy.GetType().FullName, StringComparer.Ordinal);
         }
 
         /// <summary>
@@ -573,7 +504,8 @@ namespace WebExpress.WebCore.WebIdentity
         {
             var groups = identity?.Groups ?? [];
 
-            return groups.Any(group => CheckAccess(applicationContext, group, permission));
+            return identity?.Permissions.Contains(permission.FullName, StringComparer.Ordinal) == true ||
+                groups.Any(group => CheckAccess(applicationContext, group, permission));
         }
 
         /// <summary>
@@ -702,46 +634,6 @@ namespace WebExpress.WebCore.WebIdentity
         }
 
         /// <summary>
-        /// Registers an identity provider for use within the application context.
-        /// </summary>
-        /// <param name="identityProvider">The identity provider to register. Cannot be null.</param>
-        /// <param name="applicationContext">The application context in which the identity provider will be used.</param>
-        /// <exception cref="ArgumentNullException">Thrown if identityProvider or applicationContext is null.</exception>
-        public void RegisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext)
-        {
-            ArgumentNullException.ThrowIfNull(identityProvider);
-            ArgumentNullException.ThrowIfNull(applicationContext);
-
-            if (!_identityProviders.TryGetValue(applicationContext, out var list))
-            {
-                list = [];
-                _identityProviders[applicationContext] = list;
-            }
-
-            list.Add(identityProvider);
-        }
-
-        /// <summary>
-        /// Unregisters a previously registered identity provider from the given application context.
-        /// </summary>
-        /// <param name="identityProvider">The identity provider to unregister. Cannot be null.</param>
-        /// <param name="applicationContext">The application context from which the identity provider will be removed.</param>
-        /// <exception cref="ArgumentNullException">Thrown if identityProvider or applicationContext is null.</exception>
-        /// <returns>True if the provider was successfully removed; false if it was not registered.</returns>
-        public bool UnregisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext)
-        {
-            ArgumentNullException.ThrowIfNull(identityProvider);
-            ArgumentNullException.ThrowIfNull(applicationContext);
-
-            if (_identityProviders.TryGetValue(applicationContext, out var list))
-            {
-                return list.Remove(identityProvider);
-            }
-
-            return false;
-        }
-
-        /// <summary>
         /// Retrieves all available identities from the configured identity providers for the specified 
         /// application context.
         /// </summary>
@@ -787,12 +679,7 @@ namespace WebExpress.WebCore.WebIdentity
         /// </returns>
         private IEnumerable<IIdentityProvider> GetProviders(IApplicationContext applicationContext)
         {
-            if (_identityProviders.TryGetValue(applicationContext, out var list))
-            {
-                return list;
-            }
-
-            return [];
+            return _componentHub.IdentityProviderManager.GetProviders(applicationContext);
         }
 
         /// <summary>

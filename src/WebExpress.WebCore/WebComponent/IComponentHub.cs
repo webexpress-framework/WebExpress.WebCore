@@ -160,6 +160,11 @@ namespace WebExpress.WebCore.WebComponent
         IIdentityManager IdentityManager { get; }
 
         /// <summary>
+        /// Provides application-scoped authentication sources.
+        /// </summary>
+        IIdentityProviderManager IdentityProviderManager { get; }
+
+        /// <summary>
         /// Gets the session manager.
         /// </summary>
         /// <returns>The instance of the session manager.</returns>

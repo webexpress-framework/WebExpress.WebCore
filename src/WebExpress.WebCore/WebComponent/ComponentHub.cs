@@ -54,6 +54,7 @@ namespace WebExpress.WebCore.WebComponent
         private readonly JobManager _jobManager;
         private readonly TaskManager _taskManager;
         private readonly IdentityManager _identityManager;
+        private readonly IdentityProviderManager _identityProviderManager;
         private readonly SocketManager _socketManager;
         private readonly ThemeManager _themeManager;
         private int _lastCounter = 0;
@@ -91,6 +92,7 @@ namespace WebExpress.WebCore.WebComponent
                 _statusPageManager,
                 _internationalizationManager,
                 _identityManager,
+                _identityProviderManager,
                 _sessionManager,
                 _taskManager,
                 _socketManager,
@@ -212,6 +214,11 @@ namespace WebExpress.WebCore.WebComponent
         public IIdentityManager IdentityManager => _identityManager;
 
         /// <summary>
+        /// Keeps provider discovery independent of credential issuance.
+        /// </summary>
+        public IIdentityProviderManager IdentityProviderManager => _identityProviderManager;
+
+        /// <summary>
         /// Gets the session manager.
         /// </summary>
         /// <returns>The instance of the session manager.</returns>
@@ -276,6 +283,8 @@ namespace WebExpress.WebCore.WebComponent
                 ?? throw new InvalidOperationException("Failed to create SessionManager.");
             _taskManager = CreateInstance(typeof(TaskManager)) as TaskManager
                 ?? throw new InvalidOperationException("Failed to create TaskManager.");
+            _identityProviderManager = CreateInstance(typeof(IdentityProviderManager)) as IdentityProviderManager
+                ?? throw new InvalidOperationException("Failed to create IdentityProviderManager.");
             _identityManager = CreateInstance(typeof(IdentityManager)) as IdentityManager
                 ?? throw new InvalidOperationException("Failed to create IdentityManager.");
             _socketManager = CreateInstance(typeof(SocketManager)) as SocketManager

@@ -76,9 +76,10 @@ namespace WebExpress.WebCore.WebSession
             // the session resolved for the request comes first: a session created for this
             // request has an id the client only learns with the response, so the cookie
             // cannot name it yet and a lookup by cookie would create a second one
-            if (request?.Session is not null)
+            var existing = request is RequestBase concrete ? concrete.ExistingSession : request?.Session;
+            if (existing is not null)
             {
-                return request.Session;
+                return existing;
             }
 
             var sessionCookie = request?.Header
@@ -95,6 +96,7 @@ namespace WebExpress.WebCore.WebSession
                     {
                         // sliding window: an active session keeps renewing its idle deadline
                         known.Updated = now;
+                        if (request is RequestBase knownRequest) { knownRequest.ExistingSession = known; }
 
                         return known;
                     }
@@ -107,6 +109,7 @@ namespace WebExpress.WebCore.WebSession
                 // no, invalid, unknown or expired session id => a fresh, server-generated one
                 var session = new Session();
                 _dictionary[session.Id] = session;
+                if (request is RequestBase newRequest) { newRequest.ExistingSession = session; }
 
                 return session;
             }

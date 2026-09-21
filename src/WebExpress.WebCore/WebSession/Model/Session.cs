@@ -16,9 +16,8 @@ namespace WebExpress.WebCore.WebSession.Model
         /// Gets the session id.
         /// </summary>
         /// <remarks>
-        /// The id is the only thing the client holds, so it is what an attacker would plant or
-        /// steal. The session manager therefore replaces it when the session changes privilege
-        /// - at sign-in - which is why the id must not be cached across such a change.
+        /// The id identifies optional application state and never authenticates a user.
+        /// Applications may regenerate it when replacing sensitive application state.
         /// </remarks>
         public Guid Id { get; internal set; }
 

@@ -5,7 +5,6 @@ using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
-using WebExpress.WebCore.WebSession.Model;
 
 namespace WebExpress.WebCore.WebIdentity
 {
@@ -65,27 +64,50 @@ namespace WebExpress.WebCore.WebIdentity
         IResponse CreateForbiddenResponse(IRequest request, IPageContext initiator, IIdentity identity);
 
         /// <summary>
-        /// Login an identity.
+        /// Issues a provider-independent token pair and queues its protected response cookies.
         /// </summary>
-        /// <remarks>
-        /// The session keeps its state but gets a new id, so an id the client held before the
-        /// sign-in never names the signed-in session (session fixation). The client learns the
-        /// new id from the cookie sent with the response; a caller must not hand it out itself.
-        /// </remarks>
-        /// <param name="identity">The identity.</param>
-        /// <param name="request">The request.</param>
-        /// <returns>The session of the logged-in identity, or null if the login process failed.</returns>
-        Session Login(IIdentity identity, IRequest request);
+        /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The issued token pair, or null when no identity was authenticated.</returns>
+        IdentityTokenPair Login(IIdentity identity, IRequest request);
 
         /// <summary>
-        /// Logout an identity.
+        /// Clears authentication cookies and revokes renewal for the current login grant.
         /// </summary>
-        /// <remarks>
-        /// The mirror image of the sign-in: the identity is dropped and the session gets a new
-        /// id, so an id captured while it was signed in resolves to nothing afterwards.
-        /// </remarks>
-        /// <param name="request">The request.</param>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
         void Logout(IRequest request);
+
+        /// <summary>
+        /// Rotates the refresh cookie at the dedicated endpoint without creating a session.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The rotated token pair, or null when validation or replay protection rejects renewal.</returns>
+        IdentityTokenPair Refresh(IRequest request);
+
+        /// <summary>
+        /// Issues a bounded bearer credential with a subset of the owner's permissions.
+        /// </summary>
+        /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
+        /// <param name="applicationContext">The application context that owns the requested operation.</param>
+        /// <param name="lifetime">The explicit validity period requested for the personal credential.</param>
+        /// <param name="permissions">The requested permission identifiers, limited to the owner's grants.</param>
+        /// <returns>The signed personal credential with the requested authorized permissions.</returns>
+        string CreatePersonalAccessToken(IIdentity identity, IApplicationContext applicationContext, TimeSpan lifetime, IEnumerable<string> permissions);
+
+        /// <summary>
+        /// Revokes a personal credential on every instance sharing the durable token store.
+        /// </summary>
+        /// <param name="token">The serialized credential that must pass the required trust checks.</param>
+        /// <param name="applicationContext">The application context that owns the requested operation.</param>
+        /// <returns>True when a valid personal credential was revoked; otherwise, false.</returns>
+        bool RevokePersonalAccessToken(string token, IApplicationContext applicationContext);
+
+        /// <summary>
+        /// Delivers login, renewal, or logout cookie changes on the actual HTTP response.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <param name="response">The outgoing response governed by the authentication transport contract.</param>
+        void ApplyAuthenticationCookies(IRequest request, IResponse response);
 
         /// <summary>
         /// Returns the current signed-in identity based on the provided request.
@@ -175,37 +197,6 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="permission">The permission to check for.</param>
         /// <returns>True if the identity policy has the permission, false otherwise.</returns>
         bool CheckAccess(IApplicationContext applicationContext, Type policy, Type permission);
-
-        /// <summary>
-        /// Registers an identity provider for use within the application context.
-        /// </summary>
-        /// <param name="identityProvider">
-        /// The identity provider to register. Cannot be null.
-        /// </param>
-        /// <param name="applicationContext">
-        /// The application context in which the identity provider will be used.
-        /// </param>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown if identityProvider or applicationContext is null.
-        /// </exception>
-        void RegisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext);
-
-        /// <summary>
-        /// Unregisters a previously registered identity provider from the given application context.
-        /// </summary>
-        /// <param name="identityProvider">
-        /// The identity provider to unregister. Cannot be null.
-        /// </param>
-        /// <param name="applicationContext">
-        /// The application context from which the identity provider will be removed.
-        /// </param>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown if identityProvider or applicationContext is null.
-        /// </exception>
-        /// <returns>
-        /// True if the provider was successfully removed; false if it was not registered.
-        /// </returns>
-        bool UnregisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext);
 
         /// <summary>
         /// Retrieves all available identities from the configured identity providers for the specified application

@@ -47,6 +47,11 @@ namespace WebExpress.WebCore.WebSetting
         public SessionSettings Session { get; set; }
 
         /// <summary>
+        /// Defines the shared signing authority and lifetimes for session-independent authentication.
+        /// </summary>
+        public AuthenticationSettings Authentication { get; set; }
+
+        /// <summary>
         /// The log settings. A missing block keeps logging switched off.
         /// </summary>
         public LogSettings Log { get; set; } = new();

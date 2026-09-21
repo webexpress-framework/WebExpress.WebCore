@@ -18,8 +18,8 @@ using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
-using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
+using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
@@ -37,7 +37,7 @@ namespace WebExpress.WebCore
     /// </summary>
     public class HttpServer : IHost, IHttpApplication<IHttpContext>
     {
-        private static readonly IComponentHub _componentHub = WebEx.ComponentHub;
+        private readonly Lazy<AuthenticationEndpoint> _authenticationEndpoint;
 
         /// <summary>
         /// Event is triggered after the web server is started.
@@ -116,6 +116,9 @@ namespace WebExpress.WebCore
             );
 
             Culture = HttpServerContext.Culture;
+            // webex creates the hub after this server because its managers require the server context
+            _authenticationEndpoint = new Lazy<AuthenticationEndpoint>(() =>
+                new AuthenticationEndpoint(WebEx.ComponentHub, HttpServerContext));
         }
 
         /// <summary>
@@ -251,7 +254,7 @@ namespace WebExpress.WebCore
 
                     switch (uri.Scheme)
                     {
-                        case "HTTPS":
+                        case "https":
                             {
                                 AddEndpoint(serverOptions, ep, endPoint.PfxFile, endPoint.Password, protocols);
                                 break;
@@ -321,6 +324,7 @@ namespace WebExpress.WebCore
             // signal cancellation and stop server
             ServerTokenSource.Cancel();
             Kestrel.StopAsync(ServerTokenSource.Token);
+            if (_authenticationEndpoint.IsValueCreated) { _authenticationEndpoint.Value.Dispose(); }
         }
 
         /// <summary>
@@ -474,7 +478,7 @@ namespace WebExpress.WebCore
         /// <param name="response">The response about to be sent.</param>
         private void IssueSessionCookie(IRequest request, IResponse response)
         {
-            var session = request?.Session;
+            var session = request is RequestBase concrete ? concrete.ExistingSession : request?.Session;
             var cookies = response?.Header?.Cookies;
 
             if (session is null || cookies is null)
@@ -798,16 +802,17 @@ namespace WebExpress.WebCore
             var sender = new ResponseSender();
             var stopwatch = Stopwatch.StartNew();
 
-            // every response leaves through this local send, so the statistics are recorded
-            // here rather than inside the handler: a request that never reaches a handler -
-            // an unknown route, a denied or an unauthenticated one - produces a status code
-            // the monitor has to account for just the same. Recording precedes the send, so
-            // a slow client does not end up counted as a slow server. The session cookie is
-            // issued here for the same reason: the login prompt and a redirect after sign-in
-            // never reach the handler either, yet must carry the session id.
+            /*
+             * Applies pending authentication and optional session cookies even when routing bypasses a handler.
+             * Records statistics before transmission so client latency does not inflate server processing time.
+             * The context parameter identifies the HTTP exchange and its pending credential changes.
+             * The response parameter carries the result of routing, authentication, or an application handler.
+             * Returns a task that completes after the response has been sent.
+             */
             async Task SendAsync(IHttpContext context, IResponse response)
             {
                 IssueSessionCookie(context?.Request, response);
+                WebEx.ComponentHub.IdentityManager.ApplyAuthenticationCookies(context?.Request, response);
                 UpdateStatistics(response, stopwatch.ElapsedMilliseconds);
 
                 await sender.SendAsync(context, response);
@@ -823,6 +828,13 @@ namespace WebExpress.WebCore
 
                 await SendAsync(exceptionContext, response500);
 
+                return;
+            }
+
+            var authenticationResponse = await _authenticationEndpoint.Value.HandleAsync(httpContext.Request);
+            if (authenticationResponse is not null)
+            {
+                await SendAsync(httpContext, authenticationResponse);
                 return;
             }
 
@@ -874,10 +886,10 @@ namespace WebExpress.WebCore
                 return;
             }
 
-            var identity = _componentHub?.IdentityManager.GetCurrentIdentity(httpContext.Request);
+            var identity = WebEx.ComponentHub.IdentityManager.GetCurrentIdentity(httpContext.Request);
 
             // if access is granted
-            if (_componentHub.IdentityManager.CheckAccess(identity, searchResult.EndpointContext))
+            if (WebEx.ComponentHub.IdentityManager.CheckAccess(identity, searchResult.EndpointContext))
             {
                 var response = HandleClient(httpContext, searchResult);
                 await SendAsync(httpContext, response);
@@ -890,7 +902,7 @@ namespace WebExpress.WebCore
                 // if the user is authenticated but lacks the required permissions, show the forbidden page
                 if (identity is not null && searchResult.EndpointContext is IPageContext)
                 {
-                    var forbiddenResponse = _componentHub?.IdentityManager.CreateForbiddenResponse
+                    var forbiddenResponse = WebEx.ComponentHub.IdentityManager.CreateForbiddenResponse
                     (
                         httpContext.Request,
                         searchResult.EndpointContext as IPageContext,
@@ -925,7 +937,7 @@ namespace WebExpress.WebCore
                 else if (searchResult.EndpointContext is IPageContext pageContext)
                 {
                     // if the user is not authenticated, show the login prompt
-                    var loginResponse = _componentHub?.IdentityManager.CreateAuthenticationPrompt
+                    var loginResponse = WebEx.ComponentHub.IdentityManager.CreateAuthenticationPrompt
                     (
                         httpContext.Request,
                         searchResult.EndpointContext as IPageContext,

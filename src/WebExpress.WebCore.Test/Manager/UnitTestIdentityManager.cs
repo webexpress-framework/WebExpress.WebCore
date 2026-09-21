@@ -60,6 +60,10 @@ namespace WebExpress.WebCore.Test.Manager
         /// <summary>
         /// Test the CheckAccess function of the identity manager.
         /// </summary>
+        /// <param name="application">The application whose permission bindings are evaluated.</param>
+        /// <param name="identityName">The identity selected for the authorization scenario.</param>
+        /// <param name="permission">The required permission type.</param>
+        /// <param name="expected">The expected authorization result.</param>
         [Theory]
         [InlineData(typeof(TestApplicationA), "Alice", typeof(TestIdentityPermissionA), true)]
         [InlineData(typeof(TestApplicationA), "Alice", typeof(TestIdentityPermissionB), true)]
@@ -88,6 +92,10 @@ namespace WebExpress.WebCore.Test.Manager
         /// <summary>
         /// Test the CheckAccess function of the identity manager.
         /// </summary>
+        /// <param name="application">The application whose permission bindings are evaluated.</param>
+        /// <param name="groupName">The group selected for the authorization scenario.</param>
+        /// <param name="permission">The required permission type.</param>
+        /// <param name="expected">The expected authorization result.</param>
         [Theory]
         [InlineData(typeof(TestApplicationA), "Admins", typeof(TestIdentityPermissionA), true)]
         [InlineData(typeof(TestApplicationA), "Admins", typeof(TestIdentityPermissionB), true)]
@@ -116,6 +124,10 @@ namespace WebExpress.WebCore.Test.Manager
         /// <summary>
         /// Test the CheckAccess function of the identity manager.
         /// </summary>
+        /// <param name="application">The application whose permission bindings are evaluated.</param>
+        /// <param name="policy">The policy type whose permission binding is evaluated.</param>
+        /// <param name="permission">The required permission type.</param>
+        /// <param name="expected">The expected authorization result.</param>
         [Theory]
         [InlineData(typeof(TestApplicationA), typeof(TestIdentityPolicyA), typeof(TestIdentityPermissionA), true)]
         [InlineData(typeof(TestApplicationA), typeof(TestIdentityPolicyA), typeof(TestIdentityPermissionB), true)]
@@ -135,161 +147,6 @@ namespace WebExpress.WebCore.Test.Manager
 
             // validation
             Assert.Equal(expected, access);
-        }
-
-        /// <summary>
-        /// Test the Login function of the identity manager.
-        /// </summary>
-        [Theory]
-        [InlineData(null, false)]
-        [InlineData("Alice", true)]
-        [InlineData("Bob", true)]
-        public void Login(string identityName, bool expected)
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity(identityName);
-
-            // act
-            var res = identityManager.Login(identity, request);
-
-            // validation
-            Assert.Equal(expected, res is not null);
-        }
-
-        /// <summary>
-        /// Test the Login function of the identity manager.
-        /// </summary>
-        [Theory]
-        [InlineData("Alice")]
-        [InlineData("Bob")]
-        [InlineData("Charlie")]
-        public void Logout(string identityName)
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity(identityName);
-            identityManager.Login(identity, request);
-
-            // act
-            identityManager.Logout(request);
-
-            // validation
-            var res = identityManager.GetCurrentIdentity(request);
-            Assert.Null(res);
-        }
-
-        /// <summary>
-        /// Test the GetCurrentIdentity function of the identity manager.
-        /// </summary>
-        [Theory]
-        [InlineData("Alice")]
-        [InlineData("Bob")]
-        [InlineData("Charlie")]
-        public void GetCurrentIdentity(string identityName)
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity(identityName);
-            identityManager.Login(identity, request);
-
-            // act
-            var res = identityManager.GetCurrentIdentity(request);
-
-            // validation
-            Assert.Equal(identity, res);
-        }
-
-        /// <summary>
-        /// Signing in must move the session to an id the client did not hold before: the
-        /// request keeps its session and identity, the new id resolves to the signed-in
-        /// session, and the id in use before the sign-in resolves to nothing.
-        /// </summary>
-        [Fact]
-        public void Login_ReplacesSessionId()
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity("Alice");
-            var idBefore = request.Session.Id;
-
-            // act
-            var session = identityManager.Login(identity, request);
-
-            // validation
-            Assert.NotEqual(idBefore, session.Id);
-            Assert.Same(request.Session, session);
-            Assert.Equal(identity, identityManager.GetCurrentIdentity(request));
-
-            var withOldId = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={idBefore}\n\n");
-            Assert.Null(identityManager.GetCurrentIdentity(withOldId));
-
-            var withNewId = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={session.Id}\n\n");
-            Assert.Equal(identity, identityManager.GetCurrentIdentity(withNewId));
-        }
-
-        /// <summary>
-        /// The fixation scenario end to end: an attacker plants a session id in the victim's
-        /// browser, the victim signs in with it, and the attacker's requests carrying that id
-        /// must still see nobody signed in.
-        /// </summary>
-        [Fact]
-        public void Login_PlantedSessionId_DoesNotReachTheAttacker()
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var planted = Guid.NewGuid();
-            var victim = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={planted}\n\n");
-            var identity = MockIdentityFactory.GetIdentity("Alice");
-
-            // act
-            var session = identityManager.Login(identity, victim);
-
-            // validation
-            Assert.NotNull(session);
-            Assert.NotEqual(planted, session.Id);
-
-            var attacker = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={planted}\n\n");
-            Assert.Null(identityManager.GetCurrentIdentity(attacker));
-        }
-
-        /// <summary>
-        /// Signing out retires the id the session was signed in under: the request keeps its
-        /// (now anonymous) session, while a copy of the signed-in id resolves to nothing.
-        /// </summary>
-        [Fact]
-        public void Logout_ReplacesSessionId()
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity("Alice");
-            var session = identityManager.Login(identity, request);
-            var signedInId = session.Id;
-
-            // act
-            identityManager.Logout(request);
-
-            // validation
-            Assert.NotEqual(signedInId, session.Id);
-            Assert.Same(request.Session, session);
-            Assert.Null(identityManager.GetCurrentIdentity(request));
-
-            var withSignedInId = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={signedInId}\n\n");
-            Assert.NotSame(session, componentHub.SessionManager.GetSession(withSignedInId));
-
-            var withNewId = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={session.Id}\n\n");
-            Assert.Same(session, componentHub.SessionManager.GetSession(withNewId));
         }
 
         /// <summary>
@@ -325,7 +182,7 @@ namespace WebExpress.WebCore.Test.Manager
             provider.Identities.Add(identity);
 
             // act
-            identityManager.RegisterIdentityProvider(provider, applicationContext);
+            componentHub.IdentityProviderManager.Register(provider, applicationContext);
             var identities = identityManager.GetIdentities(applicationContext).ToList();
 
             // validation
@@ -352,14 +209,14 @@ namespace WebExpress.WebCore.Test.Manager
 
             provider.Identities.Add(identity);
 
-            identityManager.RegisterIdentityProvider(provider, applicationContext);
+            componentHub.IdentityProviderManager.Register(provider, applicationContext);
 
             var identitiesBefore = identityManager.GetIdentities(applicationContext).ToList();
             Assert.Contains(identity, identitiesBefore);
             Assert.Single(identitiesBefore);
 
             // act
-            var removed = identityManager.UnregisterIdentityProvider(provider, applicationContext);
+            var removed = componentHub.IdentityProviderManager.Unregister(provider, applicationContext);
             var identitiesAfter = identityManager.GetIdentities(applicationContext).ToList();
 
             // validation

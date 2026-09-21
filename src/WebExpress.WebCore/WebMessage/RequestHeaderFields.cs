@@ -80,6 +80,16 @@ namespace WebExpress.WebCore.WebMessage
         public string Referer { get; private set; }
 
         /// <summary>
+        /// Allows cookie-authenticated mutations to reject cross-origin browser requests.
+        /// </summary>
+        public string Origin { get; private set; }
+
+        /// <summary>
+        /// Requires a browser preflight before another origin can invoke authentication mutations.
+        /// </summary>
+        public string AuthenticationRequest { get; private set; }
+
+        /// <summary>
         /// Gets the If-None-Match header value. It carries the entity tag (ETag) the client already
         /// holds and is used for conditional requests so unchanged resources can be answered with 304.
         /// </summary>
@@ -124,6 +134,8 @@ namespace WebExpress.WebCore.WebMessage
             AcceptLanguage = requestFeature.Headers.AcceptLanguage.SelectMany(x => x.Split(';', StringSplitOptions.RemoveEmptyEntries));
             UserAgent = requestFeature.Headers.UserAgent;
             Referer = requestFeature.Headers.Referer;
+            Origin = requestFeature.Headers.Origin;
+            AuthenticationRequest = requestFeature.Headers["X-WebExpress-Auth"];
             IfNoneMatch = requestFeature.Headers.IfNoneMatch;
             Upgrade = requestFeature.Headers.Upgrade;
             SecWebSocketKey = requestFeature.Headers.SecWebSocketKey;
