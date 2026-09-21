@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
@@ -30,6 +31,11 @@ namespace WebExpress.WebCore.WebComponent
     /// </summary>
     public interface IComponentHub : IComponentManager
     {
+        /// <summary>
+        /// Gets the shared certificate service used by hosting and application components.
+        /// </summary>
+        ICertificateManager CertificateManager { get; }
+
         /// <summary>
         /// An event that fires when an component is added.
         /// </summary>

@@ -209,3 +209,6 @@ validation.missing_fragment={0} muss '{1}' enthalten.
 validation.suffix_mismatch={0} muss mit '{1}' enden.
 validation.invalid_enum={0} muss ein gültiger {1}-Wert sein.
 validation.invalid_date={0} muss ein gültiges Datum sein.
+certificate.invalid=Das Zertifikat {0} kann nicht für HTTPS verwendet werden: {1}.
+certificate.expiring=Das Zertifikat {0} läuft am {1} ab; seine verbleibende Gültigkeit hat die Warnschwelle von {2} Tagen erreicht.
+certificate.load_failed=Das Zertifikat {0} konnte nicht aus dem Speicher {1} geladen werden. Referenz, Zugriffsrechte, PFX-Inhalt und Zugangsdaten prüfen.

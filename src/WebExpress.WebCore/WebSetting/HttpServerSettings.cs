@@ -34,6 +34,11 @@ namespace WebExpress.WebCore.WebSetting
         public List<EndpointSettings> Endpoints { get; set; } = [];
 
         /// <summary>
+        /// Gets or sets the shared certificate inventory and expiry warning policy used for production HTTPS.
+        /// </summary>
+        public CertificateManagerSettings Certificates { get; set; }
+
+        /// <summary>
         /// Optional fine-tuning of the underlying Kestrel server, including all request limits. When
         /// the block is omitted the web server keeps its built-in defaults, so this block only ever
         /// applies values that are explicitly opted into.

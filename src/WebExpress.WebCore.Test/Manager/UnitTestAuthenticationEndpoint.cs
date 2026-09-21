@@ -13,6 +13,66 @@ namespace WebExpress.WebCore.Test.Manager
     public class UnitTestAuthenticationEndpoint
     {
         /// <summary>
+        /// Preserves explicit HTTP and HTTPS ports so same-origin checks accept browser requests without accepting other origins.
+        /// </summary>
+        /// <param name="host">The authority sent in the Host header, including the public port.</param>
+        /// <param name="origin">The browser origin used to validate the authentication request.</param>
+        /// <param name="scheme">The HTTP transport scheme used by the host.</param>
+        /// <param name="port">The local listener port.</param>
+        /// <param name="expectedStatus">The expected success or forbidden status.</param>
+        /// <returns>A task that completes after URL construction and authentication have been checked.</returns>
+        [Theory]
+        [InlineData("localhost:8080", "http://localhost:8080", "http", 8080, 200)]
+        [InlineData("[::1]:8080", "http://[::1]:8080", "http", 8080, 200)]
+        [InlineData("localhost:8443", "https://localhost:8443", "https", 8443, 200)]
+        [InlineData("localhost:443", "https://localhost", "https", 443, 200)]
+        [InlineData("localhost:8080", "http://localhost:8081", "http", 8080, 403)]
+        [InlineData("localhost:8080", "http://other.example:8080", "http", 8080, 403)]
+        public async Task LoginWithExplicitPortEnforcesTheBrowserOrigin(string host, string origin, string scheme, int port, int expectedStatus)
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture(requireHttps: scheme == "https");
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+            fixture.Hub.IdentityProviderManager.Register(new PasswordProvider(), fixture.Application);
+            var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+            context.TraceIdentifier = Guid.NewGuid().ToString("N");
+            context.Request.Method = "POST";
+            context.Request.Scheme = scheme;
+            context.Request.Host = new Microsoft.AspNetCore.Http.HostString(host);
+            context.Request.Path = "/api/auth/login";
+            context.Request.Protocol = "HTTP/1.1";
+            context.Request.ContentType = "application/json";
+            context.Request.Headers.Origin = origin;
+            context.Request.Headers["X-WebExpress-Auth"] = "1";
+            context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>().RawTarget = "/api/auth/login";
+            context.Connection.LocalIpAddress = System.Net.IPAddress.Loopback;
+            context.Connection.RemoteIpAddress = System.Net.IPAddress.Loopback;
+            context.Connection.LocalPort = port;
+            using var body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("{\"username\":\"alice\",\"password\":\"correct\"}"));
+            context.Request.Body = body;
+            context.Request.ContentLength = body.Length;
+
+            // act
+            var request = new WebMessage.HttpContext(context.Features, fixture.Server).Request;
+            var response = await endpoint.HandleAsync(request);
+
+            // validation
+            Assert.True(Uri.TryCreate(request.Uri.ToString(), UriKind.Absolute, out var uri));
+            Assert.Equal(port, uri.Port);
+            Assert.Equal(expectedStatus, response.Status);
+            if (expectedStatus == 200)
+            {
+                using var result = JsonDocument.Parse((string)response.Content);
+                Assert.True(result.RootElement.GetProperty("authenticated").GetBoolean());
+            }
+            else
+            {
+                Assert.Contains("invalid_origin", (string)response.Content);
+                Assert.Empty(response.Header.Cookies.Cast<System.Net.Cookie>());
+            }
+        }
+
+        /// <summary>
         /// Keeps HTTPS mandatory when a deployment has not explicitly enabled development HTTP.
         /// </summary>
         /// <returns>A task that completes after the default transport rejection has been verified.</returns>

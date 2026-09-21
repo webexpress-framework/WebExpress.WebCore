@@ -38,7 +38,7 @@ namespace WebExpress.WebCore.Test.Server
             var addEndpoint = typeof(HttpServer).GetMethod("AddEndpoint", flags, null,
                 [wrapper.GetType(), typeof(EndpointSettings), typeof(Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols?)], null);
 
-            addEndpoint.Invoke(server, [wrapper, endpoint, null]);
+            Assert.Throws<System.Reflection.TargetInvocationException>(() => addEndpoint.Invoke(server, [wrapper, endpoint, null]));
 
             var listeners = typeof(Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions)
                 .GetProperty("CodeBackedListenOptions", flags).GetValue(options);

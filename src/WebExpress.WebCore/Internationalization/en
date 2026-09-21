@@ -209,4 +209,6 @@ validation.missing_fragment={0} must contain '{1}'.
 validation.suffix_mismatch={0} must end with '{1}'.
 validation.invalid_enum={0} must be a valid {1} value.
 validation.invalid_date={0} must be a valid date.
- 
+certificate.invalid=Certificate {0} cannot be used for HTTPS: {1}.
+certificate.expiring=Certificate {0} expires at {1}; its remaining lifetime reached the warning threshold of {2} days.
+certificate.load_failed=Certificate {0} could not be loaded from store {1}. Check the reference, access permissions, PFX content and credential.

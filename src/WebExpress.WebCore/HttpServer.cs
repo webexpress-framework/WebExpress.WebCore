@@ -2,8 +2,9 @@
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
-using Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
@@ -14,10 +15,10 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
-using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebLog;
@@ -38,6 +39,7 @@ namespace WebExpress.WebCore
     public class HttpServer : IHost, IHttpApplication<IHttpContext>
     {
         private readonly Lazy<AuthenticationEndpoint> _authenticationEndpoint;
+        private Microsoft.Extensions.Hosting.IHost _webHost;
 
         /// <summary>
         /// Event is triggered after the web server is started.
@@ -47,7 +49,7 @@ namespace WebExpress.WebCore
         /// <summary>
         /// Provides the KestrelServer, which responds to the requests.
         /// </summary>
-        private KestrelServer Kestrel { get; set; }
+        private IServer Kestrel { get; set; }
 
         /// <summary>
         /// Gets the server thread termination.
@@ -112,7 +114,8 @@ namespace WebExpress.WebCore
                 context.Configuration,
                 context.Culture,
                 context.Log,
-                this
+                this,
+                context.CertificateManager
             );
 
             Culture = HttpServerContext.Culture;
@@ -126,6 +129,32 @@ namespace WebExpress.WebCore
         /// </summary>
         public void Start()
         {
+            try
+            {
+                StartCore();
+            }
+            catch
+            {
+                _webHost?.Dispose();
+                _webHost = null;
+                Kestrel = null;
+                HttpServerContext.CertificateManager.Dispose();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Validates every HTTPS certificate before opening any listener and waits for startup failures.
+        /// </summary>
+        private void StartCore()
+        {
+            var settings = Settings ?? new HttpServerSettings { Endpoints = HttpServerContext.Endpoints?.ToList() ?? [] };
+            HttpServerContext.CertificateManager.Load(settings);
+            foreach (var endpoint in (settings.Endpoints ?? []).Where(x => x.GetBindingAddress().Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                HttpServerContext.CertificateManager.Resolve(endpoint);
+            }
+
             if (HttpServerContext is not null && HttpServerContext.Log != null)
             {
                 HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:httpserver.run"));
@@ -137,37 +166,33 @@ namespace WebExpress.WebCore
             }
 
             var logger = new LogFactory();
-            var transportOptions = new OptionsWrapper<SocketTransportOptions>
-            (
-                new SocketTransportOptions()
-            );
-            var transport = new SocketTransportFactory(transportOptions, logger);
-            var serviceCollection = new ServiceCollection();
-
-            serviceCollection.AddMemoryCache();
-            serviceCollection.AddLogging(x =>
-            {
-                x.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Trace);
-                x.AddProvider(logger);
-            });
-            serviceCollection.AddHttpLogging
-            (
-                x =>
-                {
-                    x.LoggingFields = Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.All;
-                }
-            );
+            _webHost = new HostBuilder()
+                .ConfigureWebHost(webHost => webHost
+                    .UseKestrel()
+                    .ConfigureServices(services =>
+                    {
+                        services.AddMemoryCache();
+                        services.AddLogging(logging =>
+                        {
+                            logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Trace);
+                            logging.AddProvider(logger);
+                        });
+                        services.AddHttpLogging(logging =>
+                            logging.LoggingFields = Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.All);
+                    })
+                    .Configure(_ => { }))
+                .Build();
 
             // the kestrel settings block is optional; a missing block or property keeps the built-in defaults
             var kestrel = Settings?.Kestrel;
 
-            var serverOptions = new OptionsWrapper<KestrelServerOptions>(new KestrelServerOptions()
-            {
-                AllowSynchronousIO = kestrel?.AllowSynchronousIO ?? true,
-                AllowResponseHeaderCompression = kestrel?.AllowResponseHeaderCompression ?? true,
-                AddServerHeader = kestrel?.AddServerHeader ?? true,
-                ApplicationServices = serviceCollection.BuildServiceProvider()
-            });
+            var serverOptions = new OptionsWrapper<KestrelServerOptions>
+            (
+                _webHost.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value
+            );
+            serverOptions.Value.AllowSynchronousIO = kestrel?.AllowSynchronousIO ?? true;
+            serverOptions.Value.AllowResponseHeaderCompression = kestrel?.AllowResponseHeaderCompression ?? true;
+            serverOptions.Value.AddServerHeader = kestrel?.AddServerHeader ?? true;
 
             var limits = serverOptions.Value.Limits;
 
@@ -210,13 +235,13 @@ namespace WebExpress.WebCore
 
             var protocols = kestrel?.ResolveProtocols();
 
-            foreach (var endpoint in Settings?.Endpoints ?? [])
+            foreach (var endpoint in settings.Endpoints ?? [])
             {
                 AddEndpoint(serverOptions, endpoint, protocols);
             }
 
-            Kestrel = new KestrelServer(serverOptions, transport, logger);
-            Kestrel.StartAsync(this, ServerTokenSource.Token);
+            Kestrel = _webHost.Services.GetRequiredService<IServer>();
+            Kestrel.StartAsync(this, ServerTokenSource.Token).GetAwaiter().GetResult();
 
             HttpServerContext.Log?.Info(message: I18N.Translate
             (
@@ -237,13 +262,17 @@ namespace WebExpress.WebCore
         {
             try
             {
-                var uri = new UriBuilder(endPoint.Uri);
+                var uri = endPoint.GetBindingAddress();
                 var asterisk = uri.Host.Equals("*");
+                var certificate = uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                    ? HttpServerContext.CertificateManager.Resolve(endPoint) : null;
 
                 var port = uri.Port;
-                var host = asterisk ? Dns.GetHostEntry(Dns.GetHostName()) : Dns.GetHostEntry(uri.Host);
-                var addressList = host.AddressList
-                    .Union(asterisk ? Dns.GetHostEntry("localhost").AddressList : [])
+                var addresses = asterisk
+                    ? new[] { Socket.OSSupportsIPv6 ? IPAddress.IPv6Any : IPAddress.Any }
+                    : IPAddress.TryParse(uri.Host.Trim('[', ']'), out var address)
+                        ? [address] : Dns.GetHostAddresses(uri.Host);
+                var addressList = addresses.Distinct()
                     .Where(x => x.AddressFamily == AddressFamily.InterNetwork || x.AddressFamily == AddressFamily.InterNetworkV6);
 
                 HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:httpserver.endpoint"), args: endPoint.Uri);
@@ -252,11 +281,11 @@ namespace WebExpress.WebCore
                 {
                     var ep = new IPEndPoint(ipAddress, port);
 
-                    switch (uri.Scheme)
+                    switch (uri.Scheme.ToLowerInvariant())
                     {
                         case "https":
                             {
-                                AddEndpoint(serverOptions, ep, endPoint.PfxFile, endPoint.Password, protocols);
+                                AddEndpoint(serverOptions, ep, certificate, protocols);
                                 break;
                             }
                         default:
@@ -271,6 +300,7 @@ namespace WebExpress.WebCore
             {
                 HttpServerContext.Log?.Error(message: I18N.Translate("webexpress.webcore:httpserver.listen.exeption"), args: endPoint);
                 HttpServerContext.Log?.Exception(ex);
+                throw;
             }
         }
 
@@ -297,15 +327,20 @@ namespace WebExpress.WebCore
         /// </summary>
         /// <param name="serverOptions">The server options.</param>
         /// <param name="endPoint">The endpoint.</param>
-        /// <param name="pfxFile">The path to the PFX file containing the certificate.</param>
-        /// <param name="password">The password for the PFX file.</param>
+        /// <param name="certificate">The validated material borrowed from the central certificate manager.</param>
         /// <param name="protocols">The HTTP protocols to enable on the endpoint, or null to keep the Kestrel default.</param>
-        private void AddEndpoint(OptionsWrapper<KestrelServerOptions> serverOptions, IPEndPoint endPoint, string pfxFile, string password, HttpProtocols? protocols)
+        private void AddEndpoint(OptionsWrapper<KestrelServerOptions> serverOptions, IPEndPoint endPoint, CertificateMaterial certificate, HttpProtocols? protocols)
         {
             serverOptions.Value.Listen(endPoint, configure =>
             {
-                var cert = X509CertificateLoader.LoadPkcs12FromFile(pfxFile, password, X509KeyStorageFlags.DefaultKeySet);
-                configure.UseHttps(cert);
+                configure.UseHttps(new HttpsConnectionAdapterOptions
+                {
+                    ServerCertificate = certificate.Certificate,
+                    ServerCertificateChain = new System.Security.Cryptography.X509Certificates.X509Certificate2Collection
+                    (
+                        certificate.Chain.ToArray()
+                    )
+                });
 
                 if (protocols is not null)
                 {
@@ -321,10 +356,20 @@ namespace WebExpress.WebCore
         /// </summary>
         public void Stop()
         {
-            // signal cancellation and stop server
-            ServerTokenSource.Cancel();
-            Kestrel.StopAsync(ServerTokenSource.Token);
-            if (_authenticationEndpoint.IsValueCreated) { _authenticationEndpoint.Value.Dispose(); }
+            try
+            {
+                // certificate handles must outlive all active tls connections
+                Kestrel?.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                ServerTokenSource.Cancel();
+                _webHost?.Dispose();
+                _webHost = null;
+                Kestrel = null;
+                HttpServerContext.CertificateManager.Dispose();
+                if (_authenticationEndpoint.IsValueCreated) { _authenticationEndpoint.Value.Dispose(); }
+            }
         }
 
         /// <summary>

@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Globalization;
 using Microsoft.Extensions.Configuration;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebSetting;
@@ -15,6 +16,11 @@ namespace WebExpress.WebCore
     /// </summary>
     public interface IHttpServerContext
     {
+        /// <summary>
+        /// Gets the shared certificate service so applications never need direct storage access.
+        /// </summary>
+        ICertificateManager CertificateManager { get; }
+
         /// <summary>
         /// Gets the route of the web server.
         /// </summary>

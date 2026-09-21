@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Reflection;
 using Microsoft.Extensions.Configuration;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebSetting;
@@ -16,6 +17,11 @@ namespace WebExpress.WebCore
     /// </summary>
     public class HttpServerContext : IHttpServerContext
     {
+        /// <summary>
+        /// Gets the certificate service shared with the host and application components.
+        /// </summary>
+        public ICertificateManager CertificateManager { get; }
+
         /// <summary>
         /// Gets the route of the web server.
         /// </summary>
@@ -84,6 +90,7 @@ namespace WebExpress.WebCore
         /// <param name="culture">The culture.</param>
         /// <param name="log">The log.</param>
         /// <param name="host">The host.</param>
+        /// <param name="certificateManager">The optional shared certificate service owned by the host.</param>
         public HttpServerContext
         (
             IRoute route,
@@ -95,7 +102,8 @@ namespace WebExpress.WebCore
             IConfigurationRoot configuration,
             CultureInfo culture,
             ILog log,
-            IHost host
+            IHost host,
+            ICertificateManager certificateManager = null
         )
         {
             var assembly = typeof(HttpServer).Assembly;
@@ -111,6 +119,7 @@ namespace WebExpress.WebCore
             Culture = culture;
             Log = log;
             Host = host;
+            CertificateManager = certificateManager ?? new CertificateManager(log);
         }
     }
 }

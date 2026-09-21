@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http.Features;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -162,14 +163,15 @@ namespace WebExpress.WebCore.WebMessage
 
             LocalEndPoint = new IPEndPoint(connectionFeature.LocalIpAddress, connectionFeature.LocalPort);
             RemoteEndPoint = new IPEndPoint(connectionFeature.RemoteIpAddress, connectionFeature.RemotePort);
+            var requestHost = new HostString(Header.Host);
 
             Uri = new UriEndpoint
             (
                 Scheme,
                 new UriAuthority()
                 {
-                    Host = Header.Host,
-                    Port = connectionFeature.LocalPort
+                    Host = requestHost.Host,
+                    Port = requestHost.Port ?? connectionFeature.LocalPort
                 },
                 requestFeature.RawTarget
             );

@@ -4,6 +4,7 @@ using System.Linq;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebComponent.Model;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
@@ -58,6 +59,11 @@ namespace WebExpress.WebCore.WebComponent
         private readonly SocketManager _socketManager;
         private readonly ThemeManager _themeManager;
         private int _lastCounter = 0;
+
+        /// <summary>
+        /// Gets the host-owned certificate service without creating a second certificate inventory.
+        /// </summary>
+        public ICertificateManager CertificateManager => _httpServerContext.CertificateManager;
 
         /// <summary>
         /// An event that fires when an component is added.
