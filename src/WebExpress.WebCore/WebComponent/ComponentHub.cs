@@ -56,6 +56,7 @@ namespace WebExpress.WebCore.WebComponent
         private readonly TaskManager _taskManager;
         private readonly IdentityManager _identityManager;
         private readonly IdentityProviderManager _identityProviderManager;
+        private readonly IdentityTokenStoreManager _identityTokenStoreManager;
         private readonly SocketManager _socketManager;
         private readonly ThemeManager _themeManager;
         private int _lastCounter = 0;
@@ -99,6 +100,7 @@ namespace WebExpress.WebCore.WebComponent
                 _internationalizationManager,
                 _identityManager,
                 _identityProviderManager,
+                _identityTokenStoreManager,
                 _sessionManager,
                 _taskManager,
                 _socketManager,
@@ -225,6 +227,11 @@ namespace WebExpress.WebCore.WebComponent
         public IIdentityProviderManager IdentityProviderManager => _identityProviderManager;
 
         /// <summary>
+        /// Keeps replay and revocation storage replaceable by plugins without changing credential issuance.
+        /// </summary>
+        public IIdentityTokenStoreManager IdentityTokenStoreManager => _identityTokenStoreManager;
+
+        /// <summary>
         /// Gets the session manager.
         /// </summary>
         /// <returns>The instance of the session manager.</returns>
@@ -291,6 +298,8 @@ namespace WebExpress.WebCore.WebComponent
                 ?? throw new InvalidOperationException("Failed to create TaskManager.");
             _identityProviderManager = CreateInstance(typeof(IdentityProviderManager)) as IdentityProviderManager
                 ?? throw new InvalidOperationException("Failed to create IdentityProviderManager.");
+            _identityTokenStoreManager = CreateInstance(typeof(IdentityTokenStoreManager)) as IdentityTokenStoreManager
+                ?? throw new InvalidOperationException("Failed to create IdentityTokenStoreManager.");
             _identityManager = CreateInstance(typeof(IdentityManager)) as IdentityManager
                 ?? throw new InvalidOperationException("Failed to create IdentityManager.");
             _socketManager = CreateInstance(typeof(SocketManager)) as SocketManager

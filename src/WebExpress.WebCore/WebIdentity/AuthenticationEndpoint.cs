@@ -83,7 +83,7 @@ namespace WebExpress.WebCore.WebIdentity
             var application = _hub.ApplicationManager.Applications.SingleOrDefault(x => x.ApplicationId == applicationId);
             if (application is null || request is not RequestBase concrete) { return Error(new ResponseBadRequest(), "unknown_application"); }
             concrete.ApplicationContext = application;
-            if (manager.Tokens is null) { return Error(new ResponseServiceUnavailable(), "authentication_not_configured"); }
+            if (!manager.IsAuthenticationConfigured(application)) { return Error(new ResponseServiceUnavailable(), "authentication_not_configured"); }
 
             try
             {
@@ -114,8 +114,8 @@ namespace WebExpress.WebCore.WebIdentity
                         var providers = _hub.IdentityProviderManager.GetProviders(application).OfType<OpenIdConnectIdentityProvider>()
                             .Where(x => x.ProviderId == providerId).ToArray();
                         if (providers.Length != 1) { return Error(new ResponseBadRequest(), "unknown_provider"); }
-                        if (path == "/api/auth/authorize") { return await providers[0].CreateChallengeAsync(manager.Tokens, applicationId); }
-                        var external = await providers[0].AuthenticateCallbackAsync(request, manager.Tokens);
+                        if (path == "/api/auth/authorize") { return await providers[0].CreateChallengeAsync(manager, application); }
+                        var external = await providers[0].AuthenticateCallbackAsync(request, manager);
                         var callback = external is null ? Unauthorized() : SignedIn(manager.Login(external, request));
                         callback.Header.Cookies.Add(IdentityManager.CreateCookie(OpenIdConnectIdentityProvider.ChallengeCookieName,
                             null, "/api/auth/callback", null));
@@ -128,7 +128,7 @@ namespace WebExpress.WebCore.WebIdentity
                             if (isDelete)
                             {
                                 var token = body.RootElement.GetProperty("token").GetString();
-                                if (manager.Tokens.ValidatePersonalAccessToken(token, applicationId)?.Id != owner.Id) { return Unauthorized(); }
+                                if (manager.ValidatePersonalAccessToken(token, application)?.Id != owner.Id) { return Unauthorized(); }
                                 manager.RevokePersonalAccessToken(token, application);
                                 return new ResponseNoContent();
                             }

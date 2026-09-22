@@ -24,30 +24,53 @@ namespace WebExpress.WebCore.Test.Fixture
         internal IHttpServerContext Server { get; }
         internal IApplicationContext Application { get; }
         internal IdentityManager Manager => (IdentityManager)Hub.IdentityManager;
-        internal IdentityTokenService Tokens { get; }
         internal TestClock Clock { get; } = new();
 
         /// <summary>
         /// Creates an isolated signing authority and durable token directory for each test.
         /// </summary>
         /// <param name="requireHttps">Whether the test retains the production transport requirement.</param>
-        internal AuthenticationFixture(bool requireHttps = true)
+        /// <param name="withTokenStorePath">Whether the deployment configures a location for the default file store.</param>
+        internal AuthenticationFixture(bool requireHttps = true, bool withTokenStorePath = true)
         {
             Settings.RequireHttps = requireHttps;
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
-            {
-                ["WebExpress:Authentication:Issuer"] = Settings.Issuer,
-                ["WebExpress:Authentication:Audience"] = Settings.Audience,
-                ["WebExpress:Authentication:SigningKey"] = Settings.SigningKey,
-                ["WebExpress:Authentication:RequireHttps"] = requireHttps.ToString(),
-                ["WebExpress:Authentication:TokenStorePath"] = Settings.TokenStorePath
-            }).Build();
+            if (!withTokenStorePath) { Settings.TokenStorePath = null; }
+            var configuration = Configuration();
             Server = UnitTestFixture.CreateHttpServerContextMock(configuration: configuration);
             Hub = UnitTestFixture.CreateComponentHubMock(Server);
             ((PluginManager)Hub.PluginManager).Register();
             Application = Hub.ApplicationManager.GetApplications(typeof(TestApplicationA)).First();
             configuration["WebExpress:Authentication:ApplicationId"] = Application.ApplicationId;
-            Tokens = new IdentityTokenService(Settings, new FileIdentityTokenStore(Settings.TokenStorePath), Clock);
+            Manager.Clock = Clock;
+        }
+
+        /// <summary>
+        /// Simulates another server instance that shares the hub's token store but reads the current settings,
+        /// so a changed issuer or signing key yields an independent signing authority.
+        /// </summary>
+        /// <returns>A separate identity manager driven by the fixture clock.</returns>
+        internal IdentityManager Instance()
+        {
+            var server = UnitTestFixture.CreateHttpServerContextMock(configuration: Configuration());
+            var manager = ComponentActivator.CreateInstance<IdentityManager>(typeof(IdentityManager), server, Hub);
+            manager.Clock = Clock;
+            return manager;
+        }
+
+        /// <summary>
+        /// Projects the current settings into the configuration section read by the identity manager.
+        /// </summary>
+        /// <returns>The configuration containing the authentication section.</returns>
+        private IConfigurationRoot Configuration()
+        {
+            return new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["WebExpress:Authentication:Issuer"] = Settings.Issuer,
+                ["WebExpress:Authentication:Audience"] = Settings.Audience,
+                ["WebExpress:Authentication:SigningKey"] = Settings.SigningKey,
+                ["WebExpress:Authentication:RequireHttps"] = Settings.RequireHttps.ToString(),
+                ["WebExpress:Authentication:TokenStorePath"] = Settings.TokenStorePath
+            }).Build();
         }
 
         /// <summary>
@@ -77,6 +100,7 @@ namespace WebExpress.WebCore.Test.Fixture
         public void Dispose()
         {
             Hub.IdentityProviderManager.Dispose();
+            Hub.IdentityTokenStoreManager.Dispose();
             if (Directory.Exists(Settings.TokenStorePath)) { Directory.Delete(Settings.TokenStorePath, true); }
         }
 

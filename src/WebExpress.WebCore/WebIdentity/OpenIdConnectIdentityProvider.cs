@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebSetting;
@@ -71,11 +72,12 @@ namespace WebExpress.WebCore.WebIdentity
         /// <summary>
         /// Starts a code flow whose verifier remains in the initiating browser's protected cookie.
         /// </summary>
-        /// <param name="tokens">The shared token service used to bind browser correlation to the local signing authority.</param>
-        /// <param name="applicationId">The application identifier that scopes token audiences and authentication.</param>
+        /// <param name="identityManager">The identity manager whose signing authority binds browser correlation to this deployment.</param>
+        /// <param name="applicationContext">The application that scopes token audiences and authentication.</param>
         /// <returns>A redirect response with a protected browser correlation cookie.</returns>
-        public async Task<IResponse> CreateChallengeAsync(IdentityTokenService tokens, string applicationId)
+        public async Task<IResponse> CreateChallengeAsync(IdentityManager identityManager, IApplicationContext applicationContext)
         {
+            var applicationId = applicationContext?.ApplicationId;
             var redirectQuery = QueryHelpers.ParseQuery(new Uri(_settings.RedirectUri).Query);
             if (redirectQuery["application"].Count != 1 || redirectQuery["application"] != applicationId ||
                 redirectQuery["provider"].Count != 1 || redirectQuery["provider"] != ProviderId)
@@ -86,10 +88,10 @@ namespace WebExpress.WebCore.WebIdentity
             var state = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
             var nonce = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
             var verifier = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
-            var challenge = tokens.ProtectChallenge(new Dictionary<string, object>
+            var challenge = identityManager.ProtectChallenge(new Dictionary<string, object>
             {
                 ["state"] = state, ["nonce"] = nonce, ["verifier"] = verifier, ["provider"] = ProviderId
-            }, applicationId);
+            }, applicationContext);
             var response = new ResponseMovedTemporarily();
             response.Header.Location = QueryHelpers.AddQueryString(configuration.AuthorizationEndpoint, new Dictionary<string, string>
             {
@@ -109,11 +111,11 @@ namespace WebExpress.WebCore.WebIdentity
         /// signature, issuer, audience, lifetime, authorized party, and nonce before mapping claims.
         /// </summary>
         /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
-        /// <param name="tokens">The shared token service used to bind browser correlation to the local signing authority.</param>
+        /// <param name="identityManager">The identity manager whose signing authority and token store verify browser correlation.</param>
         /// <returns>The normalized external identity, or null when correlation or token validation fails.</returns>
-        public async Task<IIdentity> AuthenticateCallbackAsync(IRequest request, IdentityTokenService tokens)
+        public async Task<IIdentity> AuthenticateCallbackAsync(IRequest request, IdentityManager identityManager)
         {
-            var challenge = tokens.ValidateChallenge(IdentityManager.CookieValue(request, ChallengeCookieName), request.ApplicationContext?.ApplicationId);
+            var challenge = identityManager.ValidateChallenge(IdentityManager.CookieValue(request, ChallengeCookieName), request.ApplicationContext);
             var state = Query(request, "state");
             var code = Query(request, "code");
             if (challenge is null || string.IsNullOrEmpty(code) || code.Length > 4096 || Query(request, "error") is not null ||
@@ -123,7 +125,7 @@ namespace WebExpress.WebCore.WebIdentity
                 !challenge.TryGetPayloadValue<string>("verifier", out var verifier)) { return null; }
             var issuer = Query(request, "iss");
             if (issuer is not null && issuer != _settings.Authority) { return null; }
-            if (!tokens.ConsumeChallenge(challenge)) { return null; }
+            if (!identityManager.ConsumeChallenge(challenge, request.ApplicationContext)) { return null; }
             var configuration = await GetConfigurationAsync();
             var form = new Dictionary<string, string>
             {

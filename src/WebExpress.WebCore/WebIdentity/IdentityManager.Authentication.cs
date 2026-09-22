@@ -6,7 +6,6 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebMessage;
-using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebIdentity
 {
@@ -47,8 +46,6 @@ namespace WebExpress.WebCore.WebIdentity
         public const string RefreshPath = "/api/auth/refresh";
 
         private readonly ConditionalWeakTable<IRequest, AuthenticationState> _authenticationStates = new();
-        private readonly object _tokenGate = new();
-        private IdentityTokenService _tokens;
 
         /// <summary>
         /// Keeps pending authentication changes local to one HTTP request.
@@ -58,24 +55,6 @@ namespace WebExpress.WebCore.WebIdentity
             internal IIdentity Identity;
             internal IdentityTokenPair Pair;
             internal bool Changed;
-        }
-
-        /// <summary>
-        /// Gets the token service, creating it if necessary.
-        /// </summary>
-        internal IdentityTokenService Tokens
-        {
-            get
-            {
-                lock (_tokenGate)
-                {
-                    if (_tokens is not null) { return _tokens; }
-                    var settings = _httpServerContext.Configuration.GetSection("WebExpress:Authentication").Get<AuthenticationSettings>();
-                    if (settings is null) { return null; }
-                    _tokens = new IdentityTokenService(settings, new FileIdentityTokenStore(settings.TokenStorePath));
-                    return _tokens;
-                }
-            }
         }
 
         /// <summary>
@@ -89,7 +68,7 @@ namespace WebExpress.WebCore.WebIdentity
             if (identity is null) { return null; }
             ArgumentNullException.ThrowIfNull(request);
             var snapshot = Snapshot(identity, request.ApplicationContext);
-            var pair = RequireTokens().Issue(snapshot, request.ApplicationContext.ApplicationId);
+            var pair = Issue(snapshot, request.ApplicationContext);
             var state = _authenticationStates.GetOrCreateValue(request);
             state.Identity = snapshot;
             state.Pair = pair;
@@ -105,10 +84,10 @@ namespace WebExpress.WebCore.WebIdentity
         public IdentityTokenPair Refresh(IRequest request)
         {
             ArgumentNullException.ThrowIfNull(request);
-            var pair = RequireTokens().Refresh(CookieValue(request, RefreshCookie), request.ApplicationContext?.ApplicationId);
+            var pair = Refresh(CookieValue(request, RefreshCookie), request.ApplicationContext);
             if (pair is null) { return null; }
             var state = _authenticationStates.GetOrCreateValue(request);
-            state.Identity = Tokens.ValidateAccessToken(pair.AccessToken, request.ApplicationContext.ApplicationId);
+            state.Identity = ValidateAccessToken(pair.AccessToken, request.ApplicationContext);
             state.Pair = pair;
             state.Changed = true;
             return pair;
@@ -121,8 +100,8 @@ namespace WebExpress.WebCore.WebIdentity
         public void Logout(IRequest request)
         {
             ArgumentNullException.ThrowIfNull(request);
-            Tokens?.RevokeGrant(CookieValue(request, AccessCookie), request.ApplicationContext?.ApplicationId);
-            Tokens?.RevokeRefreshGrant(CookieValue(request, RefreshCookie), request.ApplicationContext?.ApplicationId);
+            RevokeGrant(CookieValue(request, AccessCookie), request.ApplicationContext);
+            RevokeRefreshGrant(CookieValue(request, RefreshCookie), request.ApplicationContext);
             var state = _authenticationStates.GetOrCreateValue(request);
             state.Identity = null;
             state.Pair = null;
@@ -143,10 +122,10 @@ namespace WebExpress.WebCore.WebIdentity
             if (authorization is not null)
             {
                 return string.Equals(authorization.Type, "Bearer", StringComparison.OrdinalIgnoreCase)
-                    ? Tokens?.ValidatePersonalAccessToken(authorization.Token, request.ApplicationContext.ApplicationId) : null;
+                    ? ValidatePersonalAccessToken(authorization.Token, request.ApplicationContext) : null;
             }
             var cookie = CookieValue(request, AccessCookie);
-            return cookie is null ? null : Tokens?.ValidateAccessToken(cookie, request.ApplicationContext.ApplicationId);
+            return cookie is null ? null : ValidateAccessToken(cookie, request.ApplicationContext);
         }
 
         /// <summary>
@@ -160,19 +139,7 @@ namespace WebExpress.WebCore.WebIdentity
         public string CreatePersonalAccessToken(IIdentity identity, IApplicationContext applicationContext,
             TimeSpan lifetime, IEnumerable<string> permissions)
         {
-            return RequireTokens().CreatePersonalAccessToken(Snapshot(identity, applicationContext),
-                applicationContext.ApplicationId, lifetime, permissions);
-        }
-
-        /// <summary>
-        /// Persists revocation so the personal credential stops working across all configured instances.
-        /// </summary>
-        /// <param name="token">The serialized credential that must pass the required trust checks.</param>
-        /// <param name="applicationContext">The application context that owns the requested operation.</param>
-        /// <returns>True when a valid personal credential was revoked; otherwise, false.</returns>
-        public bool RevokePersonalAccessToken(string token, IApplicationContext applicationContext)
-        {
-            return RequireTokens().RevokePersonalAccessToken(token, applicationContext.ApplicationId);
+            return SignPersonalAccessToken(Snapshot(identity, applicationContext), applicationContext, lifetime, permissions);
         }
 
         /// <summary>
@@ -219,12 +186,6 @@ namespace WebExpress.WebCore.WebIdentity
             var cookies = request.Header.Cookies.Where(x => x.Name == name).ToArray();
             return cookies.Length == 1 ? cookies[0].Value : null;
         }
-
-        /// <summary>
-        /// Prevents authentication from silently falling back to ephemeral signing configuration.
-        /// </summary>
-        /// <returns>The token service configured for this deployment.</returns>
-        private IdentityTokenService RequireTokens() => Tokens ?? throw new InvalidOperationException("Configure WebExpress:Authentication before signing in.");
 
         /// <summary>
         /// Captures effective authorization before mutable provider state crosses the token boundary.

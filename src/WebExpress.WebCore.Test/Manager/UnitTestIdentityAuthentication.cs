@@ -26,8 +26,8 @@ namespace WebExpress.WebCore.Test.Manager
             var pair = fixture.Manager.Login(source, request);
             Assert.Null(request.ExistingSession);
             Assert.Null(fixture.Manager.Login(null, request));
-            var other = new IdentityTokenService(fixture.Settings, new FileIdentityTokenStore(fixture.Settings.TokenStorePath));
-            var identity = other.ValidateAccessToken(pair.AccessToken, fixture.Application.ApplicationId);
+            var other = fixture.Instance();
+            var identity = other.ValidateAccessToken(pair.AccessToken, fixture.Application);
             Assert.Equal(source.Id, identity.Id);
             Assert.Equal(source.Roles, identity.Roles);
             Assert.Null(identity.PasswordHash);
@@ -75,25 +75,25 @@ namespace WebExpress.WebCore.Test.Manager
         {
             using var fixture = new AuthenticationFixture();
             var identity = new Identity(Guid.NewGuid(), "alice", permissions: ["read"]);
-            var app = fixture.Application.ApplicationId;
-            var pair = fixture.Tokens.Issue(identity, app);
+            var app = fixture.Application;
+            var pair = fixture.Manager.Issue(identity, app);
             var parts = pair.AccessToken.Split('.');
             parts[1] = Base64UrlEncoder.Encode(Base64UrlEncoder.Decode(parts[1]).Replace("alice", "admin"));
-            Assert.Null(fixture.Tokens.ValidateAccessToken(string.Join('.', parts), app));
-            Assert.Null(fixture.Tokens.ValidateAccessToken(pair.AccessToken, "another-application"));
-            Assert.Null(fixture.Tokens.ValidateAccessToken(pair.RefreshToken, app));
-            Assert.Null(fixture.Tokens.Refresh(pair.AccessToken, app));
-            Assert.Null(fixture.Tokens.ValidateAccessToken("not.a.jwt", app));
+            Assert.Null(fixture.Manager.ValidateAccessToken(string.Join('.', parts), app));
+            Assert.Null(fixture.Manager.ValidateAccessToken(pair.AccessToken, fixture.Hub.ApplicationManager.GetApplications(typeof(TestApplicationB)).First()));
+            Assert.Null(fixture.Manager.ValidateAccessToken(pair.RefreshToken, app));
+            Assert.Null(fixture.Manager.Refresh(pair.AccessToken, app));
+            Assert.Null(fixture.Manager.ValidateAccessToken("not.a.jwt", app));
             fixture.Settings.Issuer = "https://another-authority.test";
-            var wrongIssuer = new IdentityTokenService(fixture.Settings, new FileIdentityTokenStore(fixture.Settings.TokenStorePath), fixture.Clock);
+            var wrongIssuer = fixture.Instance();
             Assert.Null(wrongIssuer.ValidateAccessToken(pair.AccessToken, app));
             fixture.Settings.Issuer = "https://webexpress.test";
             fixture.Settings.SigningKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-            var wrongKey = new IdentityTokenService(fixture.Settings, new FileIdentityTokenStore(fixture.Settings.TokenStorePath), fixture.Clock);
+            var wrongKey = fixture.Instance();
             Assert.Null(wrongKey.ValidateAccessToken(pair.AccessToken, app));
             fixture.Clock.Now = pair.AccessTokenExpiresAt.AddSeconds(1);
-            Assert.Null(fixture.Tokens.ValidateAccessToken(pair.AccessToken, app));
-            Assert.NotNull(fixture.Tokens.Refresh(pair.RefreshToken, app));
+            Assert.Null(fixture.Manager.ValidateAccessToken(pair.AccessToken, app));
+            Assert.NotNull(fixture.Manager.Refresh(pair.RefreshToken, app));
         }
 
         /// <summary>
@@ -103,18 +103,18 @@ namespace WebExpress.WebCore.Test.Manager
         public void RefreshRotatesOnceAndRetainsAbsoluteExpiry()
         {
             using var fixture = new AuthenticationFixture();
-            var app = fixture.Application.ApplicationId;
-            var pair = fixture.Tokens.Issue(new Identity(Guid.NewGuid(), "alice"), app);
+            var app = fixture.Application;
+            var pair = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "alice"), app);
             fixture.Clock.Now += TimeSpan.FromMinutes(10);
-            var next = fixture.Tokens.Refresh(pair.RefreshToken, app);
+            var next = fixture.Manager.Refresh(pair.RefreshToken, app);
             Assert.NotEqual(pair.RefreshToken, next.RefreshToken);
             Assert.Equal(pair.RefreshTokenExpiresAt.ToUnixTimeSeconds(), next.RefreshTokenExpiresAt.ToUnixTimeSeconds());
-            var other = new IdentityTokenService(fixture.Settings, new FileIdentityTokenStore(fixture.Settings.TokenStorePath), fixture.Clock);
+            var other = fixture.Instance();
             Assert.Null(other.Refresh(pair.RefreshToken, app));
-            Assert.Null(fixture.Tokens.Refresh(next.RefreshToken, app));
-            var fresh = fixture.Tokens.Issue(new Identity(Guid.NewGuid(), "bob"), app);
+            Assert.Null(fixture.Manager.Refresh(next.RefreshToken, app));
+            var fresh = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "bob"), app);
             fixture.Clock.Now = fresh.RefreshTokenExpiresAt.AddSeconds(1);
-            Assert.Null(fixture.Tokens.Refresh(fresh.RefreshToken, app));
+            Assert.Null(fixture.Manager.Refresh(fresh.RefreshToken, app));
         }
 
         /// <summary>
@@ -125,10 +125,10 @@ namespace WebExpress.WebCore.Test.Manager
         public async Task ConcurrentRefreshHasOnlyOneWinner()
         {
             using var fixture = new AuthenticationFixture();
-            var app = fixture.Application.ApplicationId;
-            var pair = fixture.Tokens.Issue(new Identity(Guid.NewGuid(), "alice"), app);
+            var app = fixture.Application;
+            var pair = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "alice"), app);
             var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
-                new IdentityTokenService(fixture.Settings, new FileIdentityTokenStore(fixture.Settings.TokenStorePath), fixture.Clock)
+                fixture.Instance()
                     .Refresh(pair.RefreshToken, app))));
             Assert.Single(results, x => x is not null);
         }
@@ -140,23 +140,23 @@ namespace WebExpress.WebCore.Test.Manager
         public void PersonalTokensAreScopedExpiringAndRevocable()
         {
             using var fixture = new AuthenticationFixture();
-            var app = fixture.Application.ApplicationId;
+            var app = fixture.Application;
             var owner = new Identity(Guid.NewGuid(), "alice", roles: ["admin"], permissions: ["read", "write"], policyNames: ["admin-policy"]);
-            var token = fixture.Tokens.CreatePersonalAccessToken(owner, app, TimeSpan.FromHours(1), ["read"]);
-            var restricted = fixture.Tokens.ValidatePersonalAccessToken(token, app);
+            var token = fixture.Manager.CreatePersonalAccessToken(owner, app, TimeSpan.FromHours(1), ["read"]);
+            var restricted = fixture.Manager.ValidatePersonalAccessToken(token, app);
             Assert.Equal(["read"], restricted.Permissions);
             Assert.Empty(restricted.Roles);
             Assert.Empty(restricted.PolicyNames);
-            Assert.Null(fixture.Tokens.ValidateAccessToken(token, app));
-            Assert.Null(fixture.Tokens.Refresh(token, app));
-            Assert.Throws<ArgumentException>(() => fixture.Tokens.CreatePersonalAccessToken(owner, app, TimeSpan.FromHours(1), ["delete"]));
-            Assert.Throws<ArgumentOutOfRangeException>(() => fixture.Tokens.CreatePersonalAccessToken(owner, app, TimeSpan.Zero, ["read"]));
-            Assert.True(fixture.Tokens.RevokePersonalAccessToken(token, app));
-            var other = new IdentityTokenService(fixture.Settings, new FileIdentityTokenStore(fixture.Settings.TokenStorePath), fixture.Clock);
+            Assert.Null(fixture.Manager.ValidateAccessToken(token, app));
+            Assert.Null(fixture.Manager.Refresh(token, app));
+            Assert.Throws<ArgumentException>(() => fixture.Manager.CreatePersonalAccessToken(owner, app, TimeSpan.FromHours(1), ["delete"]));
+            Assert.Throws<ArgumentOutOfRangeException>(() => fixture.Manager.CreatePersonalAccessToken(owner, app, TimeSpan.Zero, ["read"]));
+            Assert.True(fixture.Manager.RevokePersonalAccessToken(token, app));
+            var other = fixture.Instance();
             Assert.Null(other.ValidatePersonalAccessToken(token, app));
-            var expiring = fixture.Tokens.CreatePersonalAccessToken(owner, app, TimeSpan.FromSeconds(1), ["read"]);
+            var expiring = fixture.Manager.CreatePersonalAccessToken(owner, app, TimeSpan.FromSeconds(1), ["read"]);
             fixture.Clock.Now += TimeSpan.FromSeconds(2);
-            Assert.Null(fixture.Tokens.ValidatePersonalAccessToken(expiring, app));
+            Assert.Null(fixture.Manager.ValidatePersonalAccessToken(expiring, app));
         }
 
         /// <summary>
@@ -170,7 +170,7 @@ namespace WebExpress.WebCore.Test.Manager
             var request = fixture.Request($"Cookie: {IdentityManager.AccessCookieName}={pair.AccessToken}\r\n");
             fixture.Manager.Logout(request);
             Assert.Null(fixture.Manager.GetCurrentIdentity(request));
-            Assert.Null(fixture.Tokens.Refresh(pair.RefreshToken, fixture.Application.ApplicationId));
+            Assert.Null(fixture.Manager.Refresh(pair.RefreshToken, fixture.Application));
             var response = new ResponseOK();
             fixture.Manager.ApplyAuthenticationCookies(request, response);
             Assert.All(response.Header.Cookies.Cast<System.Net.Cookie>(), x => Assert.True(x.Expires < DateTime.UtcNow));
@@ -185,12 +185,12 @@ namespace WebExpress.WebCore.Test.Manager
         public void ExpiredAccessCanOnlyRevokeRenewal()
         {
             using var fixture = new AuthenticationFixture();
-            var app = fixture.Application.ApplicationId;
-            var pair = fixture.Tokens.Issue(new Identity(Guid.NewGuid(), "alice"), app);
+            var app = fixture.Application;
+            var pair = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "alice"), app);
             fixture.Clock.Now = pair.AccessTokenExpiresAt.AddSeconds(1);
-            Assert.Null(fixture.Tokens.ValidateAccessToken(pair.AccessToken, app));
-            fixture.Tokens.RevokeGrant(pair.AccessToken, app);
-            Assert.Null(fixture.Tokens.Refresh(pair.RefreshToken, app));
+            Assert.Null(fixture.Manager.ValidateAccessToken(pair.AccessToken, app));
+            fixture.Manager.RevokeGrant(pair.AccessToken, app);
+            Assert.Null(fixture.Manager.Refresh(pair.RefreshToken, app));
         }
 
         /// <summary>
@@ -202,7 +202,7 @@ namespace WebExpress.WebCore.Test.Manager
             using var fixture = new AuthenticationFixture();
             var identity = new Identity(Guid.NewGuid(), "external", policyNames: [typeof(TestIdentityPolicyA).FullName]);
             var pair = fixture.Manager.Login(identity, fixture.Request());
-            var verified = fixture.Tokens.ValidateAccessToken(pair.AccessToken, fixture.Application.ApplicationId);
+            var verified = fixture.Manager.ValidateAccessToken(pair.AccessToken, fixture.Application);
             Assert.Contains(typeof(TestIdentityPermissionC).FullName, verified.Permissions);
         }
 

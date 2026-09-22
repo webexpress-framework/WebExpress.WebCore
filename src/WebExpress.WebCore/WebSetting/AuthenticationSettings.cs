@@ -46,6 +46,7 @@ namespace WebExpress.WebCore.WebSetting
 
         /// <summary>
         /// Places refresh replay markers and PAT revocations on durable shared storage.
+        /// Used by the default file store for every application without a plugin-supplied store.
         /// </summary>
         public string TokenStorePath { get; set; }
 

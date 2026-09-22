@@ -28,7 +28,7 @@ namespace WebExpress.WebCore.Test.Manager
             using var backchannel = new Backchannel();
             using var client = new HttpClient(backchannel);
             using var provider = new PluginIdentityProvider(Settings(fixture), client);
-            var redirect = await provider.CreateChallengeAsync(fixture.Tokens, fixture.Application.ApplicationId);
+            var redirect = await provider.CreateChallengeAsync(fixture.Manager, fixture.Application);
             var parameters = QueryHelpers.ParseQuery(new Uri(redirect.Header.Location).Query);
             Assert.Equal("code", parameters["response_type"]);
             Assert.Equal("S256", parameters["code_challenge_method"]);
@@ -39,7 +39,7 @@ namespace WebExpress.WebCore.Test.Manager
             backchannel.Nonce = parameters["nonce"];
             var callback = fixture.Request($"Cookie: {cookie.Name}={cookie.Value}\r\n", "GET",
                 $"/api/auth/callback?state={parameters["state"]}&code=single-use-code");
-            var identity = await provider.AuthenticateCallbackAsync(callback, fixture.Tokens);
+            var identity = await provider.AuthenticateCallbackAsync(callback, fixture.Manager);
             Assert.NotNull(identity);
             Assert.Equal("alice", identity.Name);
             Assert.Equal(["read", "write"], identity.Permissions.Order());
@@ -49,7 +49,7 @@ namespace WebExpress.WebCore.Test.Manager
             var pair = fixture.Manager.Login(identity, callback);
             var authenticatedRequest = fixture.Request($"Cookie: {IdentityManager.AccessCookieName}={pair.AccessToken}\r\n");
             Assert.Equal(identity.Id, fixture.Manager.GetCurrentIdentity(authenticatedRequest)?.Id);
-            Assert.Null(await provider.AuthenticateCallbackAsync(callback, fixture.Tokens));
+            Assert.Null(await provider.AuthenticateCallbackAsync(callback, fixture.Manager));
             Assert.Equal(1, backchannel.Exchanges);
         }
 
@@ -73,13 +73,13 @@ namespace WebExpress.WebCore.Test.Manager
             using var backchannel = new Backchannel { Failure = failure };
             using var client = new HttpClient(backchannel);
             using var provider = new PluginIdentityProvider(Settings(fixture), client);
-            var redirect = await provider.CreateChallengeAsync(fixture.Tokens, fixture.Application.ApplicationId);
+            var redirect = await provider.CreateChallengeAsync(fixture.Manager, fixture.Application);
             var parameters = QueryHelpers.ParseQuery(new Uri(redirect.Header.Location).Query);
             backchannel.Nonce = parameters["nonce"];
             var cookie = redirect.Header.Cookies[OpenIdConnectIdentityProvider.ChallengeCookieName];
             var state = failure == "state" ? "attacker-state" : parameters["state"].ToString();
             var callback = fixture.Request($"Cookie: {cookie.Name}={cookie.Value}\r\n", "GET", $"/api/auth/callback?state={state}&code=code");
-            Assert.Null(await provider.AuthenticateCallbackAsync(callback, fixture.Tokens));
+            Assert.Null(await provider.AuthenticateCallbackAsync(callback, fixture.Manager));
             Assert.Equal(failure == "state" ? 0 : 1, backchannel.Exchanges);
         }
 
@@ -94,8 +94,8 @@ namespace WebExpress.WebCore.Test.Manager
             using var backchannel = new Backchannel();
             using var client = new HttpClient(backchannel);
             using var provider = new PluginIdentityProvider(Settings(fixture), client);
-            Assert.Null(await provider.AuthenticateCallbackAsync(fixture.Request(path: "/api/auth/callback?code=stolen&state=stolen"), fixture.Tokens));
-            Assert.Null(await provider.AuthenticateCallbackAsync(fixture.Request(path: "/api/auth/callback?id_token=jwt"), fixture.Tokens));
+            Assert.Null(await provider.AuthenticateCallbackAsync(fixture.Request(path: "/api/auth/callback?code=stolen&state=stolen"), fixture.Manager));
+            Assert.Null(await provider.AuthenticateCallbackAsync(fixture.Request(path: "/api/auth/callback?id_token=jwt"), fixture.Manager));
             Assert.Equal(0, backchannel.Exchanges);
         }
 

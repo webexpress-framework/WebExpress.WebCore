@@ -171,6 +171,11 @@ namespace WebExpress.WebCore.WebComponent
         IIdentityProviderManager IdentityProviderManager { get; }
 
         /// <summary>
+        /// Resolves the durable replay and revocation store bound to each application.
+        /// </summary>
+        IIdentityTokenStoreManager IdentityTokenStoreManager { get; }
+
+        /// <summary>
         /// Gets the session manager.
         /// </summary>
         /// <returns>The instance of the session manager.</returns>
