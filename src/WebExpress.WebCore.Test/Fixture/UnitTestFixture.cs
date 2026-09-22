@@ -203,8 +203,10 @@ namespace WebExpress.WebCore.Test.Fixture
 
             foreach (var line in filteredLines)
             {
-                var key = line.Split(':').FirstOrDefault().Trim();
-                var value = line.Split(':').Skip(1).FirstOrDefault().Trim();
+                // split at the first colon only: values such as an origin contain further ones
+                var colon = line.IndexOf(':');
+                var key = (colon < 0 ? line : line[..colon]).Trim();
+                var value = colon < 0 ? "" : line[(colon + 1)..].Trim();
                 requestFeature.Headers[key] = value;
             }
 

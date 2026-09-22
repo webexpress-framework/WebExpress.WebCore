@@ -13,6 +13,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Net;
+using System.Net.Quic;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Threading;
@@ -40,6 +41,33 @@ namespace WebExpress.WebCore
     {
         private readonly Lazy<AuthenticationEndpoint> _authenticationEndpoint;
         private Microsoft.Extensions.Hosting.IHost _webHost;
+        private SecurityHeaders _securityHeaders;
+
+        /// <summary>
+        /// Gets the security headers of every response. They are resolved on first use because
+        /// the settings are assigned after construction.
+        /// </summary>
+        public SecurityHeaders SecurityHeaders => _securityHeaders ??= new SecurityHeaders(Settings?.Security);
+
+        private RequestOriginGuard _originGuard;
+
+        /// <summary>
+        /// Gets the cross-site request forgery check, resolved on first use for the same reason.
+        /// </summary>
+        public RequestOriginGuard OriginGuard => _originGuard ??= new RequestOriginGuard(Settings?.Security);
+
+        private readonly List<HttpEndpointInfo> _listeningEndpoints = [];
+
+        /// <summary>
+        /// Gets the endpoints the server listens on together with the protocols each one
+        /// actually serves, which can differ from the configuration when HTTP/3 had to be dropped.
+        /// </summary>
+        public IReadOnlyList<HttpEndpointInfo> ListeningEndpoints => _listeningEndpoints;
+
+        /// <summary>
+        /// Gets whether the operating system provides QUIC, the transport HTTP/3 depends on.
+        /// </summary>
+        public static bool QuicSupported => QuicListener.IsSupported;
 
         /// <summary>
         /// Event is triggered after the web server is started.
@@ -312,11 +340,14 @@ namespace WebExpress.WebCore
         /// <param name="protocols">The HTTP protocols to enable on the endpoint, or null to keep the Kestrel default.</param>
         private void AddEndpoint(OptionsWrapper<KestrelServerOptions> serverOptions, IPEndPoint endPoint, HttpProtocols? protocols)
         {
+            var effective = ResolveProtocols(protocols, tls: false, QuicListener.IsSupported);
+            _listeningEndpoints.Add(new HttpEndpointInfo(endPoint.ToString(), false, effective ?? HttpProtocols.Http1AndHttp2));
+
             serverOptions.Value.Listen(endPoint, configure =>
             {
-                if (protocols is not null)
+                if (effective is not null)
                 {
-                    configure.Protocols = protocols.Value;
+                    configure.Protocols = effective.Value;
                 }
             });
             HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:httpserver.listen"), args: endPoint.ToString());
@@ -331,6 +362,19 @@ namespace WebExpress.WebCore
         /// <param name="protocols">The HTTP protocols to enable on the endpoint, or null to keep the Kestrel default.</param>
         private void AddEndpoint(OptionsWrapper<KestrelServerOptions> serverOptions, IPEndPoint endPoint, CertificateMaterial certificate, HttpProtocols? protocols)
         {
+            var quic = QuicListener.IsSupported;
+            var effective = ResolveProtocols(protocols, tls: true, quic);
+            _listeningEndpoints.Add(new HttpEndpointInfo(endPoint.ToString(), true, effective.Value));
+
+            if (effective.Value.HasFlag(HttpProtocols.Http3))
+            {
+                HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:httpserver.http3"), args: endPoint.ToString());
+            }
+            else if (!quic && (protocols?.HasFlag(HttpProtocols.Http3) ?? true))
+            {
+                HttpServerContext.Log?.Warning(message: I18N.Translate("webexpress.webcore:httpserver.http3.unsupported"), args: endPoint.ToString());
+            }
+
             serverOptions.Value.Listen(endPoint, configure =>
             {
                 configure.UseHttps(new HttpsConnectionAdapterOptions
@@ -342,13 +386,39 @@ namespace WebExpress.WebCore
                     )
                 });
 
-                if (protocols is not null)
-                {
-                    configure.Protocols = protocols.Value;
-                }
+                configure.Protocols = effective.Value;
             });
 
             HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:httpserver.listen"), args: endPoint.ToString());
+        }
+
+        /// <summary>
+        /// Determines the protocols an endpoint actually serves. A TLS endpoint without explicit
+        /// configuration offers HTTP/3 next to HTTP/1.1 and HTTP/2; Kestrel then announces it
+        /// through the Alt-Svc header, so browsers switch to QUIC on their own and fall back to
+        /// TCP wherever UDP is blocked. HTTP/3 is dropped where it cannot work - without TLS,
+        /// which QUIC requires, or without QUIC support in the operating system - because an
+        /// endpoint restricted to it would otherwise answer nothing at all.
+        /// </summary>
+        /// <param name="configured">The configured protocols, or null when nothing was configured.</param>
+        /// <param name="tls">Whether the endpoint uses TLS.</param>
+        /// <param name="quicSupported">Whether the operating system provides QUIC.</param>
+        /// <returns>The protocols to apply, or null to keep the Kestrel default.</returns>
+        internal static HttpProtocols? ResolveProtocols(HttpProtocols? configured, bool tls, bool quicSupported)
+        {
+            if (tls && quicSupported)
+            {
+                return configured ?? HttpProtocols.Http1AndHttp2AndHttp3;
+            }
+
+            if (configured is not HttpProtocols value || !value.HasFlag(HttpProtocols.Http3))
+            {
+                return tls ? configured ?? HttpProtocols.Http1AndHttp2 : configured;
+            }
+
+            var remaining = value & ~HttpProtocols.Http3;
+
+            return remaining == HttpProtocols.None ? HttpProtocols.Http1AndHttp2 : remaining;
         }
 
         /// <summary>
@@ -812,7 +882,7 @@ namespace WebExpress.WebCore
                     httpContext?.Request
                 );
 
-                await new ResponseSender().SendAsync(httpContext, response);
+                await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
             }
         }
 
@@ -828,10 +898,13 @@ namespace WebExpress.WebCore
         /// <returns>The html fragment.</returns>
         private static string Describe(Exception ex)
         {
-            return $"<h4>Message</h4>{ex.Message}<br/><br/>" +
-                $"<h5>Source</h5>{ex.Source}<br/><br/>" +
-                $"<h5>StackTrace</h5>{ex.StackTrace?.Replace("\n", "<br/>\n")}<br/><br/>" +
-                $"<h5>InnerException</h5>{ex.InnerException?.ToString().Replace("\n", "<br/>\n")}";
+            // messages routinely quote request data such as the path, which must not become markup
+            static string Encode(string text) => WebUtility.HtmlEncode(text)?.Replace("\n", "<br/>\n");
+
+            return $"<h4>Message</h4>{Encode(ex.Message)}<br/><br/>" +
+                $"<h5>Source</h5>{Encode(ex.Source)}<br/><br/>" +
+                $"<h5>StackTrace</h5>{Encode(ex.StackTrace)}<br/><br/>" +
+                $"<h5>InnerException</h5>{Encode(ex.InnerException?.ToString())}";
         }
 
         /// <summary>
@@ -844,7 +917,7 @@ namespace WebExpress.WebCore
         /// <returns>Provides an asynchronous operation that handles the http context.</returns>
         private async Task ProcessRequestCoreAsync(IHttpContext httpContext)
         {
-            var sender = new ResponseSender();
+            var sender = new ResponseSender(SecurityHeaders);
             var stopwatch = Stopwatch.StartNew();
 
             /*
@@ -872,6 +945,14 @@ namespace WebExpress.WebCore
                 var response500 = CreateStatusPage<ResponseInternalServerError>(message, httpContext?.Request);
 
                 await SendAsync(exceptionContext, response500);
+
+                return;
+            }
+
+            // checked before any handler runs, so no application can forget it
+            if (!OriginGuard.IsAllowed(httpContext.Request, httpContext is HttpWebSocketContext))
+            {
+                await SendAsync(httpContext, new ResponseForbidden(new StatusMessage("Cross-site request rejected.")));
 
                 return;
             }
@@ -1025,7 +1106,7 @@ namespace WebExpress.WebCore
         /// </param>
         public async Task HandleWebSocketAsync(IHttpContext httpContext, ISocketContext socketContext)
         {
-            var responseSender = new ResponseSender();
+            var responseSender = new ResponseSender(SecurityHeaders);
             var socketManager = WebEx.ComponentHub.SocketManager;
 
             // validate that the request is a websocket upgrade

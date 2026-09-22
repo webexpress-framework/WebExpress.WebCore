@@ -31,8 +31,11 @@ namespace WebExpress.WebCore.WebSetting
         /// <summary>
         /// The HTTP protocols enabled on every listening endpoint, given as the name of a Kestrel
         /// <see cref="HttpProtocols"/> value (e.g. <c>Http1</c>, <c>Http2</c> or <c>Http1AndHttp2</c>).
-        /// When not specified the Kestrel default (<c>Http1AndHttp2</c>) is kept, which negotiates
-        /// HTTP/2 over TLS via ALPN and serves plain HTTP as HTTP/1.1. Set <c>Http2</c> on a plain
+        /// When not specified, a TLS endpoint serves <c>Http1AndHttp2AndHttp3</c> - HTTP/3 over QUIC
+        /// wherever the operating system provides it, announced to browsers via Alt-Svc - and a
+        /// plain endpoint keeps the Kestrel default, serving HTTP/1.1. Configure
+        /// <c>Http1AndHttp2</c> to keep a TLS endpoint off UDP. HTTP/3 is dropped automatically
+        /// without TLS or QUIC support, so it never leaves an endpoint unreachable. Set <c>Http2</c> on a plain
         /// (non-TLS) endpoint to enable cleartext HTTP/2 (h2c), which has no automatic upgrade path.
         /// </summary>
         /// <remarks>

@@ -57,6 +57,12 @@ namespace WebExpress.WebCore.WebSetting
         public AuthenticationSettings Authentication { get; set; }
 
         /// <summary>
+        /// Optional overrides of the security headers and cookie attributes. When the block is
+        /// omitted the restrictive built-in defaults apply.
+        /// </summary>
+        public SecuritySettings Security { get; set; }
+
+        /// <summary>
         /// The log settings. A missing block keeps logging switched off.
         /// </summary>
         public LogSettings Log { get; set; } = new();

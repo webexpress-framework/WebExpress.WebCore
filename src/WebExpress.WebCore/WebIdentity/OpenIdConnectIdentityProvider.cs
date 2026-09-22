@@ -102,6 +102,8 @@ namespace WebExpress.WebCore.WebIdentity
             });
             response.Header.Cookies.Add(IdentityManager.CreateCookie(ChallengeCookieName, challenge,
                 "/api/auth/callback", DateTimeOffset.UtcNow.AddMinutes(5)));
+            // the identity provider redirects back cross-site, which a strict cookie would not survive
+            response.Header.CookieSameSite[ChallengeCookieName] = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
             response.Header.CacheControl = "no-store";
             return response;
         }

@@ -28,6 +28,8 @@ httpserver.connectionlimit=The limit for concurrent requests has been exceeded.
 httpserver.endpoint=Endpoint '{0}' is registered.
 httpserver.listen=The web server listens for the endpoint {0}.
 httpserver.listen.exeption=Failed to set up an endpoint for the Uri {0}.
+httpserver.http3=HTTP/3 (QUIC) is active on the endpoint {0}; the UDP port must be open in the firewall.
+httpserver.http3.unsupported=HTTP/3 is unavailable because the operating system provides no QUIC (on Linux install the libmsquic package). The endpoint {0} serves HTTP/1.1 and HTTP/2.
 httpserver.listener.try=If you do not have access rights follow the instruction as an administrator in the console: 
 httpserver.listener.windows=netsh http add urlacl url={0} user=everyone listen=yes
 

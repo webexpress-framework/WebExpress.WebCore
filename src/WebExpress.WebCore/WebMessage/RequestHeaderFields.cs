@@ -90,6 +90,12 @@ namespace WebExpress.WebCore.WebMessage
         public string AuthenticationRequest { get; private set; }
 
         /// <summary>
+        /// Gets the Sec-Fetch-Site header. Browsers set it themselves and scripts cannot forge it,
+        /// so it tells reliably whether a request was triggered by another site.
+        /// </summary>
+        public string SecFetchSite { get; private set; }
+
+        /// <summary>
         /// Gets the If-None-Match header value. It carries the entity tag (ETag) the client already
         /// holds and is used for conditional requests so unchanged resources can be answered with 304.
         /// </summary>
@@ -136,6 +142,7 @@ namespace WebExpress.WebCore.WebMessage
             Referer = requestFeature.Headers.Referer;
             Origin = requestFeature.Headers.Origin;
             AuthenticationRequest = requestFeature.Headers["X-WebExpress-Auth"];
+            SecFetchSite = requestFeature.Headers["Sec-Fetch-Site"];
             IfNoneMatch = requestFeature.Headers.IfNoneMatch;
             Upgrade = requestFeature.Headers.Upgrade;
             SecWebSocketKey = requestFeature.Headers.SecWebSocketKey;

@@ -28,7 +28,8 @@ namespace WebExpress.WebCore.WebHtml.Parser
                 ["title"] = () => new HtmlElementMetadataTitle(),
 
                 // Scripting
-                ["script"] = () => new HtmlElementScriptingScript(),
+                // parsed markup may stem from user input; a nonce would let a stored script run
+                ["script"] = () => new HtmlElementScriptingScript() { Trusted = false },
                 ["noscript"] = () => new HtmlElementScriptingNoscript(),
                 ["canvas"] = () => new HtmlElementScriptingCanvas(),
 

@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using Microsoft.AspNetCore.Http;
+using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Text;
 
@@ -55,6 +57,14 @@ namespace WebExpress.WebCore.WebMessage
         /// Gets the cookies.
         /// </summary>
         public CookieCollection Cookies { get; } = [];
+
+        /// <summary>
+        /// Gets the SameSite attribute of individual cookies by name. <see cref="Cookie"/> cannot
+        /// carry the attribute itself, and a cookie whose flow depends on it - a cross-site login
+        /// callback, or a credential that must never leave the own site - states it here instead
+        /// of inheriting the server-wide default.
+        /// </summary>
+        public IDictionary<string, SameSiteMode> CookieSameSite { get; } = new Dictionary<string, SameSiteMode>(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets or sets the Upgrade header (for protocol upgrade responses, e.g. "websocket").

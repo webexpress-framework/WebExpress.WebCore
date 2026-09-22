@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http.Features;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Primitives;
 using System;
 using System.Collections.Generic;
@@ -15,6 +16,17 @@ namespace WebExpress.WebCore.WebMessage
     /// </summary>
     public class ResponseSender
     {
+        private readonly SecurityHeaders _securityHeaders;
+
+        /// <summary>
+        /// Initializes a new instance of the class.
+        /// </summary>
+        /// <param name="securityHeaders">The security headers every response carries, or null for the built-in defaults.</param>
+        public ResponseSender(SecurityHeaders securityHeaders = null)
+        {
+            _securityHeaders = securityHeaders ?? SecurityHeaders.Default;
+        }
+
         /// <summary>
         /// Sends the specified response message asynchronously to the provided context.
         /// </summary>
@@ -45,6 +57,28 @@ namespace WebExpress.WebCore.WebMessage
                 // websocket handshake but are forbidden on HTTP/2+ (RFC 9113 §8.2.2), where Kestrel
                 // rejects them. Only emit them while the connection still speaks HTTP/1.x.
                 var allowConnectionSpecificHeaders = !IsHttp2OrHigher(context);
+                var nonce = SecurityHeaders.CreateNonce();
+
+                foreach (var header in _securityHeaders.Resolve(IsHttps(context), nonce))
+                {
+                    responseFeature.Headers[header.Key] = header.Value;
+                }
+
+                // a handler's own header wins over the server-wide default of the same name
+                foreach (var header in response.Header.CustomHeader)
+                {
+                    responseFeature.Headers[header.Key] = header.Value;
+                }
+
+                if (!string.IsNullOrWhiteSpace(response.Header.ContentDisposition))
+                {
+                    responseFeature.Headers.ContentDisposition = response.Header.ContentDisposition;
+                }
+
+                if (!string.IsNullOrWhiteSpace(response.Header.ContentLanguage))
+                {
+                    responseFeature.Headers.ContentLanguage = response.Header.ContentLanguage;
+                }
 
                 if (response.Header.Location is not null)
                 {
@@ -59,6 +93,11 @@ namespace WebExpress.WebCore.WebMessage
                 if (!string.IsNullOrWhiteSpace(response.Header.ContentType))
                 {
                     responseFeature.Headers.ContentType = response.Header.ContentType;
+                }
+                else if (response.Content is IHtmlNode)
+                {
+                    // with nosniff the browser no longer guesses, and an untyped page would be shown as text
+                    responseFeature.Headers.ContentType = $"text/html; charset={context.Encoding.WebName}";
                 }
 
                 if (response.Header.WWWAuthenticate)
@@ -75,7 +114,9 @@ namespace WebExpress.WebCore.WebMessage
                     // so attributes survive the round trip.
                     var headerValues = response.Header.Cookies
                         .Cast<Cookie>()
-                        .Select(SerializeSetCookie)
+                        .Select(cookie => SerializeSetCookie(cookie, response.Header.CookieSameSite.TryGetValue(cookie.Name, out var sameSite)
+                            ? sameSite
+                            : _securityHeaders.CookieSameSite))
                         .Where(s => !string.IsNullOrEmpty(s))
                         .ToArray();
                     if (headerValues.Length > 0)
@@ -115,7 +156,14 @@ namespace WebExpress.WebCore.WebMessage
                 }
                 else if (response?.Content is IHtmlNode htmlContent)
                 {
-                    var content = context.Encoding.GetBytes(htmlContent?.ToString());
+                    string html;
+
+                    using (HtmlScriptNonce.Begin(nonce))
+                    {
+                        html = htmlContent.ToString();
+                    }
+
+                    var content = context.Encoding.GetBytes(html);
 
                     responseFeature.Headers.ContentLength = content.Length;
                     await responseBodyFeature.Stream.WriteAsync(content);
@@ -155,14 +203,28 @@ namespace WebExpress.WebCore.WebMessage
         }
 
         /// <summary>
+        /// Determines whether the request arrived over https, the only transport on which a
+        /// browser honours HSTS.
+        /// </summary>
+        /// <param name="context">The request context whose scheme is inspected.</param>
+        /// <returns>True for an https request; otherwise false.</returns>
+        private static bool IsHttps(IHttpContext context)
+        {
+            var scheme = context?.Features?.Get<IHttpRequestFeature>()?.Scheme;
+
+            return string.Equals(scheme, "https", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Serialises a <see cref="Cookie"/> as a single Set-Cookie header
         /// value preserving Path, Domain, Expires and the HttpOnly / Secure
-        /// flags. SameSite defaults to <c>Lax</c> because System.Net.Cookie
-        /// does not model the attribute directly.
+        /// flags. SameSite is passed in because System.Net.Cookie does not
+        /// model the attribute.
         /// </summary>
         /// <param name="cookie">The cookie to serialise.</param>
+        /// <param name="sameSite">The SameSite attribute of the cookie.</param>
         /// <returns>A Set-Cookie header value, or null when the cookie is empty.</returns>
-        private static string SerializeSetCookie(Cookie cookie)
+        private static string SerializeSetCookie(Cookie cookie, SameSiteMode sameSite)
         {
             if (cookie is null || string.IsNullOrEmpty(cookie.Name))
             {
@@ -196,9 +258,10 @@ namespace WebExpress.WebCore.WebMessage
                 parts.Add("Secure");
             }
 
-            // System.Net.Cookie has no SameSite property; default to Lax for
-            // first-party fit-for-purpose behaviour without cross-site leaks.
-            parts.Add("SameSite=Lax");
+            if (sameSite != SameSiteMode.Unspecified)
+            {
+                parts.Add($"SameSite={sameSite}");
+            }
 
             return string.Join("; ", parts);
         }

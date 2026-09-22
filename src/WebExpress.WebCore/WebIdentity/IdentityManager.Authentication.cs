@@ -154,6 +154,8 @@ namespace WebExpress.WebCore.WebIdentity
             // an expired access credential still identifies the grant for logout; validation always enforces its signed expiry
             response.Header.Cookies.Add(CreateCookie(AccessCookie, state.Pair?.AccessToken, "/", state.Pair?.RefreshTokenExpiresAt, RequiresHttps));
             response.Header.Cookies.Add(CreateCookie(RefreshCookie, state.Pair?.RefreshToken, RefreshPath, state.Pair?.RefreshTokenExpiresAt, RequiresHttps));
+            // only the own scripts ever renew the grant, so no cross-site request needs the refresh token
+            response.Header.CookieSameSite[RefreshCookie] = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
         }
 
         /// <summary>
