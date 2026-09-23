@@ -295,5 +295,40 @@ namespace WebExpress.WebCore.Test.Server
             Assert.Equal(404, response.StatusCode);
             Assert.Contains($"session={request.Session.Id}", response.Headers.SetCookie.ToString());
         }
+
+        /// <summary>
+        /// A protected page is served only to an identity holding its policy. An anonymous
+        /// request is refused even when no provider of the application can offer a login,
+        /// rather than the page being served as if it were public.
+        /// </summary>
+        /// <param name="authenticated">Whether a real signed login supplies the request identity.</param>
+        /// <param name="grantPolicy">Whether the login grants the page's policy.</param>
+        /// <param name="status">The expected response status.</param>
+        /// <returns>A task that completes after the HTTP response has been verified.</returns>
+        [Theory]
+        [InlineData(false, false, 401)]
+        [InlineData(true, false, 403)]
+        [InlineData(true, true, 200)]
+        public async Task ProcessRequestAsync_ProtectedPage_RequiresPolicy(bool authenticated, bool grantPolicy, int status)
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            var page = (WebPage.PageContext)fixture.Hub.PageManager.GetPages<WWW.About>(fixture.Application).Single();
+            page.Policies = [new TestIdentityPolicyA()];
+
+            // act
+            var (response, _) = await AnswerAsync(fixture.Hub, "GET /server/appa/about HTTP/1.1\nCookie:\n\n", r =>
+            {
+                if (authenticated)
+                {
+                    ((WebMessage.RequestBase)r).ApplicationContext = fixture.Application;
+                    fixture.Manager.Login(new WebIdentity.Identity(Guid.NewGuid(), "test-user",
+                        policyNames: grantPolicy ? [typeof(TestIdentityPolicyA).FullName] : []), r);
+                }
+            });
+
+            // validation
+            Assert.Equal(status, response.StatusCode);
+        }
     }
 }

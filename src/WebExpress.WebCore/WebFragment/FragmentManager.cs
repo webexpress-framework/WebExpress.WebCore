@@ -11,6 +11,7 @@ using WebExpress.WebCore.WebFragment.Model;
 using WebExpress.WebCore.WebHtml;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebLog;
+using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
 using WebExpress.WebCore.WebScope;
@@ -442,6 +443,35 @@ namespace WebExpress.WebCore.WebFragment
             foreach (var item in _dictionary.GetFragmentItems(applicationContext, typeof(TFragment), typeof(TSection), effectiveScopes))
             {
                 yield return item.CreateInstance<TFragment>(pageContext);
+            }
+        }
+
+        /// <summary>
+        /// Returns the fragments of a page that may appear for the given request. A control that
+        /// only reads properties of a fragment, instead of rendering it, never reaches the check in
+        /// the fragment's own render method, so the conditions and policies are evaluated here.
+        /// </summary>
+        /// <typeparam name="TFragment">The fragment type.</typeparam>
+        /// <typeparam name="TSection">The section where the fragment is embedded.</typeparam>
+        /// <param name="pageContext">The page context.</param>
+        /// <param name="request">The request whose state and identity decide which fragments are shown.</param>
+        /// <returns>An enumeration of the fragments whose conditions and policies the request fulfills.</returns>
+        public IEnumerable<TFragment> GetFragments<TFragment, TSection>(IPageContext pageContext, IRequest request)
+            where TFragment : IFragmentBase
+            where TSection : ISection
+        {
+            var applicationContext = pageContext?.ApplicationContext;
+            var scopes = pageContext?.Scopes ?? [typeof(IScope)];
+
+            var effectiveScopes = (scopes?.Any() == true) ? scopes : [typeof(IScope)];
+
+            foreach (var item in _dictionary.GetFragmentItems(applicationContext, typeof(TFragment), typeof(TSection), effectiveScopes))
+            {
+                // checked before the instance is created, so a hidden fragment is never constructed
+                if (item.FragmentContext.Check(request))
+                {
+                    yield return item.CreateInstance<TFragment>(pageContext);
+                }
             }
         }
 

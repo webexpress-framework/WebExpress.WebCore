@@ -117,10 +117,10 @@ namespace WebExpress.WebCore.WebFragment.Model
             where TRenderContext : IRenderContext
             where TVisualTree : IVisualTree
         {
-            var instance = CreateInstance<IFragmentBase>();
-
-            if (CheckConditions(renderContext?.Request))
+            if (FragmentContext.Check(renderContext?.Request))
             {
+                var instance = CreateInstance<IFragmentBase>();
+
                 if (!_delegateCache.TryGetValue(FragmentClass, out var del))
                 {
                     // create and compile the expression
@@ -150,16 +150,6 @@ namespace WebExpress.WebCore.WebFragment.Model
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Checks the component to see if they are displayed or disabled.
-        /// </summary>
-        /// <param name="request">The request.</param>
-        /// <returns>True if the fragment is active, false otherwise.</returns>
-        public bool CheckConditions(IRequest request)
-        {
-            return !FragmentContext.Conditions.Any() || FragmentContext.Conditions.All(x => x.Fulfillment(request));
         }
 
         /// <summary>

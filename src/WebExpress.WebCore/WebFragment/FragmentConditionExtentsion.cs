@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using WebExpress.WebCore.WebCondition;
 using WebExpress.WebCore.WebMessage;
 
@@ -26,6 +27,35 @@ namespace WebExpress.WebCore.WebFragment
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Decides whether a fragment may appear for the given request. Besides the conditions, the
+        /// identity must satisfy the fragment's policies, so a link to a protected page is only shown
+        /// to those the server would serve the page to.
+        /// </summary>
+        /// <param name="fragmentContext">The context of the fragment to check.</param>
+        /// <param name="request">The request whose identity and state are evaluated.</param>
+        /// <returns>True if the conditions are fulfilled and the identity satisfies all policies; otherwise, false.</returns>
+        public static bool Check(this IFragmentContext fragmentContext, IRequest request)
+        {
+            if (!(fragmentContext?.Conditions ?? []).Check(request))
+            {
+                return false;
+            }
+
+            var policies = fragmentContext?.Policies ?? [];
+
+            if (!policies.Any())
+            {
+                return true;
+            }
+
+            var identityManager = WebEx.ComponentHub?.IdentityManager;
+            var identity = identityManager?.GetCurrentIdentity(request);
+
+            // without an identity manager no policy can be verified, so the fragment stays hidden
+            return identityManager is not null && policies.All(x => identityManager.CheckAccess(identity, x));
         }
     }
 }

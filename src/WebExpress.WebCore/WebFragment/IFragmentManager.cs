@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebHtml;
+using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebScope;
 using WebExpress.WebCore.WebSection;
@@ -100,6 +101,20 @@ namespace WebExpress.WebCore.WebFragment
         /// <param name="pageContext">The page context.</param>
         /// <returns>An enumeration of the filtered fragments.</returns>
         IEnumerable<TFragment> GetFragments<TFragment, TSection>(IPageContext pageContext)
+            where TFragment : IFragmentBase
+            where TSection : ISection;
+
+        /// <summary>
+        /// Returns the fragments of a page that may appear for the given request. A control that
+        /// only reads properties of a fragment, instead of rendering it, never reaches the check in
+        /// the fragment's own render method, so the conditions and policies are evaluated here.
+        /// </summary>
+        /// <typeparam name="TFragment">The fragment type.</typeparam>
+        /// <typeparam name="TSection">The section where the fragment is embedded.</typeparam>
+        /// <param name="pageContext">The page context.</param>
+        /// <param name="request">The request whose state and identity decide which fragments are shown.</param>
+        /// <returns>An enumeration of the fragments whose conditions and policies the request fulfills.</returns>
+        IEnumerable<TFragment> GetFragments<TFragment, TSection>(IPageContext pageContext, IRequest request)
             where TFragment : IFragmentBase
             where TSection : ISection;
 

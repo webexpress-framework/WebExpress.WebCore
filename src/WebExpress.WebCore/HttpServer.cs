@@ -1075,6 +1075,17 @@ namespace WebExpress.WebCore
                         await SendAsync(httpContext, loginResponse);
                         return;
                     }
+
+                    // no provider can offer a login, so the page must be refused rather than served as if it were public
+                    var unauthorizedPage = CreateStatusPage<ResponseUnauthorized>
+                    (
+                        new StatusMessage("Authentication required.").Message,
+                        httpContext.Request,
+                        searchResult
+                    );
+
+                    await SendAsync(httpContext, unauthorizedPage);
+                    return;
                 }
                 else
                 {
@@ -1083,12 +1094,6 @@ namespace WebExpress.WebCore
                     await SendAsync(httpContext, unauthorizedResponse);
                     return;
                 }
-            }
-
-            // fallback: no specific denied-response (login prompt / forbidden) could be created
-            {
-                var response = HandleClient(httpContext, searchResult);
-                await SendAsync(httpContext, response);
             }
         }
 
