@@ -516,6 +516,11 @@ namespace WebExpress.WebCore
                     response = new ResponseMovedTemporarily(ex.Uri);
                 }
             }
+            catch (ForbiddenException)
+            {
+                // the endpoint refused the caller itself; answered in place like a policy refusal
+                response = CreateAccessDeniedResponse(request, searchResult, WebEx.ComponentHub?.IdentityManager?.GetCurrentIdentity(request));
+            }
             catch (BadRequestException ex)
             {
                 var message = $"<h4>Message</h4>{ex.Message}<br/><br/>" +
@@ -536,6 +541,11 @@ namespace WebExpress.WebCore
                     response = rex.Permanet
                         ? new ResponseMovedPermanently(rex.Uri)
                         : new ResponseMovedTemporarily(rex.Uri);
+                }
+                else if (ex is TargetInvocationException { InnerException: ForbiddenException })
+                {
+                    // a page's Process is invoked through reflection, which wraps what it throws
+                    response = CreateAccessDeniedResponse(request, searchResult, WebEx.ComponentHub?.IdentityManager?.GetCurrentIdentity(request));
                 }
                 else
                 {
@@ -720,6 +730,58 @@ namespace WebExpress.WebCore
                     });
                 }
             }
+        }
+
+        /// <summary>
+        /// Builds the answer to a request that is refused access, in place - at the address that
+        /// was asked for, without a redirect.
+        /// </summary>
+        /// <remarks>
+        /// One answer for both ways a request is refused: the endpoint's own policies, checked
+        /// before it runs, and a <see cref="ForbiddenException"/> an endpoint throws once it
+        /// knows more than its policies could say (the resource its route names, say). A
+        /// signed-in caller who lacks the right sees the forbidden page, a caller who is not
+        /// signed in is asked to sign in; a REST endpoint, which has no page to show, answers
+        /// the bare status.
+        /// </remarks>
+        /// <param name="request">The refused request.</param>
+        /// <param name="searchResult">The resolved endpoint.</param>
+        /// <param name="identity">The caller, or <see langword="null"/> when nobody is signed in.</param>
+        /// <returns>The response to send.</returns>
+        internal static IResponse CreateAccessDeniedResponse(IRequest request, SearchResult searchResult, IIdentity identity)
+        {
+            var pageContext = searchResult?.EndpointContext as IPageContext;
+            var identityManager = WebEx.ComponentHub?.IdentityManager;
+
+            if (identity is not null)
+            {
+                if (pageContext is null)
+                {
+                    return new ResponseForbidden(new StatusMessage("You do not have permission to access this resource."));
+                }
+
+                return identityManager?.CreateForbiddenResponse(request, pageContext, identity)
+                    ?? CreateStatusPage<ResponseForbidden>
+                    (
+                        new StatusMessage("You do not have permission to access this resource.").Message,
+                        request,
+                        searchResult
+                    );
+            }
+
+            if (pageContext is null)
+            {
+                return new ResponseUnauthorized(new StatusMessage("Authentication required. Provide a valid access token."));
+            }
+
+            // no provider can offer a login, so the page must be refused rather than served as if it were public
+            return identityManager?.CreateAuthenticationPrompt(request, pageContext, identity)
+                ?? CreateStatusPage<ResponseUnauthorized>
+                (
+                    new StatusMessage("Authentication required.").Message,
+                    request,
+                    searchResult
+                );
         }
 
         /// <summary>
@@ -1023,78 +1085,8 @@ namespace WebExpress.WebCore
                 return;
             }
 
-            // access is denied (the grant case returned above) - determine the appropriate response
-            {
-                // if the user is authenticated but lacks the required permissions, show the forbidden page
-                if (identity is not null && searchResult.EndpointContext is IPageContext)
-                {
-                    var forbiddenResponse = WebEx.ComponentHub.IdentityManager.CreateForbiddenResponse
-                    (
-                        httpContext.Request,
-                        searchResult.EndpointContext as IPageContext,
-                        identity
-                    );
-
-                    if (forbiddenResponse is not null)
-                    {
-                        await SendAsync(httpContext, forbiddenResponse);
-                        return;
-                    }
-                    else
-                    {
-                        forbiddenResponse = CreateStatusPage<ResponseForbidden>
-                        (
-                            new StatusMessage("You do not have permission to access this resource.").Message,
-                            httpContext.Request,
-                            searchResult
-                        );
-
-                        await SendAsync(httpContext, forbiddenResponse);
-                        return;
-                    }
-                }
-                else if (identity is not null)
-                {
-                    var forbiddenResponse = new ResponseForbidden(new StatusMessage("You do not have permission to access this resource."));
-
-                    await SendAsync(httpContext, forbiddenResponse);
-                    return;
-                }
-                else if (searchResult.EndpointContext is IPageContext pageContext)
-                {
-                    // if the user is not authenticated, show the login prompt
-                    var loginResponse = WebEx.ComponentHub.IdentityManager.CreateAuthenticationPrompt
-                    (
-                        httpContext.Request,
-                        searchResult.EndpointContext as IPageContext,
-                        identity
-                    );
-
-                    if (loginResponse is not null)
-                    {
-                        await SendAsync(httpContext, loginResponse);
-                        return;
-                    }
-
-                    // no provider can offer a login, so the page must be refused rather than served as if it were public
-                    var unauthorizedPage = CreateStatusPage<ResponseUnauthorized>
-                    (
-                        new StatusMessage("Authentication required.").Message,
-                        httpContext.Request,
-                        searchResult
-                    );
-
-                    await SendAsync(httpContext, unauthorizedPage);
-                    return;
-                }
-                else
-                {
-                    var unauthorizedResponse = new ResponseUnauthorized(new StatusMessage("Authentication required. Provide a valid access token."));
-
-                    await SendAsync(httpContext, unauthorizedResponse);
-                    return;
-                }
-            }
+            // access is denied (the grant case returned above)
+            await SendAsync(httpContext, CreateAccessDeniedResponse(httpContext.Request, searchResult, identity));
         }
 
         /// <summary>
