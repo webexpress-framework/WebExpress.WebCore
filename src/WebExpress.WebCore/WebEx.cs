@@ -224,12 +224,12 @@ namespace WebExpress.WebCore
             (_componentHub as ComponentHub).Execute();
 
             // starting the web server
-            OnStart();
+            var started = OnStart();
 
             // finish
             OnExit();
 
-            return 0;
+            return started ? 0 : 1;
         }
 
         /// <summary>
@@ -367,13 +367,22 @@ namespace WebExpress.WebCore
         /// <summary>
         /// Initiates the HTTP server and raises the start event.
         /// </summary>
-        private void OnStart()
+        /// <returns>
+        /// <see langword="false"/> when the server could not listen because an endpoint is
+        /// already in use, so the application ends instead of waiting on a server that never ran.
+        /// </returns>
+        private bool OnStart()
         {
-            _httpServer.Start();
+            if (!_httpServer.Start())
+            {
+                return false;
+            }
 
             Start?.Invoke(this, EventArgs.Empty);
 
             Thread.CurrentThread.Join();
+
+            return true;
         }
 
         /// <summary>

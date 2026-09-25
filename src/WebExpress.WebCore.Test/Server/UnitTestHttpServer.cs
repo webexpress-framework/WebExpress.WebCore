@@ -46,6 +46,41 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
+        /// An endpoint another process already holds - a second instance, say - ends the start
+        /// with a result instead of an exception, so the host can log it and exit cleanly.
+        /// </summary>
+        [Fact]
+        public void Start_EndpointInUse_ReturnsFalseInsteadOfThrowing()
+        {
+            // arrange
+            using var occupant = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            occupant.Start();
+            var port = ((System.Net.IPEndPoint)occupant.LocalEndpoint).Port;
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
+            {
+                Settings = new HttpServerSettings { Endpoints = [new() { Uri = $"http://127.0.0.1:{port}" }] }
+            };
+
+            var errors = server.HttpServerContext.Log.ErrorCount;
+
+            try
+            {
+                // act
+                var started = true;
+                var exception = Record.Exception(() => started = server.Start());
+
+                // validation
+                Assert.Null(exception);
+                Assert.False(started);
+                Assert.Equal(errors + 1, server.HttpServerContext.Log.ErrorCount);
+            }
+            finally
+            {
+                server.Stop();
+            }
+        }
+
+        /// <summary>
         /// Preserves normal and missing-route responses when startup constructs the server before its component hub.
         /// </summary>
         /// <param name="path">The application route whose response must survive the production startup order.</param>

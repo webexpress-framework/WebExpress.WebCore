@@ -28,6 +28,7 @@ httpserver.connectionlimit=Das Limit für gleichzeitige Anfragen wurde überschr
 httpserver.endpoint=Endpunkt '{0}' wird registriert.
 httpserver.listen=Der Webserver lauscht auf den Endpunkt {0}.
 httpserver.listen.exeption=Fehler beim Einrichten eines Endpunktes für die Uri {0}.
+httpserver.listen.inuse=Der Endpunkt ist bereits durch einen anderen Prozess belegt, etwa eine weitere WebExpress-Instanz. Der HttpServer wird nicht gestartet und die Anwendung beendet. ({0})
 httpserver.http3=HTTP/3 (QUIC) ist auf dem Endpunkt {0} aktiv; der UDP-Port muss in der Firewall freigegeben sein.
 httpserver.http3.unsupported=HTTP/3 ist nicht verfügbar, da das Betriebssystem kein QUIC bereitstellt (unter Linux das Paket libmsquic installieren). Der Endpunkt {0} bedient HTTP/1.1 und HTTP/2.
 httpserver.listener.try=Falls Ihnen Zugriffsrechte fehlen, führen Sie unter Windows folgende Anweisung als Administrator aus:

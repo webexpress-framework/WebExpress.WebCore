@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Hosting;
+﻿using Microsoft.AspNetCore.Connections;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -11,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Quic;
@@ -153,20 +155,37 @@ namespace WebExpress.WebCore
         }
 
         /// <summary>
-        /// Starts the HTTP(S) server.
+        /// Starts the HTTP(S) server. An endpoint that another process - typically a second
+        /// instance - already holds is an operating condition rather than a defect, so it is
+        /// logged and reported through the result instead of escaping as an exception.
         /// </summary>
-        public void Start()
+        /// <returns>
+        /// <see langword="true"/> when the server listens on all endpoints; <see langword="false"/>
+        /// when an endpoint is already in use and the server was not started.
+        /// </returns>
+        public bool Start()
         {
             try
             {
                 StartCore();
+
+                return true;
             }
-            catch
+            catch (Exception ex)
             {
                 _webHost?.Dispose();
                 _webHost = null;
                 Kestrel = null;
                 HttpServerContext.CertificateManager.Dispose();
+
+                // kestrel wraps the socket error of an occupied address into an io exception
+                if (ex is IOException { InnerException: AddressInUseException })
+                {
+                    HttpServerContext.Log?.Error(message: I18N.Translate("webexpress.webcore:httpserver.listen.inuse"), args: ex.Message);
+
+                    return false;
+                }
+
                 throw;
             }
         }
