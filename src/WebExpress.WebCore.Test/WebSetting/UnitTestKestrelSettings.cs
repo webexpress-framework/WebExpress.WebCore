@@ -45,6 +45,23 @@ namespace WebExpress.WebCore.Test.WebSetting
         }
 
         /// <summary>
+        /// Tests that the public URI is bound separately from an internal listener binding.
+        /// </summary>
+        [Fact]
+        public void ExternalUriIsBoundIndependentlyOfEndpoint()
+        {
+            // arrange
+            var json = """{ "WebExpress": { "Endpoints": [ { "Uri": "http://0.0.0.0:8080/" } ], "ExternalUri": "https://www.example.com/" } }""";
+
+            // act
+            var settings = Bind(json);
+
+            // validation
+            Assert.Equal("http://0.0.0.0:8080/", settings.Endpoints[0].Uri);
+            Assert.Equal("https://www.example.com/", settings.ExternalUri);
+        }
+
+        /// <summary>
         /// Tests that all kestrel settings are read when present.
         /// </summary>
         [Fact]

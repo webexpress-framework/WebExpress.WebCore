@@ -18,6 +18,20 @@ namespace WebExpress.WebCore.Test.Server
         private const string Endpoint = "/server/appa/api/2/testrestapib";
 
         /// <summary>
+        /// Preserves the configured public URI when the server creates its shared context.
+        /// </summary>
+        [Fact]
+        public void ExternalUriIsAvailableFromServerContext()
+        {
+            // arrange
+            const string externalUri = "https://www.example.com/";
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock(externalUri: externalUri));
+
+            // validation
+            Assert.Equal(externalUri, server.HttpServerContext.ExternalUri);
+        }
+
+        /// <summary>
         /// Prevents a missing HTTPS certificate from silently registering an unencrypted listener.
         /// </summary>
         /// <param name="scheme">The configured HTTPS spelling normalized by the URI parser.</param>

@@ -34,6 +34,13 @@ namespace WebExpress.WebCore.WebSetting
         public List<EndpointSettings> Endpoints { get; set; } = [];
 
         /// <summary>
+        /// The public base URI of the server, e.g. <c>https://www.example.com/</c>. This can
+        /// differ from a listener binding such as <c>http://0.0.0.0:8080/</c> when the server is
+        /// deployed behind a reverse proxy.
+        /// </summary>
+        public string ExternalUri { get; set; }
+
+        /// <summary>
         /// Gets or sets the shared certificate inventory and expiry warning policy used for production HTTPS.
         /// </summary>
         public CertificateManagerSettings Certificates { get; set; }

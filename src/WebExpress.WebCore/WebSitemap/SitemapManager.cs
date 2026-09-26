@@ -45,8 +45,10 @@ namespace WebExpress.WebCore.WebSitemap
         {
             _componentHub = componentHub;
             _httpServerContext = httpServerContext;
-            _serverUri = new UriEndpoint(_httpServerContext?.Endpoints.FirstOrDefault(e => e.Uri.StartsWith("https"))?.ToString()
-                ?? _httpServerContext?.Endpoints.FirstOrDefault()?.ToString() ?? "");
+            _serverUri = new UriEndpoint(!string.IsNullOrWhiteSpace(_httpServerContext?.ExternalUri)
+                ? _httpServerContext.ExternalUri
+                : _httpServerContext?.Endpoints.FirstOrDefault(e => e.Uri.StartsWith("https"))?.ToString()
+                    ?? _httpServerContext?.Endpoints.FirstOrDefault()?.ToString() ?? "");
 
             _httpServerContext?.Log?.Debug
             (

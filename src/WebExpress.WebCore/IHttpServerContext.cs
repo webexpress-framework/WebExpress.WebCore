@@ -32,6 +32,12 @@ namespace WebExpress.WebCore
         ICollection<EndpointSettings> Endpoints { get; }
 
         /// <summary>
+        /// Gets the optional public base URI of the server. It can differ from the listener
+        /// bindings when a reverse proxy exposes the server.
+        /// </summary>
+        string ExternalUri { get; }
+
+        /// <summary>
         /// Gets the version of the http(s) server.
         /// </summary>
         string Version { get; }

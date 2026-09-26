@@ -38,8 +38,9 @@ namespace WebExpress.WebCore.Test.Fixture
         /// settings file never sees one left behind by another.
         /// </param>
         /// <param name="configuration">The configuration. Defaults to an empty one.</param>
+        /// <param name="externalUri">The optional public base URI.</param>
         /// <returns>The server context.</returns>
-        public static IHttpServerContext CreateHttpServerContextMock(string settingsPath = null, IConfigurationRoot configuration = null)
+        public static IHttpServerContext CreateHttpServerContextMock(string settingsPath = null, IConfigurationRoot configuration = null, string externalUri = null)
         {
             return new HttpServerContext
             (
@@ -52,7 +53,8 @@ namespace WebExpress.WebCore.Test.Fixture
                 configuration ?? new ConfigurationBuilder().Build(),
                 CultureInfo.GetCultureInfo("en"),
                 new Log() { LogMode = LogMode.Off },
-                null
+                null,
+                externalUri: externalUri
             );
         }
 
@@ -89,9 +91,9 @@ namespace WebExpress.WebCore.Test.Fixture
         /// Create a component hub and register the plugins.
         /// </summary>
         /// <returns>The component hub.</returns>
-        public static ComponentHub CreateAndRegisterComponentHubMock()
+        public static ComponentHub CreateAndRegisterComponentHubMock(IHttpServerContext httpServerContext = null)
         {
-            var componentHub = CreateComponentHubMock();
+            var componentHub = CreateComponentHubMock(httpServerContext);
             var pluginManager = componentHub.PluginManager as PluginManager;
 
             pluginManager.Register();

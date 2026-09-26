@@ -145,7 +145,8 @@ namespace WebExpress.WebCore
                 context.Culture,
                 context.Log,
                 this,
-                context.CertificateManager
+                context.CertificateManager,
+                context.ExternalUri
             );
 
             Culture = HttpServerContext.Culture;

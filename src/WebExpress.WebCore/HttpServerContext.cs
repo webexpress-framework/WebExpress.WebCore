@@ -33,6 +33,11 @@ namespace WebExpress.WebCore
         public ICollection<EndpointSettings> Endpoints { get; protected set; }
 
         /// <summary>
+        /// Gets the optional public base URI of the server, independent of its listener bindings.
+        /// </summary>
+        public string ExternalUri { get; protected set; }
+
+        /// <summary>
         /// Gets the version of the http(s) server.
         /// </summary>
         public string Version { get; protected set; }
@@ -91,6 +96,7 @@ namespace WebExpress.WebCore
         /// <param name="log">The log.</param>
         /// <param name="host">The host.</param>
         /// <param name="certificateManager">The optional shared certificate service owned by the host.</param>
+        /// <param name="externalUri">The optional public base URI, independent of the listener bindings.</param>
         public HttpServerContext
         (
             IRoute route,
@@ -103,7 +109,8 @@ namespace WebExpress.WebCore
             CultureInfo culture,
             ILog log,
             IHost host,
-            ICertificateManager certificateManager = null
+            ICertificateManager certificateManager = null,
+            string externalUri = null
         )
         {
             var assembly = typeof(HttpServer).Assembly;
@@ -111,6 +118,7 @@ namespace WebExpress.WebCore
 
             Route = route;
             Endpoints = endpoints;
+            ExternalUri = externalUri;
             PackagePath = packageBaseFolder;
             AssetPath = assetBaseFolder;
             DataPath = dataBaseFolder;

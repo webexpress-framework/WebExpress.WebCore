@@ -15,3 +15,20 @@ To get started with `WebExpress.WebCore`, use the following guides:
 - [WebExpress.WebIndex API Documentation](https://webexpress-framework.github.io/WebExpress.WebIndex/) 
 
 We hope you enjoy using `WebExpress.WebCore` and find it valuable for your projects. Happy coding!
+
+## Public server URI
+
+Configure `WebExpress:ExternalUri` when the listener binding is not the URL used by clients, for example when WebExpress runs behind a reverse proxy. The server continues to bind to the addresses in `Endpoints`, while applications and components can obtain the public URL through `IHttpServerContext.ExternalUri`.
+
+```json
+{
+  "WebExpress": {
+	"Endpoints": [
+	  { "Uri": "http://0.0.0.0:8080/" }
+	],
+	"ExternalUri": "https://www.example.com/"
+  }
+}
+```
+
+`ExternalUri` is optional. Leave it unset when the listener address is also the public URL.

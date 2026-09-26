@@ -296,7 +296,8 @@ namespace WebExpress.WebCore
                 configuration,
                 culture,
                 log,
-                null
+                null,
+                externalUri: settings.ExternalUri
             );
 
             _httpServer = new HttpServer(context)
