@@ -96,6 +96,12 @@ namespace WebExpress.WebCore.WebSetting
         public string ContextPath { get; set; }
 
         /// <summary>
+        /// Gets or sets the entry point preferences. An omitted block redirects to the only
+        /// registered application or shows an overview when there are several applications.
+        /// </summary>
+        public RootSettings Root { get; set; }
+
+        /// <summary>
         /// The culture the server runs in, as a culture name such as <c>en-US</c>. Empty to keep
         /// the culture of the operating system.
         /// </summary>

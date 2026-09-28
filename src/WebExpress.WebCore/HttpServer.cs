@@ -21,6 +21,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
+using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebIdentity;
@@ -1043,6 +1044,14 @@ namespace WebExpress.WebCore
             if (authenticationResponse is not null)
             {
                 await SendAsync(httpContext, authenticationResponse);
+                return;
+            }
+
+            var rootResponse = RootEndpoint.Handle(httpContext.Request, HttpServerContext.Route,
+                WebEx.ComponentHub.ApplicationManager.Applications, Settings?.Root);
+            if (rootResponse is not null)
+            {
+                await SendAsync(httpContext, rootResponse);
                 return;
             }
 

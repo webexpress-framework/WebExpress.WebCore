@@ -32,3 +32,35 @@ Configure `WebExpress:ExternalUri` when the listener binding is not the URL used
 ```
 
 `ExternalUri` is optional. Leave it unset when the listener address is also the public URL.
+
+## Server entry point
+
+By default, a `GET` or `HEAD` request to `/` redirects to the application path when exactly one application is registered. With several applications, the server displays an overview containing their current names and links. With no applications, the overview displays an empty state. The overview supports English and German according to the request culture and requires no UI plugin.
+
+For deployments with a `ContextPath`, the same behavior is available at that prefix with or without a trailing slash. Generated links and redirect targets include the prefix. Application URLs and their authentication checks remain unchanged. An application already mounted directly at an entry point retains that route, including when redirects are disabled.
+
+To select one application even when several are installed, configure `WebExpress:Root:ApplicationId` in the active host's `settings/webexpress.settings.json`. The value is the registered application identifier exposed by `IApplicationContext.ApplicationId`, which is the application class's fully qualified name in lowercase. It is not the display name or URL. An unknown identifier displays the overview instead of redirecting to an arbitrary target.
+
+```json
+{
+  "WebExpress": {
+    "Root": {
+      "ApplicationId": "example.plugin.application"
+    }
+  }
+}
+```
+
+To always display the overview, set `WebExpress:Root:RedirectEnabled` to `false`. This setting takes precedence over `ApplicationId`. Omitting the `Root` block restores automatic selection. Apply configuration changes by restarting the host.
+
+```json
+{
+  "WebExpress": {
+    "Root": {
+      "RedirectEnabled": false
+    }
+  }
+}
+```
+
+For container configuration, the equivalent environment variables are `WEBEXPRESS_WebExpress__Root__ApplicationId` and `WEBEXPRESS_WebExpress__Root__RedirectEnabled`. Redirects use HTTP 302 with `Cache-Control: no-store` so application changes are reflected on the next visit. Root query parameters do not override the configured target or propagate to application links.

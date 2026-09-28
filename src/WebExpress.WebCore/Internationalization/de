@@ -215,3 +215,7 @@ validation.invalid_date={0} muss ein gültiges Datum sein.
 certificate.invalid=Das Zertifikat {0} kann nicht für HTTPS verwendet werden: {1}.
 certificate.expiring=Das Zertifikat {0} läuft am {1} ab; seine verbleibende Gültigkeit hat die Warnschwelle von {2} Tagen erreicht.
 certificate.load_failed=Das Zertifikat {0} konnte nicht aus dem Speicher {1} geladen werden. Referenz, Zugriffsrechte, PFX-Inhalt und Zugangsdaten prüfen.
+
+root.title=Anwendungen
+root.introduction=Wählen Sie eine Anwendung aus, um fortzufahren.
+root.empty=Es sind keine Anwendungen verfügbar.
