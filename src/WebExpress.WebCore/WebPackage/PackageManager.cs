@@ -114,17 +114,18 @@ namespace WebExpress.WebCore.WebPackage
             // build sitemap
             _componentHub?.SitemapManager.Refresh();
 
-            Task.Factory.StartNew(() =>
+            _httpServerContext.Lifetime.TryRun(async stopping =>
             {
-                while (!TokenSource.IsCancellationRequested)
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stopping, TokenSource.Token);
+                while (!linked.IsCancellationRequested)
                 {
                     Scan();
 
-                    var secendsLeft = 60 - DateTime.Now.Second;
-                    Thread.Sleep(secendsLeft * 1000);
+                    var secondsLeft = 60 - DateTime.Now.Second;
+                    await Task.Delay(TimeSpan.FromSeconds(secondsLeft), linked.Token).ConfigureAwait(false);
                 }
 
-            }, TokenSource.Token);
+            });
         }
 
         /// <summary>
@@ -1507,6 +1508,7 @@ namespace WebExpress.WebCore.WebPackage
         /// </summary>
         public void Dispose()
         {
+            ShutDown();
         }
     }
 }

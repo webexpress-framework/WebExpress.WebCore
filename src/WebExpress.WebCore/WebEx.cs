@@ -4,7 +4,9 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebComponent;
@@ -25,6 +27,9 @@ namespace WebExpress.WebCore
     {
         private static IComponentHub _componentHub;
         private HttpServer _httpServer;
+        private ComponentHub _ownedComponentHub;
+        private IConfigurationRoot _configuration;
+        private readonly TaskCompletionSource _shutdownRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
         /// Occurs when the initialization process is completed.
@@ -214,22 +219,68 @@ namespace WebExpress.WebCore
                 return 1;
             }
 
-            // initialization of the web server
-            if (!OnInitialization(ArgumentParser.Current.GetValidArguments(args), settingsFile))
+            Console.CancelKeyPress += OnCancel;
+            using var terminate = OperatingSystem.IsWindows() ? null
+                : PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnSignal);
+            using var interrupt = OperatingSystem.IsWindows() ? null
+                : PosixSignalRegistration.Create(PosixSignal.SIGINT, OnSignal);
+            using var quit = OperatingSystem.IsWindows() ? null
+                : PosixSignalRegistration.Create(PosixSignal.SIGQUIT, OnSignal);
+
+            try
             {
+                if (!OnInitialization(ArgumentParser.Current.GetValidArguments(args), settingsFile))
+                {
+                    return 1;
+                }
+
+                if (_shutdownRequested.Task.IsCompleted)
+                {
+                    return 0;
+                }
+
+                _ownedComponentHub.Execute();
+                return OnStart() ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"WebExpress could not run: {ex.Message}");
+                _httpServer?.HttpServerContext.Log?.Exception(ex);
                 return 1;
             }
+            finally
+            {
+                try
+                {
+                    if (_httpServer is not null)
+                    {
+                        OnExit();
+                    }
+                }
+                finally
+                {
+                    Console.CancelKeyPress -= OnCancel;
+                    (_configuration as IDisposable)?.Dispose();
+                }
+            }
+        }
 
-            // start the manager
-            (_componentHub as ComponentHub).Execute();
+        /// <summary>
+        /// Requests the same orderly termination used for container and console signals.
+        /// </summary>
+        public void RequestShutdown()
+        {
+            _shutdownRequested.TrySetResult();
+        }
 
-            // starting the web server
-            var started = OnStart();
-
-            // finish
-            OnExit();
-
-            return started ? 0 : 1;
+        /// <summary>
+        /// Suppresses immediate process termination so the execution thread can drain the host.
+        /// </summary>
+        /// <param name="context">The POSIX signal and its default termination behavior.</param>
+        private void OnSignal(PosixSignalContext context)
+        {
+            context.Cancel = true;
+            RequestShutdown();
         }
 
         /// <summary>
@@ -239,7 +290,8 @@ namespace WebExpress.WebCore
         /// <param name="e">The event argument.</param>
         private void OnCancel(object sender, ConsoleCancelEventArgs e)
         {
-            OnExit();
+            e.Cancel = true;
+            RequestShutdown();
         }
 
         /// <summary>
@@ -257,7 +309,7 @@ namespace WebExpress.WebCore
             // reported by name and stops the start instead of surfacing as a stack trace
             try
             {
-                configuration = SettingsLoader.Load(settingsFile, ex => log.Exception(ex));
+                configuration = _configuration = SettingsLoader.Load(settingsFile, ex => log.Exception(ex));
             }
             catch (Exception ex)
             {
@@ -305,7 +357,8 @@ namespace WebExpress.WebCore
                 Settings = settings
             };
 
-            _componentHub = ComponentActivator.CreateInstance<ComponentHub>(_httpServer.HttpServerContext);
+            _ownedComponentHub = ComponentActivator.CreateInstance<ComponentHub>(_httpServer.HttpServerContext);
+            _componentHub = _ownedComponentHub;
 
             // apply the configured session lifetime once the manager exists; left unset, its
             // built-in bounded default stands
@@ -345,8 +398,6 @@ namespace WebExpress.WebCore
             Directory.CreateDirectory(assetBase);
             Directory.CreateDirectory(dataBase);
 
-            Console.CancelKeyPress += OnCancel;
-
             Initialization?.Invoke(this, EventArgs.Empty);
 
             return true;
@@ -374,6 +425,11 @@ namespace WebExpress.WebCore
         /// </returns>
         private bool OnStart()
         {
+            if (_shutdownRequested.Task.IsCompleted)
+            {
+                return true;
+            }
+
             if (!_httpServer.Start())
             {
                 return false;
@@ -381,7 +437,7 @@ namespace WebExpress.WebCore
 
             Start?.Invoke(this, EventArgs.Empty);
 
-            Thread.CurrentThread.Join();
+            _shutdownRequested.Task.GetAwaiter().GetResult();
 
             return true;
         }
@@ -391,9 +447,28 @@ namespace WebExpress.WebCore
         /// </summary>
         private void OnExit()
         {
-            _httpServer.Stop();
+            try
+            {
+                _httpServer.Stop();
+            }
+            catch (Exception ex)
+            {
+                _httpServer.HttpServerContext.Log?.Exception(ex);
+            }
 
-            Exit?.Invoke(this, EventArgs.Empty);
+            foreach (EventHandler handler in Exit?.GetInvocationList() ?? [])
+            {
+                try
+                {
+                    handler(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    _httpServer.HttpServerContext.Log?.Exception(ex);
+                }
+            }
+
+            _ownedComponentHub?.ShutDown();
 
             // end of program log
             _httpServer.HttpServerContext.Log?.Separator('=');
@@ -401,9 +476,6 @@ namespace WebExpress.WebCore
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.warnings"), args: _httpServer.HttpServerContext.Log?.WarningCount);
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.done"));
             _httpServer.HttpServerContext.Log?.Separator('/');
-
-            // Stop running
-            (_componentHub as ComponentHub).ShutDown();
 
             // stop logging
             _httpServer.HttpServerContext.Log?.Close();

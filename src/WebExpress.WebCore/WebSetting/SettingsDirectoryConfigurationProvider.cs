@@ -22,6 +22,8 @@ namespace WebExpress.WebCore.WebSetting
     /// </remarks>
     public sealed class SettingsDirectoryConfigurationProvider : ConfigurationProvider, IDisposable
     {
+        private readonly object _watcherLock = new();
+        private bool _disposed;
         private readonly SettingsDirectoryConfigurationSource _source;
         private readonly PhysicalFileProvider _fileProvider;
         private readonly IDisposable _changeRegistration;
@@ -39,7 +41,7 @@ namespace WebExpress.WebCore.WebSetting
             if (source.ReloadOnChange && Directory.Exists(source.Path))
             {
                 _fileProvider = new PhysicalFileProvider(source.Path);
-                _changeRegistration = ChangeToken.OnChange(() => _fileProvider.Watch("*.json"), ReloadOnChange);
+                _changeRegistration = ChangeToken.OnChange(CreateChangeToken, ReloadOnChange);
             }
         }
 
@@ -103,8 +105,48 @@ namespace WebExpress.WebCore.WebSetting
         /// </summary>
         public void Dispose()
         {
+            lock (_watcherLock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+            }
+
             _changeRegistration?.Dispose();
             _fileProvider?.Dispose();
+        }
+
+        /// <summary>
+        /// Stops renewing subscriptions when their directory or provider no longer exists.
+        /// ChangeToken renews subscriptions outside the reload callback's exception handler.
+        /// </summary>
+        /// <returns>A directory change token, or an inactive token after watching has ended.</returns>
+        private IChangeToken CreateChangeToken()
+        {
+            lock (_watcherLock)
+            {
+                if (_disposed || !Directory.Exists(_source.Path))
+                {
+                    return NullChangeToken.Singleton;
+                }
+
+                try
+                {
+                    return _fileProvider.Watch("*.json");
+                }
+                catch (FileNotFoundException)
+                {
+                    // the directory can disappear between the existence check and watcher startup
+                    return NullChangeToken.Singleton;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return NullChangeToken.Singleton;
+                }
+            }
         }
 
         /// <summary>
@@ -115,14 +157,22 @@ namespace WebExpress.WebCore.WebSetting
         {
             Thread.Sleep(_source.ReloadDelay);
 
-            try
+            lock (_watcherLock)
             {
-                Load();
-                OnReload();
-            }
-            catch (Exception ex)
-            {
-                _source.OnLoadException?.Invoke(ex);
+                if (_disposed || !Directory.Exists(_source.Path))
+                {
+                    return;
+                }
+
+                try
+                {
+                    Load();
+                    OnReload();
+                }
+                catch (Exception ex)
+                {
+                    _source.OnLoadException?.Invoke(ex);
+                }
             }
         }
     }

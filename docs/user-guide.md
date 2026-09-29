@@ -20,6 +20,10 @@ We hope you enjoy using `WebExpress.WebCore` and find it valuable for your proje
 
 The container health endpoint is documented in the [Health model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#health-model) section of the Development Guide. WebCore provides `/health` globally, and applications contribute critical dependency checks as public sealed `IHealth` components in `WebExpress.WebCore.WebHealt`. The `HealthManager` discovers these components through the plugin and application lifecycle. The guide includes the component model, a database example, the HTTP contract, and Docker and Kubernetes probe configuration.
 
+## Graceful shutdown
+
+The container lifecycle is described in the [Graceful shutdown guide](graceful-shutdown.md). It covers `Shutdown: "graceful"`, the shared drain budget, background synchronization, resource ownership, and Docker and Kubernetes termination settings.
+
 ## Public server URI
 
 Configure `WebExpress:ExternalUri` when the listener binding is not the URL used by clients, for example when WebExpress runs behind a reverse proxy. The server continues to bind to the addresses in `Endpoints`, while applications and components can obtain the public URL through `IHttpServerContext.ExternalUri`.

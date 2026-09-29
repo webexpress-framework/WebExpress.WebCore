@@ -17,6 +17,7 @@ namespace WebExpress.WebCore.WebSocket
         private readonly CancellationTokenSource _cts = new();
         private readonly int _bufferSize;
         private bool _disconnectRaised;
+        private static readonly TimeSpan _shutdownCloseTimeout = TimeSpan.FromSeconds(1);
 
         /// <summary>
         /// Raised when a text message is received.
@@ -89,13 +90,16 @@ namespace WebExpress.WebCore.WebSocket
         /// <summary>
         /// Internal loop for receiving messages. Invokes the appropriate events for each message.
         /// </summary>
+        /// <param name="stopping">The host signal that closes idle connections during shutdown.</param>
         /// <returns>
         /// A task that represents the asynchronous receive loop.
         /// </returns>
-        internal async Task ReceiveLoopAsync()
+        internal async Task ReceiveLoopAsync(CancellationToken stopping = default)
         {
             var buffer = new byte[_bufferSize];
             using var builder = new MemoryStream();
+            var shutdown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = stopping.Register(() => shutdown.TrySetResult());
 
             while (_socket.State == WebSocketState.Open && !_cts.IsCancellationRequested)
             {
@@ -103,7 +107,23 @@ namespace WebExpress.WebCore.WebSocket
 
                 try
                 {
-                    result = await _socket.ReceiveAsync(buffer, _cts.Token);
+                    var receive = _socket.ReceiveAsync(buffer, _cts.Token);
+                    if (await Task.WhenAny(receive, shutdown.Task) == shutdown.Task || stopping.IsCancellationRequested)
+                    {
+                        using var deadline = new CancellationTokenSource(_shutdownCloseTimeout);
+                        await CloseAsync("server shutdown", deadline.Token);
+                        try
+                        {
+                            await receive;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // the close frame is sent before canceling the outstanding receive
+                        }
+                        break;
+                    }
+
+                    result = await receive;
                 }
                 catch
                 {
@@ -151,8 +171,6 @@ namespace WebExpress.WebCore.WebSocket
         /// </returns>
         public async Task CloseAsync(string reason = "closed", CancellationToken cancellation = default)
         {
-            _cts.Cancel();
-
             if (_socket.State == WebSocketState.Open || _socket.State == WebSocketState.CloseReceived)
             {
                 try
@@ -165,6 +183,7 @@ namespace WebExpress.WebCore.WebSocket
                 }
             }
 
+            _cts.Cancel();
             RaiseDisconnected(WebSocketCloseStatus.NormalClosure, reason);
         }
 
@@ -204,14 +223,15 @@ namespace WebExpress.WebCore.WebSocket
                 // ignore
             }
 
-            RaiseDisconnected(WebSocketCloseStatus.NormalClosure, "disposed");
-
-            if (_socket is IDisposable d)
+            try
             {
-                d.Dispose();
+                RaiseDisconnected(WebSocketCloseStatus.NormalClosure, "disposed");
             }
-
-            _cts.Dispose();
+            finally
+            {
+                _socket.Dispose();
+                _cts.Dispose();
+            }
         }
     }
 }

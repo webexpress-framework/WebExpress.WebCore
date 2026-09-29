@@ -18,6 +18,11 @@ namespace WebExpress.WebCore
     public class HttpServerContext : IHttpServerContext
     {
         /// <summary>
+        /// Gets the shared lifetime for framework workers and application synchronization processes.
+        /// </summary>
+        public ServerLifetime Lifetime { get; }
+
+        /// <summary>
         /// Gets the certificate service shared with the host and application components.
         /// </summary>
         public ICertificateManager CertificateManager { get; }
@@ -97,6 +102,7 @@ namespace WebExpress.WebCore
         /// <param name="host">The host.</param>
         /// <param name="certificateManager">The optional shared certificate service owned by the host.</param>
         /// <param name="externalUri">The optional public base URI, independent of the listener bindings.</param>
+        /// <param name="lifetime">The optional lifetime shared when the host creates its server context.</param>
         public HttpServerContext
         (
             IRoute route,
@@ -110,7 +116,8 @@ namespace WebExpress.WebCore
             ILog log,
             IHost host,
             ICertificateManager certificateManager = null,
-            string externalUri = null
+            string externalUri = null,
+            ServerLifetime lifetime = null
         )
         {
             var assembly = typeof(HttpServer).Assembly;
@@ -127,6 +134,7 @@ namespace WebExpress.WebCore
             Culture = culture;
             Log = log;
             Host = host;
+            Lifetime = lifetime ?? new ServerLifetime(log);
             CertificateManager = certificateManager ?? new CertificateManager(log);
         }
     }

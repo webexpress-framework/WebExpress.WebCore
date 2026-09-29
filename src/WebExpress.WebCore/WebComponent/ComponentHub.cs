@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
@@ -62,6 +63,7 @@ namespace WebExpress.WebCore.WebComponent
         private readonly ThemeManager _themeManager;
         private readonly HealthManager _healthManager;
         private int _lastCounter = 0;
+        private int _disposed;
 
         /// <summary>
         /// Gets the host-owned certificate service without creating a second certificate inventory.
@@ -513,12 +515,7 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         public void ShutDown()
         {
-            _healthManager.Dispose();
-
-            _httpServerContext?.Log?.Debug
-            (
-                _internationalizationManager.Translate("webexpress.webcore:componentmanager.shutdown")
-            );
+            Dispose();
         }
 
         /// <summary>
@@ -630,7 +627,39 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         public void Dispose()
         {
-            _healthManager.Dispose();
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            var managers = Managers.Distinct().Reverse().ToArray();
+            foreach (var plugin in _pluginManager.Plugins.ToArray())
+            {
+                foreach (var manager in managers.OfType<IExecutableElements>())
+                {
+                    try
+                    {
+                        manager.ShutDown(plugin);
+                    }
+                    catch (Exception ex)
+                    {
+                        _httpServerContext?.Log?.Exception(ex);
+                    }
+                }
+            }
+
+            foreach (var manager in managers)
+            {
+                try
+                {
+                    manager.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _httpServerContext?.Log?.Exception(ex);
+                }
+            }
+
             GC.SuppressFinalize(this);
         }
     }

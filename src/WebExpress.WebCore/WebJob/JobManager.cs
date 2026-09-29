@@ -340,17 +340,18 @@ namespace WebExpress.WebCore.WebJob
         /// </summary>
         internal void Execute()
         {
-            Task.Factory.StartNew(() =>
+            _httpServerContext.Lifetime.TryRun(async stopping =>
             {
-                while (!_tokenSource.IsCancellationRequested)
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stopping, _tokenSource.Token);
+                while (!linked.IsCancellationRequested)
                 {
                     Update();
 
-                    var secendsLeft = 60 - DateTime.Now.Second;
-                    Thread.Sleep(secendsLeft * 1000);
+                    var secondsLeft = 60 - DateTime.Now.Second;
+                    await Task.Delay(TimeSpan.FromSeconds(secondsLeft), linked.Token).ConfigureAwait(false);
                 }
 
-            }, _tokenSource.Token);
+            });
         }
 
         /// <summary>
@@ -377,30 +378,10 @@ namespace WebExpress.WebCore.WebJob
                             )
                         );
 
-                        Task.Factory.StartNew(() =>
+                        _httpServerContext.Lifetime.TryRun(() =>
                         {
                             scheduleItemValue.Instance?.Process();
-                        }, _tokenSource.Token);
-                    }
-                }
-
-                foreach (var scheduleItemValue in _dynamicScheduleList)
-                {
-                    if (scheduleItemValue.JobContext.Cron.Matching(_clock))
-                    {
-                        _httpServerContext?.Log?.Debug
-                        (
-                            I18N.Translate
-                            (
-                                "webexpress.webcore:jobmanager.job.process",
-                                scheduleItemValue.JobContext.JobId
-                            )
-                        );
-
-                        Task.Factory.StartNew(() =>
-                        {
-                            scheduleItemValue.Instance?.Process();
-                        }, _tokenSource.Token);
+                        });
                     }
                 }
             }
@@ -433,6 +414,20 @@ namespace WebExpress.WebCore.WebJob
             _componentHub?.ApplicationManager.RemoveApplication -= OnRemoveApplication;
 
             _tokenSource.Cancel();
+
+            foreach (var item in _staticScheduleDictionary.Values.SelectMany(x => x.Values)
+                .SelectMany(x => x.Values).SelectMany(x => x).Concat(_dynamicScheduleList).Distinct())
+            {
+                try
+                {
+                    item.Instance?.Dispose();
+                    item.TokenSource.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _httpServerContext?.Log?.Exception(ex);
+                }
+            }
         }
     }
 }

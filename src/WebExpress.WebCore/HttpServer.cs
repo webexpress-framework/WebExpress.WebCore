@@ -47,6 +47,9 @@ namespace WebExpress.WebCore
         private Microsoft.Extensions.Hosting.IHost _webHost;
         private SecurityHeaders _securityHeaders;
         private volatile bool _isRunning;
+        private volatile bool _isStopping;
+        private readonly Lock _stopLock = new();
+        private Task _stopTask;
 
         /// <summary>
         /// Gets whether startup completed and the host has not begun draining requests.
@@ -154,7 +157,8 @@ namespace WebExpress.WebCore
                 context.Log,
                 this,
                 context.CertificateManager,
-                context.ExternalUri
+                context.ExternalUri,
+                context.Lifetime
             );
 
             Culture = HttpServerContext.Culture;
@@ -206,6 +210,7 @@ namespace WebExpress.WebCore
         private void StartCore()
         {
             var settings = Settings ?? new HttpServerSettings { Endpoints = HttpServerContext.Endpoints?.ToList() ?? [] };
+            settings.ValidateShutdown();
             HttpServerContext.CertificateManager.Load(settings);
             foreach (var endpoint in (settings.Endpoints ?? []).Where(x => x.GetBindingAddress().Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
             {
@@ -451,25 +456,89 @@ namespace WebExpress.WebCore
         }
 
         /// <summary>
-        /// Stops the HTTP(S) server.
+        /// Waits for the configured shutdown before releasing server resources.
         /// </summary>
         public void Stop()
         {
+            StopAsync().GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Stops admission immediately and shares one drain and cleanup between all callers.
+        /// </summary>
+        /// <param name="cancellationToken">An optional earlier deadline for the shutdown.</param>
+        /// <returns>The shared shutdown task.</returns>
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            lock (_stopLock)
+            {
+                return _stopTask ??= StopCoreAsync(cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Drains HTTP connections and registered background work within one shared time budget.
+        /// </summary>
+        /// <param name="cancellationToken">An optional earlier deadline supplied by the host.</param>
+        /// <returns>A task that completes after draining and releasing transport resources.</returns>
+        private async Task StopCoreAsync(CancellationToken cancellationToken)
+        {
+            _isStopping = true;
             _isRunning = false;
+            var settings = Settings ?? new HttpServerSettings();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (settings.Shutdown == ShutdownMode.Graceful)
+            {
+                deadline.CancelAfter(TimeSpan.FromSeconds(settings.ShutdownTimeoutSeconds));
+            }
+            else
+            {
+                deadline.Cancel();
+            }
 
             try
             {
-                // certificate handles must outlive all active tls connections
-                Kestrel?.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+                var background = HttpServerContext.Lifetime.StopAsync(deadline.Token);
+                var requests = Kestrel?.StopAsync(deadline.Token) ?? Task.CompletedTask;
+                await Task.WhenAll(requests, background).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+            {
+                // cleanup also runs when a worker exceeds the cooperative drain budget
             }
             finally
             {
-                ServerTokenSource.Cancel();
-                _webHost?.Dispose();
+                if (deadline.IsCancellationRequested && settings.Shutdown == ShutdownMode.Graceful)
+                {
+                    HttpServerContext.Log?.Warning("Graceful shutdown deadline reached; unfinished work may be interrupted.");
+                }
+
+                ReleaseResource(() => ServerTokenSource.Cancel());
+                ReleaseResource(() => _webHost?.Dispose());
                 _webHost = null;
                 Kestrel = null;
-                HttpServerContext.CertificateManager.Dispose();
-                if (_authenticationEndpoint.IsValueCreated) { _authenticationEndpoint.Value.Dispose(); }
+                ReleaseResource(HttpServerContext.CertificateManager.Dispose);
+                if (_authenticationEndpoint.IsValueCreated)
+                {
+                    ReleaseResource(_authenticationEndpoint.Value.Dispose);
+                }
+                ServerTokenSource.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Keeps one failing release from skipping other independent server resources.
+        /// </summary>
+        /// <param name="release">The release operation owned by this server.</param>
+        private void ReleaseResource(Action release)
+        {
+            try
+            {
+                release();
+            }
+            catch (Exception ex)
+            {
+                HttpServerContext.Log?.Exception(ex);
             }
         }
 
@@ -963,6 +1032,15 @@ namespace WebExpress.WebCore
         {
             try
             {
+                if (_isStopping)
+                {
+                    var response = HealthEndpoint.Matches(httpContext)
+                        ? HealthEndpoint.CreateResponse(false, httpContext.Features.Get<IHttpRequestFeature>()?.Method == "HEAD")
+                        : (IResponse)new ResponseServiceUnavailable();
+                    await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
+                    return;
+                }
+
                 if (HealthEndpoint.Matches(httpContext))
                 {
                     if (httpContext is HttpExceptionContext healthException)

@@ -536,14 +536,16 @@ namespace WebExpress.WebCore.Test.Manager
         public async Task HttpsListenerPresentsSuppliedIntermediateChain()
         {
             // arrange
+            // unique issuer names prevent windows chain caches from mixing independent test authorities
+            var chainId = Guid.NewGuid().ToString("N");
             using var rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            var rootRequest = new CertificateRequest("CN=WebExpress Test Root", rootKey, HashAlgorithmName.SHA256);
+            var rootRequest = new CertificateRequest($"CN=WebExpress Test Root {chainId}", rootKey, HashAlgorithmName.SHA256);
             rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
             rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
             using var root = rootRequest.CreateSelfSigned(_clock.Now.AddDays(-2), _clock.Now.AddDays(100));
 
             using var issuerKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            var issuerRequest = new CertificateRequest("CN=WebExpress Test Intermediate", issuerKey, HashAlgorithmName.SHA256);
+            var issuerRequest = new CertificateRequest($"CN=WebExpress Test Intermediate {chainId}", issuerKey, HashAlgorithmName.SHA256);
             issuerRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
             issuerRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
             using var issuerPublic = issuerRequest.Create(root, _clock.Now.AddDays(-1), _clock.Now.AddDays(95), RandomNumberGenerator.GetBytes(16));

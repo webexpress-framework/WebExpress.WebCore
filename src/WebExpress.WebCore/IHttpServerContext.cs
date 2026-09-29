@@ -17,6 +17,11 @@ namespace WebExpress.WebCore
     public interface IHttpServerContext
     {
         /// <summary>
+        /// Gets the lifetime used to drain background work before shared resources are released.
+        /// </summary>
+        ServerLifetime Lifetime { get; }
+
+        /// <summary>
         /// Gets the shared certificate service so applications never need direct storage access.
         /// </summary>
         ICertificateManager CertificateManager { get; }

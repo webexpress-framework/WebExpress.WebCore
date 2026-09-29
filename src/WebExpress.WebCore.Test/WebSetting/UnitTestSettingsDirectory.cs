@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.Test.WebSetting
@@ -24,7 +24,10 @@ namespace WebExpress.WebCore.Test.WebSetting
         /// </summary>
         public void Dispose()
         {
-            Directory.Delete(_directory, true);
+            if (Directory.Exists(_directory))
+            {
+                Directory.Delete(_directory, true);
+            }
             GC.SuppressFinalize(this);
         }
 
@@ -220,6 +223,7 @@ namespace WebExpress.WebCore.Test.WebSetting
             {
                 // act
                 var configuration = SettingsLoader.Load(Path.Combine(_directory, "webexpress.settings.json"));
+                using var configurationLifetime = configuration as IDisposable;
 
                 // validation
                 Assert.Equal("de-DE", configuration.GetServerSettings().Culture);
@@ -227,6 +231,111 @@ namespace WebExpress.WebCore.Test.WebSetting
             finally
             {
                 Environment.SetEnvironmentVariable(variable, null);
+            }
+        }
+
+        /// <summary>
+        /// Verifies that repeated file changes keep renewing the watcher subscription.
+        /// </summary>
+        [Fact]
+        public async System.Threading.Tasks.Task WatchedFilesReloadRepeatedly()
+        {
+            // arrange
+            Write("webexpress.settings.json", "{ \"Value\": \"initial\" }");
+            using var provider = new SettingsDirectoryConfigurationProvider(new()
+            {
+                Path = _directory,
+                ReloadOnChange = true,
+                ReloadDelay = 20
+            });
+            provider.Load();
+
+            foreach (var value in new[] { "first", "second" })
+            {
+                var reloaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                using var subscription = provider.GetReloadToken().RegisterChangeCallback(_ => reloaded.TrySetResult(), null);
+
+                // act
+                Write("webexpress.settings.json", $$"""{ "Value": "{{value}}" }""");
+                await reloaded.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+                // validation
+                Assert.True(provider.TryGet("Value", out var actual));
+                Assert.Equal(value, actual);
+            }
+        }
+
+        /// <summary>
+        /// Verifies that disposal prevents a delayed watcher callback from publishing changes.
+        /// </summary>
+        [Fact]
+        public async System.Threading.Tasks.Task DisposedWatcherDoesNotReload()
+        {
+            // arrange
+            Write("webexpress.settings.json", "{}");
+            using var provider = new SettingsDirectoryConfigurationProvider(new()
+            {
+                Path = _directory,
+                ReloadOnChange = true,
+                ReloadDelay = 300
+            });
+            provider.Load();
+            var reloadToken = provider.GetReloadToken();
+
+            // act
+            Write("webexpress.settings.json", "{ \"Value\": \"changed\" }");
+            await System.Threading.Tasks.Task.Delay(100, TestContext.Current.CancellationToken);
+            provider.Dispose();
+            Directory.Delete(_directory, true);
+            await System.Threading.Tasks.Task.Delay(500, TestContext.Current.CancellationToken);
+
+            // validation
+            Assert.False(reloadToken.HasChanged);
+            Assert.False(provider.TryGet("Value", out _));
+        }
+
+        /// <summary>
+        /// Verifies that removing a watched directory does not leak failures from token renewal.
+        /// </summary>
+        [Fact]
+        public async System.Threading.Tasks.Task RemovedWatchedDirectoryDoesNotLeakTaskExceptions()
+        {
+            // arrange
+            Write("webexpress.settings.json", "{}");
+            using var provider = new SettingsDirectoryConfigurationProvider(new()
+            {
+                Path = _directory,
+                ReloadOnChange = true,
+                ReloadDelay = 20
+            });
+            provider.Load();
+            var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+            EventHandler<UnobservedTaskExceptionEventArgs> onUnobserved = (_, args) =>
+            {
+                if (args.Exception.ToString().Contains(_directory, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Enqueue(args.Exception);
+                    args.SetObserved();
+                }
+            };
+            TaskScheduler.UnobservedTaskException += onUnobserved;
+            try
+            {
+                // act
+                Directory.Delete(_directory, true);
+                for (var attempt = 0; attempt < 5; attempt++)
+                {
+                    await System.Threading.Tasks.Task.Delay(200, TestContext.Current.CancellationToken);
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                }
+
+                // validation
+                Assert.Empty(errors);
+            }
+            finally
+            {
+                TaskScheduler.UnobservedTaskException -= onUnobserved;
             }
         }
 

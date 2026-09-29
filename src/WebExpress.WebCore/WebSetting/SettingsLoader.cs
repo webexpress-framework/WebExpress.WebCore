@@ -59,7 +59,9 @@ namespace WebExpress.WebCore.WebSetting
         /// <returns>The server settings; every block that is absent in the configuration stays at its default.</returns>
         public static HttpServerSettings GetServerSettings(this IConfiguration configuration)
         {
-            return configuration.GetSection(HttpServerSettings.Section).Get<HttpServerSettings>() ?? new HttpServerSettings();
+            var settings = configuration.GetSection(HttpServerSettings.Section).Get<HttpServerSettings>() ?? new HttpServerSettings();
+            settings.ValidateShutdown();
+            return settings;
         }
 
         /// <summary>

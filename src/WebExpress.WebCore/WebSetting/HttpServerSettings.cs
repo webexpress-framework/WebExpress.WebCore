@@ -41,6 +41,33 @@ namespace WebExpress.WebCore.WebSetting
         public string ExternalUri { get; set; }
 
         /// <summary>
+        /// Gets or sets whether termination waits for admitted requests and background work.
+        /// </summary>
+        public ShutdownMode Shutdown { get; set; } = ShutdownMode.Immediate;
+
+        /// <summary>
+        /// Gets or sets the shared drain budget in seconds. Cleanup requires additional time
+        /// within the container runtime's termination grace period.
+        /// </summary>
+        public int ShutdownTimeoutSeconds { get; set; } = 30;
+
+        /// <summary>
+        /// Rejects invalid shutdown settings before listeners or background workers are started.
+        /// </summary>
+        internal void ValidateShutdown()
+        {
+            if (!System.Enum.IsDefined(Shutdown))
+            {
+                throw new System.InvalidOperationException("WebExpress:Shutdown must be immediate or graceful.");
+            }
+
+            if (ShutdownTimeoutSeconds is < 1 or > 86400)
+            {
+                throw new System.InvalidOperationException("WebExpress:ShutdownTimeoutSeconds must be between 1 and 86400.");
+            }
+        }
+
+        /// <summary>
         /// Gets or sets the shared certificate inventory and expiry warning policy used for production HTTPS.
         /// </summary>
         public CertificateManagerSettings Certificates { get; set; }

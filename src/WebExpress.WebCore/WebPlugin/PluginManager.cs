@@ -4,7 +4,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
@@ -608,8 +607,13 @@ namespace WebExpress.WebCore.WebPlugin
             }
 
             // run plugin concurrently
-            Task.Run(() =>
+            _httpServerContext.Lifetime.TryRun(() =>
             {
+                if (token.Value.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 _httpServerContext?.Log?.Debug
                 (
                     I18N.Translate
@@ -630,8 +634,7 @@ namespace WebExpress.WebCore.WebPlugin
                     )
                 );
 
-                token?.ThrowIfCancellationRequested();
-            }, token.Value);
+            });
         }
 
         /// <summary>
@@ -748,6 +751,19 @@ namespace WebExpress.WebCore.WebPlugin
         /// </summary>
         public void Dispose()
         {
+            foreach (var item in _dictionary.Values)
+            {
+                try
+                {
+                    item.CancellationTokenSource.Cancel();
+                    item.Plugin?.Dispose();
+                    item.CancellationTokenSource.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _httpServerContext?.Log?.Exception(ex);
+                }
+            }
         }
     }
 }

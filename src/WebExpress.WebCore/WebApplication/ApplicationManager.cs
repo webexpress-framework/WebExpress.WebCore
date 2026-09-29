@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication.Model;
 using WebExpress.WebCore.WebAttribute;
@@ -382,9 +381,13 @@ namespace WebExpress.WebCore.WebApplication
             {
                 var token = applicationItem.CancellationTokenSource.Token;
 
-                // Run the application concurrently
-                Task.Run(() =>
+                _httpServerContext.Lifetime.TryRun(() =>
                 {
+                    if (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
                     _httpServerContext?.Log?.Debug
                     (
                         I18N.Translate
@@ -404,8 +407,7 @@ namespace WebExpress.WebCore.WebApplication
                         )
                     );
 
-                    token.ThrowIfCancellationRequested();
-                }, token);
+                });
             }
         }
 
@@ -494,6 +496,21 @@ namespace WebExpress.WebCore.WebApplication
         {
             _componentHub?.PluginManager?.AddPlugin -= OnAddPlugin;
             _componentHub?.PluginManager?.RemovePlugin -= OnRemovePlugin;
+
+            foreach (var context in _dictionary.All.ToArray())
+            {
+                var item = _dictionary.GetApplicationItem(context);
+                try
+                {
+                    item.CancellationTokenSource.Cancel();
+                    item.Application?.Dispose();
+                    item.CancellationTokenSource.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _httpServerContext?.Log?.Exception(ex);
+                }
+            }
         }
     }
 }
