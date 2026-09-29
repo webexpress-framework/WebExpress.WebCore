@@ -24,6 +24,7 @@ using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
+using WebExpress.WebCore.WebHealt;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
@@ -45,6 +46,12 @@ namespace WebExpress.WebCore
         private readonly Lazy<AuthenticationEndpoint> _authenticationEndpoint;
         private Microsoft.Extensions.Hosting.IHost _webHost;
         private SecurityHeaders _securityHeaders;
+        private volatile bool _isRunning;
+
+        /// <summary>
+        /// Gets whether startup completed and the host has not begun draining requests.
+        /// </summary>
+        public bool IsRunning => _isRunning;
 
         /// <summary>
         /// Gets the security headers of every response. They are resolved on first use because
@@ -170,6 +177,7 @@ namespace WebExpress.WebCore
             try
             {
                 StartCore();
+                _isRunning = true;
 
                 return true;
             }
@@ -447,6 +455,8 @@ namespace WebExpress.WebCore
         /// </summary>
         public void Stop()
         {
+            _isRunning = false;
+
             try
             {
                 // certificate handles must outlive all active tls connections
@@ -953,17 +963,38 @@ namespace WebExpress.WebCore
         {
             try
             {
+                if (HealthEndpoint.Matches(httpContext))
+                {
+                    if (httpContext is HttpExceptionContext healthException)
+                    {
+                        HttpServerContext.Log?.Exception(healthException.Exception);
+                        var unavailable = HealthEndpoint.CreateResponse(false,
+                            httpContext.Features.Get<IHttpRequestFeature>()?.Method == "HEAD");
+                        await new ResponseSender(SecurityHeaders).SendAsync(httpContext, unavailable);
+                        return;
+                    }
+
+                    var cancellationToken = httpContext.Features.Get<IHttpRequestLifetimeFeature>()?.RequestAborted
+                        ?? CancellationToken.None;
+                    var response = await HealthEndpoint.HandleAsync(httpContext.Request, WebEx.ComponentHub?.HealthManager,
+                        HttpServerContext.Log, cancellationToken);
+                    await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
+                    return;
+                }
+
                 await ProcessRequestCoreAsync(httpContext);
             }
             catch (Exception ex)
             {
                 HttpServerContext.Log?.Exception(ex);
 
-                var response = CreateStatusPage<ResponseInternalServerError>
-                (
-                    Describe(ex),
-                    httpContext?.Request
-                );
+                var response = HealthEndpoint.Matches(httpContext)
+                    ? HealthEndpoint.CreateResponse(false, httpContext.Features.Get<IHttpRequestFeature>()?.Method == "HEAD")
+                    : CreateStatusPage<ResponseInternalServerError>
+                    (
+                        Describe(ex),
+                        httpContext?.Request
+                    );
 
                 await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
             }

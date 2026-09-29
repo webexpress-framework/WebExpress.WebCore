@@ -9,6 +9,7 @@ using WebExpress.WebCore.WebComponent.Model;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
+using WebExpress.WebCore.WebHealt;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebInclude;
 using WebExpress.WebCore.WebJob;
@@ -59,6 +60,7 @@ namespace WebExpress.WebCore.WebComponent
         private readonly IdentityTokenStoreManager _identityTokenStoreManager;
         private readonly SocketManager _socketManager;
         private readonly ThemeManager _themeManager;
+        private readonly HealthManager _healthManager;
         private int _lastCounter = 0;
 
         /// <summary>
@@ -104,6 +106,7 @@ namespace WebExpress.WebCore.WebComponent
                 _sessionManager,
                 _taskManager,
                 _socketManager,
+                _healthManager,
                 _themeManager
             }.Concat(_dictionary.Values.SelectMany(x => x).Select(x => x.ComponentInstance));
 
@@ -250,6 +253,11 @@ namespace WebExpress.WebCore.WebComponent
         public IThemeManager ThemeManager => _themeManager;
 
         /// <summary>
+        /// Gets the shared health registry used by the host and application dependencies.
+        /// </summary>
+        public IHealthManager HealthManager => _healthManager;
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         /// <param name="httpServerContext">The reference to the context of the host.</param>
@@ -306,6 +314,9 @@ namespace WebExpress.WebCore.WebComponent
                 ?? throw new InvalidOperationException("Failed to create SocketManager.");
             _themeManager = CreateInstance(typeof(ThemeManager)) as ThemeManager
                 ?? throw new InvalidOperationException("Failed to create ThemeManager.");
+
+            _healthManager = CreateInstance(typeof(HealthManager)) as HealthManager
+                ?? throw new InvalidOperationException("Failed to create HealthManager.");
 
             _internationalizationManager.Register(typeof(HttpServer).Assembly, typeof(HttpServer).Assembly.GetName().Name?.ToLower());
 
@@ -502,6 +513,8 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         public void ShutDown()
         {
+            _healthManager.Dispose();
+
             _httpServerContext?.Log?.Debug
             (
                 _internationalizationManager.Translate("webexpress.webcore:componentmanager.shutdown")
@@ -617,6 +630,7 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         public void Dispose()
         {
+            _healthManager.Dispose();
             GC.SuppressFinalize(this);
         }
     }

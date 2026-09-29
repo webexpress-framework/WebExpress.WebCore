@@ -219,3 +219,8 @@ certificate.load_failed=Das Zertifikat {0} konnte nicht aus dem Speicher {1} gel
 root.title=Anwendungen
 root.introduction=Wählen Sie eine Anwendung aus, um fortzufahren.
 root.empty=Es sind keine Anwendungen verfügbar.
+
+health.host_unavailable=Der HTTP-Host wird gestartet oder beendet.
+health.component_unavailable=Ein Komponentenmanager konnte nicht initialisiert werden.
+health.failed=Healthcheck {0}/{1} fehlgeschlagen: {2}
+health.timeout=Healthcheck {0}/{1} hat sein Zeitlimit von {2} überschritten.

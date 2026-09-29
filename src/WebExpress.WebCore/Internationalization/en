@@ -219,3 +219,8 @@ certificate.load_failed=Certificate {0} could not be loaded from store {1}. Chec
 root.title=Applications
 root.introduction=Select an application to continue.
 root.empty=No applications are available.
+
+health.host_unavailable=The HTTP host is starting or stopping.
+health.component_unavailable=A component manager failed to initialize.
+health.failed=Health check {0}/{1} failed: {2}
+health.timeout=Health check {0}/{1} exceeded its time budget of {2}.

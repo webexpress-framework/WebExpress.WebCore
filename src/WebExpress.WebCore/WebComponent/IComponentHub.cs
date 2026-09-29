@@ -7,6 +7,7 @@ using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
+using WebExpress.WebCore.WebHealt;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebInclude;
 using WebExpress.WebCore.WebJob;
@@ -192,6 +193,11 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         /// <returns>The instance of the theme manager.</returns>
         IThemeManager ThemeManager { get; }
+
+        /// <summary>
+        /// Gets the shared health registry used by the host and application dependencies.
+        /// </summary>
+        IHealthManager HealthManager { get; }
 
         /// <summary>
         /// Returns a component based on its id.

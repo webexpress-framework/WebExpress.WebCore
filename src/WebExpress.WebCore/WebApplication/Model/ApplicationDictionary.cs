@@ -48,7 +48,8 @@ namespace WebExpress.WebCore.WebApplication.Model
         /// <returns>An IEnumerable of application contexts that were removed.</returns>
         public IEnumerable<IApplicationContext> RemoveApplications(IPluginContext pluginContext)
         {
-            var applicationContexts = GetApplications(pluginContext);
+            // removal events need the contexts after the registry entry has been deleted
+            var applicationContexts = GetApplications(pluginContext).ToArray();
 
             _dict.Remove(pluginContext);
 
