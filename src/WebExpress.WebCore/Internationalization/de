@@ -92,6 +92,7 @@ applicationmanager.application.initialization=Die Anwendung '{0}' wurde initiali
 applicationmanager.application.processing.start=Die Anwendung '{0}' wird ausgeführt.
 applicationmanager.application.processing.end=Die Ausführung der Anwendung '{0}' wurde beendet.
 applicationmanager.application.boot.notfound=Das Plugin '{0}' ist nicht bekannt.
+applicationmanager.application.failed=Die Anwendung '{0}' konnte nicht erzeugt werden und ist nicht verfügbar.
 
 resourcemanager.initialization=Der Ressourcenmanager wurde initialisiert.
 resourcemanager.register={0} Ressource(n) wurden der Anwendung '{1}' zugewiesen.
@@ -169,6 +170,7 @@ fragmentmanager.titel=Fragmente:
 fragmentmanager.fragment=Fragment: '{0}' für die Anwendung '{1}'.
 
 identitymanager.initialization=Der Identitymanager wurde initialisiert.
+identitymanager.authentication.invalid=Mit dem Abschnitt WebExpress:Authentication können keine Tokens ausgestellt werden: {0}
 identitymanager.registerpermission=Die Berechtigung '{0}' wurde der Anwendung '{1}' zugewiesen und im Identitymanager registriert.
 identitymanager.duplicatepermission=Die Berechtigung '{0}' wurde bereits in der Anwendung '{1}' registriert.
 identitymanager.registerpolicy=Die Policy '{0}' wurde der Anwendung '{1}' zugewiesen und im Identitymanager registriert.
@@ -222,5 +224,6 @@ root.empty=Es sind keine Anwendungen verfügbar.
 
 health.host_unavailable=Der HTTP-Host wird gestartet oder beendet.
 health.component_unavailable=Ein Komponentenmanager konnte nicht initialisiert werden.
+health.application_unavailable=Die Anwendung '{0}' des Plugins '{1}' konnte nicht erzeugt werden: {2}
 health.failed=Healthcheck {0}/{1} fehlgeschlagen: {2}
 health.timeout=Healthcheck {0}/{1} hat sein Zeitlimit von {2} überschritten.

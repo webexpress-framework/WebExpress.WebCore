@@ -172,6 +172,73 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Keeps a declared application whose constructor threw visible to probes, although it left no
+        /// health bindings behind, until the plugin that declares it is removed.
+        /// </summary>
+        /// <returns>A task that completes after failure, diagnostics, and recovery are validated.</returns>
+        [Fact]
+        public async Task ApplicationConstructorFails_IsUnhealthyUntilPluginRemoved()
+        {
+            // arrange
+            var (hub, server) = CreateHost();
+            using var manager = hub.HealthManager;
+            var applications = (ApplicationManager)hub.ApplicationManager;
+            var type = CreateThrowingApplication("private-application-diagnostic");
+            var plugin = new HealthTestPluginContext("failing-plugin", type);
+
+            // act
+            typeof(ApplicationManager).GetMethod("Register", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(applications, [plugin]);
+            var failed = await manager.CheckAsync(TestContext.Current.CancellationToken);
+            var live = manager.CheckLiveness();
+            var failure = Assert.Single(applications.FailedApplications);
+            applications.Remove(plugin);
+            var recovered = await manager.CheckAsync(TestContext.Current.CancellationToken);
+
+            // validation
+            Assert.False(failed);
+            Assert.False(live);
+            Assert.True(recovered);
+            Assert.Equal(type.FullName.ToLower(), failure.ApplicationId);
+            Assert.Same(plugin, failure.PluginContext);
+            Assert.Equal("private-application-diagnostic", Assert.IsType<InvalidOperationException>(failure.Exception).Message);
+            Assert.Empty(applications.GetApplications(plugin));
+            Assert.Empty(applications.FailedApplications);
+            Assert.Contains(server.HttpServerContext.Log.GetRecentEntries(), x =>
+                x.Message.Contains(failure.ApplicationId) && x.Message.Contains("private-application-diagnostic"));
+        }
+
+        /// <summary>
+        /// Keeps the liveness probe independent of application dependencies while still judging the framework.
+        /// </summary>
+        /// <returns>A task that completes after readiness and liveness are compared.</returns>
+        [Fact]
+        public async Task CheckLiveness_SkipsApplicationChecks()
+        {
+            // arrange
+            var (hub, server) = CreateHost();
+            using var manager = hub.HealthManager;
+            var calls = 0;
+            Register(manager, new ApplicationContext(), "database", _ =>
+            {
+                Interlocked.Increment(ref calls);
+                return Task.FromResult(HealthCheckResult.Unhealthy());
+            });
+
+            // act
+            var ready = await manager.CheckAsync(TestContext.Current.CancellationToken);
+            var callsAfterReadiness = calls;
+            var live = manager.CheckLiveness();
+            SetRunning(server, false);
+            var stopping = manager.CheckLiveness();
+
+            // validation
+            Assert.False(ready);
+            Assert.True(live);
+            Assert.False(stopping);
+            Assert.Equal(callsAfterReadiness, calls);
+        }
+
+        /// <summary>
         /// Removes checks contributed by another plugin without removing the application or unrelated checks.
         /// </summary>
         /// <returns>A task that completes after the actual plugin removal event has been processed.</returns>
@@ -573,6 +640,7 @@ namespace WebExpress.WebCore.Test.Manager
 
             // validation
             Assert.False(healthy);
+            Assert.False(manager.CheckLiveness());
             using var registration = Register(manager, new ApplicationContext(), "database",
                 _ => Task.FromResult(HealthCheckResult.Healthy()));
             Assert.Empty(manager.HealthChecks);

@@ -223,5 +223,20 @@ namespace WebExpress.WebCore.WebIdentity
         /// collection is empty if no groups are found.
         /// </returns>
         IEnumerable<IIdentityGroup> GetGroups(IApplicationContext applicationContext);
+
+        /// <summary>
+        /// Reports whether the application can both sign credentials and persist their replay and revocation markers.
+        /// </summary>
+        /// <remarks>
+        /// The rules for the <c>WebExpress:Authentication</c> section live only here, so a health
+        /// check or a setup page asks this instead of restating them and drifting from them. A
+        /// section that exists but would issue weak or inconsistent credentials answers false like
+        /// a missing one; the reason is written to the server log, never the key. A missing token
+        /// store directory is created, as the first sign-in would, so a directory that cannot be
+        /// created surfaces here as an exception.
+        /// </remarks>
+        /// <param name="applicationContext">The application whose authentication endpoints are being served.</param>
+        /// <returns>True when a signing authority and a token store are available; otherwise, false.</returns>
+        bool IsAuthenticationConfigured(IApplicationContext applicationContext);
     }
 }

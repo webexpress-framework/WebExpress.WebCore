@@ -44,8 +44,8 @@ componentmanager.remove=The component '{0}' has been removed.
 componentmanager.component=Components:
 componentmanager.name=Component: '{0}'
 
-logmanager.initialization:The log manager has been initialized.
-logmanager.titel:Log manager
+logmanager.initialization=The log manager has been initialized.
+logmanager.titel=Log manager
 
 internationalizationmanager.initialization=The internationalization manager has been initialized.
 internationalizationmanager.register=The plugin '{0}' is registered in the internationalization manager.
@@ -84,14 +84,15 @@ pluginmanager.applicationless=The plugin '{0}' does not have any information abo
 
 applicationmanager.titel=Application manager:
 applicationmanager.initialization=The application manager has been initialized.
-applicationmanager.registerapplication=The application '{0}' has been created and registered in the application manager.
+applicationmanager.register=The application '{0}' has been created and registered in the application manager.
 applicationmanager.update=The name or the icon of the application '{0}' was changed at runtime.
-applicationmanager.duplicateapplication=The application '{0}' has already been registered in the application manager.
+applicationmanager.duplicate=The application '{0}' has already been registered in the application manager.
 applicationmanager.application=Application: '{0}'
 applicationmanager.application.initialization=The application'{0}' has been initialized.
 applicationmanager.application.processing.start=The application '{0}' is running.
 applicationmanager.application.processing.end=The running of the application '{0}' has been stopped.
 applicationmanager.application.boot.notfound=The plugin '{0}' is unknown.
+applicationmanager.application.failed=The application '{0}' could not be created and is not available.
 
 resourcemanager.initialization=The resource manager has been initialized.
 resourcemanager.register={0} resource(s) have been assigned to the application '{1}'.
@@ -169,6 +170,7 @@ fragmentmanager.titel=Fragments:
 fragmentmanager.fragment=Fragment: '{0}' for application '{1}'.
 
 identitymanager.initialization=The identity manager has been initialized.
+identitymanager.authentication.invalid=The section WebExpress:Authentication cannot issue tokens: {0}
 identitymanager.registerpermission=The permission '{0}' has been assigned to the application '{1}' and registered in the identity manager.
 identitymanager.duplicatepermission=The permission '{0}' has already been registered in the application '{1}'.
 identitymanager.registerpolicy=The policy '{0}' has been assigned to the application '{1}' and registered in the identity manager.
@@ -222,5 +224,6 @@ root.empty=No applications are available.
 
 health.host_unavailable=The HTTP host is starting or stopping.
 health.component_unavailable=A component manager failed to initialize.
+health.application_unavailable=The application '{0}' of the plugin '{1}' could not be created: {2}
 health.failed=Health check {0}/{1} failed: {2}
 health.timeout=Health check {0}/{1} exceeded its time budget of {2}.

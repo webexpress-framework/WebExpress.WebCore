@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication.Model;
 using WebExpress.WebCore.WebAttribute;
@@ -23,6 +24,8 @@ namespace WebExpress.WebCore.WebApplication
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly ApplicationDictionary _dictionary = new();
+        private readonly Lock _failuresSync = new();
+        private readonly List<ApplicationFailure> _failures = [];
 
         /// <summary>
         /// An event that fires when an application is added.
@@ -43,6 +46,21 @@ namespace WebExpress.WebCore.WebApplication
         /// Gets the stored applications.
         /// </summary>
         public IEnumerable<IApplicationContext> Applications => _dictionary.All;
+
+        /// <summary>
+        /// Gets the declared applications whose constructor threw, for as long as their plugin is loaded.
+        /// </summary>
+        public IEnumerable<ApplicationFailure> FailedApplications
+        {
+            get
+            {
+                // health probes read this on request threads while plugins may be loading
+                lock (_failuresSync)
+                {
+                    return _failures.ToArray();
+                }
+            }
+        }
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -78,6 +96,9 @@ namespace WebExpress.WebCore.WebApplication
             }
 
             var assembly = pluginContext.Assembly;
+
+            // a plugin whose applications all failed is not in the dictionary and is evaluated afresh
+            DiscardFailures(pluginContext);
 
             foreach (var type in assembly.GetExportedTypes().Where
                 (
@@ -147,14 +168,42 @@ namespace WebExpress.WebCore.WebApplication
                     DefaultThemeType = defaultThemeType
                 };
 
-                // create application
-                var applicationInstance = ComponentActivator.CreateInstance<IApplication, IApplicationContext>
-                (
-                    type,
-                    applicationContext,
-                    _httpServerContext,
-                    _componentHub
-                );
+                IApplication applicationInstance;
+
+                try
+                {
+                    applicationInstance = ComponentActivator.CreateInstance<IApplication, IApplicationContext>
+                    (
+                        type,
+                        applicationContext,
+                        _httpServerContext,
+                        _componentHub
+                    );
+                }
+                catch (Exception ex)
+                {
+                    // an escaping exception would also abort the plugin's remaining applications
+                    // and every later subscriber of the AddPlugin event, health discovery included
+                    var cause = ex is TargetInvocationException { InnerException: not null } ? ex.InnerException : ex;
+
+                    lock (_failuresSync)
+                    {
+                        _failures.Add(new ApplicationFailure
+                        {
+                            ApplicationId = id,
+                            PluginContext = pluginContext,
+                            Exception = cause
+                        });
+                    }
+
+                    _httpServerContext?.Log?.Error
+                    (
+                        I18N.Translate("webexpress.webcore:applicationmanager.application.failed", id)
+                    );
+                    _httpServerContext?.Log?.Exception(cause);
+
+                    continue;
+                }
 
                 if (_dictionary.AddApplication(pluginContext, new ApplicationItem()
                 {
@@ -196,12 +245,26 @@ namespace WebExpress.WebCore.WebApplication
                 return;
             }
 
+            DiscardFailures(pluginContext);
+
             foreach (var applicationContext in _dictionary.RemoveApplications(pluginContext))
             {
                 OnRemoveApplication(applicationContext);
             }
 
             Log();
+        }
+
+        /// <summary>
+        /// Forgets the failed applications of a plugin, whose code is either gone or about to be evaluated again.
+        /// </summary>
+        /// <param name="pluginContext">The plugin that declares the failed applications.</param>
+        private void DiscardFailures(IPluginContext pluginContext)
+        {
+            lock (_failuresSync)
+            {
+                _failures.RemoveAll(x => x.PluginContext == pluginContext);
+            }
         }
 
         /// <summary>

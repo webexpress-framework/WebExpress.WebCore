@@ -31,6 +31,16 @@ namespace WebExpress.WebCore.WebApplication
         IEnumerable<IApplicationContext> Applications { get; }
 
         /// <summary>
+        /// Gets the declared applications whose constructor threw, for as long as their plugin is loaded.
+        /// </summary>
+        /// <remarks>
+        /// A failed application is absent from <see cref="Applications"/>, so nothing else in the
+        /// host can tell that it was ever declared. The health probe reads this to stay unhealthy
+        /// instead of reporting a host that lost its application as available.
+        /// </remarks>
+        IEnumerable<ApplicationFailure> FailedApplications { get; }
+
+        /// <summary>
         /// Returns the application contexts for a given application id.
         /// </summary>
         /// <param name="applicationId">The application id.</param>

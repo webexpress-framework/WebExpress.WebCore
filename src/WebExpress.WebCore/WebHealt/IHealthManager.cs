@@ -40,5 +40,17 @@ namespace WebExpress.WebCore.WebHealt
         /// <param name="cancellationToken">The cancellation token for the caller waiting for the probe.</param>
         /// <returns>True only when every critical component is available.</returns>
         Task<bool> CheckAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Judges the framework without running any application check, for probes that restart the process.
+        /// </summary>
+        /// <remarks>
+        /// A liveness probe that fails while a database is down restarts every instance at once
+        /// and cures nothing. The framework conditions are the ones a restart can clear: a host
+        /// stuck in startup or shutdown, a component manager or a declared application that could
+        /// not be created.
+        /// </remarks>
+        /// <returns>True when the framework is running and every declared application exists.</returns>
+        bool CheckLiveness();
     }
 }

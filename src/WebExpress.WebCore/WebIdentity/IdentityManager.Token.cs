@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebSetting;
 
@@ -73,9 +74,22 @@ namespace WebExpress.WebCore.WebIdentity
         /// </summary>
         /// <param name="applicationContext">The application whose authentication endpoints are being served.</param>
         /// <returns>True when a signing authority and a token store are available; otherwise, false.</returns>
-        internal bool IsAuthenticationConfigured(IApplicationContext applicationContext)
+        public bool IsAuthenticationConfigured(IApplicationContext applicationContext)
         {
-            return Authority is not null && TokenStore(applicationContext) is not null;
+            try
+            {
+                return Authority is not null && TokenStore(applicationContext) is not null;
+            }
+            catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidOperationException)
+            {
+                // the authority and the configuration binder reject the section by throwing, which
+                // is right for signing but not for a question a probe asks on every request
+                _httpServerContext?.Log?.Warning
+                (
+                    I18N.Translate("webexpress.webcore:identitymanager.authentication.invalid", ex.Message)
+                );
+                return false;
+            }
         }
 
         /// <summary>

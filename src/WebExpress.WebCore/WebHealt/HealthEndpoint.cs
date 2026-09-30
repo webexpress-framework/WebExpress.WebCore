@@ -13,15 +13,34 @@ namespace WebExpress.WebCore.WebHealt
     internal static class HealthEndpoint
     {
         /// <summary>
-        /// Reserves only the global health path so similarly named application routes remain reachable.
+        /// Reserves only the global health paths so similarly named application routes remain reachable.
         /// </summary>
         /// <param name="context">The context whose raw features remain available after request parsing failures.</param>
-        /// <returns>True for the global health path, with an optional trailing slash.</returns>
+        /// <returns>True for the global health or liveness path, with an optional trailing slash.</returns>
         internal static bool Matches(IHttpContext context)
         {
+            return RequestPath(context) is "/health" or "/health/" || IsLiveness(context);
+        }
+
+        /// <summary>
+        /// Separates the liveness probe, which must not depend on application dependencies.
+        /// </summary>
+        /// <param name="context">The context whose raw features remain available after request parsing failures.</param>
+        /// <returns>True for the liveness path, with an optional trailing slash.</returns>
+        internal static bool IsLiveness(IHttpContext context)
+        {
+            return RequestPath(context) is "/health/live" or "/health/live/";
+        }
+
+        /// <summary>
+        /// Reads the path from the raw features, which exist even when request parsing failed.
+        /// </summary>
+        /// <param name="context">The context of the probe request.</param>
+        /// <returns>The path without query, or null when the context carries none.</returns>
+        private static string RequestPath(IHttpContext context)
+        {
             var feature = context?.Features.Get<IHttpRequestFeature>();
-            var path = string.IsNullOrEmpty(feature?.Path) ? feature?.RawTarget?.Split('?')[0] : feature.Path;
-            return path is "/health" or "/health/";
+            return string.IsNullOrEmpty(feature?.Path) ? feature?.RawTarget?.Split('?')[0] : feature.Path;
         }
 
         /// <summary>
@@ -31,9 +50,10 @@ namespace WebExpress.WebCore.WebHealt
         /// <param name="manager">The health manager, or null while the framework is unavailable.</param>
         /// <param name="log">The server log receiving unexpected framework errors.</param>
         /// <param name="cancellationToken">The cancellation token for the disconnected probe client.</param>
+        /// <param name="liveness">Whether only the framework is judged, leaving application checks out.</param>
         /// <returns>A non-cacheable response containing only the public aggregate status.</returns>
         internal static async Task<IResponse> HandleAsync(IRequest request, IHealthManager manager, ILog log,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken, bool liveness = false)
         {
             if (request.Method is not RequestMethod.GET and not RequestMethod.HEAD)
             {
@@ -53,7 +73,7 @@ namespace WebExpress.WebCore.WebHealt
                 }
                 else
                 {
-                    healthy = await manager.CheckAsync(cancellationToken);
+                    healthy = liveness ? manager.CheckLiveness() : await manager.CheckAsync(cancellationToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

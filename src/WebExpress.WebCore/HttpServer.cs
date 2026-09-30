@@ -1055,7 +1055,7 @@ namespace WebExpress.WebCore
                     var cancellationToken = httpContext.Features.Get<IHttpRequestLifetimeFeature>()?.RequestAborted
                         ?? CancellationToken.None;
                     var response = await HealthEndpoint.HandleAsync(httpContext.Request, WebEx.ComponentHub?.HealthManager,
-                        HttpServerContext.Log, cancellationToken);
+                        HttpServerContext.Log, cancellationToken, HealthEndpoint.IsLiveness(httpContext));
                     await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
                     return;
                 }

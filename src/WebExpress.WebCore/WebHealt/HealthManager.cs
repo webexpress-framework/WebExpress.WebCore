@@ -150,7 +150,26 @@ namespace WebExpress.WebCore.WebHealt
         }
 
         /// <summary>
-        /// Rejects probes during startup or shutdown and when a component failed to initialize.
+        /// Judges the framework alone, so a liveness probe restarts the process only for faults a
+        /// restart can cure and never because a database the process does not own is down.
+        /// </summary>
+        /// <returns>True when the framework is running and every declared application exists.</returns>
+        public bool CheckLiveness()
+        {
+            lock (_sync)
+            {
+                if (_disposed)
+                {
+                    return false;
+                }
+            }
+
+            return CheckFramework();
+        }
+
+        /// <summary>
+        /// Rejects probes during startup or shutdown, when a component failed to initialize and
+        /// when a declared application could not be created.
         /// </summary>
         /// <returns>True when hosting and the component registry can support application requests.</returns>
         private bool CheckFramework()
@@ -167,7 +186,15 @@ namespace WebExpress.WebCore.WebHealt
                 return false;
             }
 
-            return true;
+            // a failed application took its health bindings with it, so no check of its own can fail
+            var failures = _componentHub.ApplicationManager.FailedApplications.ToArray();
+            foreach (var failure in failures)
+            {
+                _httpServerContext.Log?.Error(I18N.Translate("webexpress.webcore:health.application_unavailable",
+                    failure.ApplicationId, failure.PluginContext?.PluginId, failure.Exception?.Message));
+            }
+
+            return failures.Length == 0;
         }
 
         /// <summary>

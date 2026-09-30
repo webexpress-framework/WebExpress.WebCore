@@ -81,6 +81,30 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A section that exists but would issue weak or inconsistent credentials answers the public question
+        /// like a missing one, instead of throwing at a health check, and names the reason only in the log.
+        /// </summary>
+        /// <param name="setting">The setting that makes the section unusable.</param>
+        /// <param name="value">The value it is overridden with.</param>
+        [Theory]
+        [InlineData("SigningKey", "AAAAAAAAAAAAAAAAAAAAAA==")]
+        [InlineData("SigningKey", "not base64!")]
+        [InlineData("Issuer", " ")]
+        [InlineData("AccessTokenLifetime", "00:00:00")]
+        [InlineData("AccessTokenLifetime", "soon")]
+        public void InvalidSectionIsNotConfigured(string setting, string value)
+        {
+            using var fixture = new AuthenticationFixture();
+            var key = fixture.Settings.SigningKey;
+            fixture.Server.Configuration["WebExpress:Authentication:" + setting] = value;
+            IIdentityManager manager = fixture.Manager;
+
+            Assert.False(manager.IsAuthenticationConfigured(fixture.Application));
+            Assert.Contains(fixture.Server.Log.GetRecentEntries(), x => x.Message.Contains("WebExpress:Authentication"));
+            Assert.DoesNotContain(fixture.Server.Log.GetRecentEntries(), x => x.Message.Contains(key));
+        }
+
+        /// <summary>
         /// Removing the owning plugin unbinds and disposes the store, so no request keeps writing into it.
         /// </summary>
         [Fact]

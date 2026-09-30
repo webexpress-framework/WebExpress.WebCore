@@ -29,8 +29,13 @@ namespace WebExpress.WebCore.Test.Server
         [InlineData("/health", true)]
         [InlineData("/health/", true)]
         [InlineData("/health?probe=readiness", true)]
+        [InlineData("/health/live", true)]
+        [InlineData("/health/live/", true)]
+        [InlineData("/health/live?probe=liveness", true)]
         [InlineData("/healthy", false)]
         [InlineData("/health/details", false)]
+        [InlineData("/health/lively", false)]
+        [InlineData("/app/health/live", false)]
         [InlineData("/server/health", false)]
         [InlineData("/app/health", false)]
         [InlineData("/", false)]
@@ -109,6 +114,53 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
+        /// Separates the liveness path so it never runs application checks.
+        /// </summary>
+        /// <param name="path">The requested route.</param>
+        /// <param name="liveness">Whether the route is the liveness probe.</param>
+        [Theory]
+        [InlineData("/health/live", true)]
+        [InlineData("/health/live/?probe=liveness", true)]
+        [InlineData("/health", false)]
+        [InlineData("/health/", false)]
+        public void IsLiveness_DistinguishesLivenessFromReadiness(string path, bool liveness)
+        {
+            // arrange
+            var context = UnitTestFixture.CreateHttpContextMock($"GET {path} HTTP/1.1\r\n\r\n");
+
+            // act
+            var actual = HealthEndpoint.IsLiveness(context);
+
+            // validation
+            Assert.Equal(liveness, actual);
+        }
+
+        /// <summary>
+        /// Answers the liveness probe from the framework state alone, so a failing dependency cannot restart the process.
+        /// </summary>
+        /// <returns>A task that completes after the liveness response is validated.</returns>
+        [Fact]
+        public async Task HandleAsync_Liveness_SkipsApplicationChecks()
+        {
+            // arrange
+            var context = UnitTestFixture.CreateHttpServerContextMock();
+            var request = UnitTestFixture.CreateRequestMock("GET /health/live HTTP/1.1\r\n\r\n");
+            using var manager = new FailingHealthManager { Live = true };
+
+            // act
+            var live = await HealthEndpoint.HandleAsync(request, manager, context.Log, TestContext.Current.CancellationToken, liveness: true);
+            manager.Live = false;
+            var dead = await HealthEndpoint.HandleAsync(request, manager, context.Log, TestContext.Current.CancellationToken, liveness: true);
+
+            // validation
+            Assert.Equal(200, live.Status);
+            Assert.Equal("{\"status\":\"healthy\"}", live.Content);
+            Assert.Equal(503, dead.Status);
+            Assert.Equal(UnhealthyBody, dead.Content);
+            Assert.DoesNotContain(context.Log.GetRecentEntries(), x => x.Message.Contains("private-manager-diagnostic"));
+        }
+
+        /// <summary>
         /// Keeps request parsing errors from exposing technical details on the reserved health path.
         /// </summary>
         /// <returns>A task that completes after the malformed probe response is validated.</returns>
@@ -181,6 +233,9 @@ namespace WebExpress.WebCore.Test.Server
                 using var healthy = await client.GetAsync("/health?probe=readiness", TestContext.Current.CancellationToken);
                 failure = "result";
                 using var failed = await client.GetAsync("/health", TestContext.Current.CancellationToken);
+                var callsBeforeLive = calls;
+                using var live = await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
+                var callsAfterLive = calls;
                 failure = "exception";
                 using var exception = await client.GetAsync("/health/", TestContext.Current.CancellationToken);
                 failure = "none";
@@ -203,6 +258,8 @@ namespace WebExpress.WebCore.Test.Server
                     Assert.True(response.Headers.CacheControl.NoStore);
                     Assert.False(response.Headers.Contains("Set-Cookie"));
                 }
+                Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+                Assert.Equal(callsBeforeLive, callsAfterLive);
                 Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
                 Assert.Equal(HttpStatusCode.OK, head.StatusCode);
                 Assert.Empty(await head.Content.ReadAsByteArrayAsync(TestContext.Current.CancellationToken));
@@ -261,6 +318,20 @@ namespace WebExpress.WebCore.Test.Server
             public Task<bool> CheckAsync(CancellationToken cancellationToken = default)
             {
                 return Task.FromException<bool>(new InvalidOperationException("private-manager-diagnostic"));
+            }
+
+            /// <summary>
+            /// Gets or sets the framework state the liveness probe reports.
+            /// </summary>
+            public bool Live { get; set; }
+
+            /// <summary>
+            /// Reports the configured framework state without touching the failing readiness path.
+            /// </summary>
+            /// <returns>The configured framework state.</returns>
+            public bool CheckLiveness()
+            {
+                return Live;
             }
 
             /// <summary>

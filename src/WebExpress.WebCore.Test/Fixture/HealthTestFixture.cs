@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Reflection.Emit;
 using WebExpress.WebCore.Test.Data;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
@@ -33,6 +34,39 @@ namespace WebExpress.WebCore.Test.Fixture
             }
 
             return new HealthTestRegistration((HealthManager)manager, plugin);
+        }
+
+        /// <summary>
+        /// Emits a public sealed application whose constructor throws.
+        /// </summary>
+        /// <remarks>
+        /// The application manager only discovers public top-level types, and such a type in the
+        /// test assembly would be registered - and fail - in every test that loads the test plugin.
+        /// A type in its own dynamic assembly is visible only to the plugin context it is handed to.
+        /// </remarks>
+        /// <param name="message">The message of the exception the constructor throws.</param>
+        /// <returns>The emitted application type.</returns>
+        internal static Type CreateThrowingApplication(string message)
+        {
+            var assembly = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("WebExpress.WebCore.Test.ThrowingApplication"),
+                AssemblyBuilderAccess.RunAndCollect);
+            var type = assembly.DefineDynamicModule("ThrowingApplication").DefineType("WebExpress.WebCore.Test.ThrowingApplication",
+                TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Class, typeof(object), [typeof(IApplication), typeof(IDisposable)]);
+
+            var constructor = type.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, Type.EmptyTypes).GetILGenerator();
+            constructor.Emit(OpCodes.Ldstr, message);
+            constructor.Emit(OpCodes.Newobj, typeof(InvalidOperationException).GetConstructor([typeof(string)]));
+            constructor.Emit(OpCodes.Throw);
+
+            foreach (var declaration in new[] { typeof(IApplication).GetMethod(nameof(IApplication.Run)), typeof(IDisposable).GetMethod(nameof(IDisposable.Dispose)) })
+            {
+                var method = type.DefineMethod(declaration.Name, MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.Final |
+                    MethodAttributes.HideBySig | MethodAttributes.NewSlot, typeof(void), Type.EmptyTypes);
+                method.GetILGenerator().Emit(OpCodes.Ret);
+                type.DefineMethodOverride(method, declaration);
+            }
+
+            return type.CreateType();
         }
     }
 
@@ -105,6 +139,15 @@ namespace WebExpress.WebCore.Test.Fixture
         /// </summary>
         /// <returns>The types supplied by the test.</returns>
         public override Type[] GetTypes()
+        {
+            return _types;
+        }
+
+        /// <summary>
+        /// Provides the declared fixture inventory to application discovery, which reads exported types only.
+        /// </summary>
+        /// <returns>The types supplied by the test.</returns>
+        public override Type[] GetExportedTypes()
         {
             return _types;
         }
