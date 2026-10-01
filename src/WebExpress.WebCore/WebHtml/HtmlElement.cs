@@ -101,9 +101,23 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// Determines whether the element is inline.
+        /// Determines whether the element is written without the line break and indentation
+        /// that otherwise precede it. Independent of this, no break is written where it would
+        /// touch text, because a browser reads it as a blank there (see <see cref="ContinuesText"/>).
         /// </summary>
         public bool Inline { get; set; }
+
+        /// <summary>
+        /// The builder and its length right after the opening tag of a text-level element was
+        /// written, so the first child of that element can tell that it continues running
+        /// text. Serialization runs on one thread from start to end, which keeps this
+        /// thread-local state consistent.
+        /// </summary>
+        [ThreadStatic]
+        private static StringBuilder _textLevelOpenBuilder;
+
+        [ThreadStatic]
+        private static int _textLevelOpenEnd;
 
         /// <summary>
         /// Determines whether the element requires a closing tag.
@@ -445,6 +459,13 @@ namespace WebExpress.WebCore.WebHtml
             {
                 ToPostString(builder, deep, nl);
             }
+
+            // the mark only concerns the first child, and a page builder must not outlive
+            // its request in a thread-local field
+            if (ReferenceEquals(_textLevelOpenBuilder, builder))
+            {
+                _textLevelOpenBuilder = null;
+            }
         }
 
         /// <summary>
@@ -454,7 +475,7 @@ namespace WebExpress.WebCore.WebHtml
         /// <param name="deep">The depth of the element in the HTML hierarchy, used for indentation.</param>
         protected virtual void ToPreString(StringBuilder builder, int deep)
         {
-            if (!Inline)
+            if (!Inline && !ContinuesText(builder))
             {
                 builder.AppendLine();
                 builder.Append(string.Empty.PadRight(deep));
@@ -469,6 +490,38 @@ namespace WebExpress.WebCore.WebHtml
             }
 
             builder.Append('>');
+
+            if (this is IHtmlElementTextSemantics)
+            {
+                _textLevelOpenBuilder = builder;
+                _textLevelOpenEnd = builder.Length;
+            }
+        }
+
+        /// <summary>
+        /// Determines whether an element written next continues running text: it follows
+        /// text directly, or it is the first child of a text-level element. A line break
+        /// there would be read as a blank and split a word formatted in part
+        /// (<c>x&lt;b&gt;y&lt;/b&gt;z</c>). Between two elements the break is kept, because
+        /// controls place an icon and its label as neighbours and rely on the blank between them.
+        /// </summary>
+        /// <param name="builder">The builder the element is written to.</param>
+        /// <returns>True if the element continues running text; otherwise, false.</returns>
+        private static bool ContinuesText(StringBuilder builder)
+        {
+            if (builder.Length == 0)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(builder, _textLevelOpenBuilder) && builder.Length == _textLevelOpenEnd)
+            {
+                return true;
+            }
+
+            var last = builder[builder.Length - 1];
+
+            return last != '>' && !char.IsWhiteSpace(last);
         }
 
         /// <summary>
@@ -479,7 +532,9 @@ namespace WebExpress.WebCore.WebHtml
         /// <param name="nl">Indicates whether the closing tag should start on a new line.</param>
         protected virtual void ToPostString(StringBuilder builder, int deep, bool nl = true)
         {
-            if (!Inline && nl)
+            // a break before the closing tag of a text-level element would be a blank inside
+            // the running text, visible before whatever follows it, such as a full stop
+            if (!Inline && nl && this is not IHtmlElementTextSemantics)
             {
                 builder.AppendLine();
                 builder.Append(string.Empty.PadRight(deep));
