@@ -24,7 +24,10 @@ namespace WebExpress.WebCore.WebMessage
         /// limited to the own origin and the nonce-carrying inline scripts the server renders.
         /// Inline styles stay allowed because the controls emit style attributes throughout,
         /// and style injection cannot execute code. Images and media may come from any https
-        /// source, since editor content legitimately references external pictures.
+        /// source, since editor content legitimately references external pictures. Embedded
+        /// objects are limited to the own origin: browsers no longer run plugins, so an object
+        /// can only show a document - the PDF viewer control relies on it - and a foreign one
+        /// has to be allowed explicitly.
         /// </summary>
         public const string DefaultContentSecurityPolicy =
             "default-src 'self'; " +
@@ -34,7 +37,7 @@ namespace WebExpress.WebCore.WebMessage
             "media-src 'self' blob: https:; " +
             "font-src 'self' data:; " +
             "connect-src 'self'; " +
-            "object-src 'none'; " +
+            "object-src 'self'; " +
             "base-uri 'self'; " +
             "form-action 'self'; " +
             "frame-ancestors 'self'";

@@ -63,7 +63,7 @@ namespace WebExpress.WebCore.Test.Message
             Assert.Equal("nosniff", feature.Headers["X-Content-Type-Options"]);
             Assert.Equal("SAMEORIGIN", feature.Headers["X-Frame-Options"]);
             Assert.Equal("strict-origin-when-cross-origin", feature.Headers["Referrer-Policy"]);
-            Assert.Contains("object-src 'none'", feature.Headers["Content-Security-Policy"].ToString());
+            Assert.Contains("object-src 'self'", feature.Headers["Content-Security-Policy"].ToString());
             Assert.False(feature.Headers.ContainsKey("Strict-Transport-Security"));
         }
 
