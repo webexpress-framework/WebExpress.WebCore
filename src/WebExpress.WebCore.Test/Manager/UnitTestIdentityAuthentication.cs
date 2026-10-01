@@ -97,6 +97,86 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// The signature alone decides acceptance: identical header and claims are honored under the
+        /// deployment key and refused under any other key, so knowing the claim layout never suffices.
+        /// </summary>
+        [Fact]
+        public void TokenSignedWithForeignKeyIsRejected()
+        {
+            using var fixture = new AuthenticationFixture();
+            var app = fixture.Application;
+            var token = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "alice"), app).AccessToken;
+            var parts = token.Split('.');
+            var key = Convert.FromBase64String(fixture.Settings.SigningKey);
+
+            // reproducing the issued token proves the forgery differs from it in nothing but the key
+            var resigned = Sign(parts[0], parts[1], key, HMACSHA256.HashData);
+            Assert.Equal(token, resigned);
+            Assert.NotNull(fixture.Manager.ValidateAccessToken(resigned, app));
+
+            var forged = Sign(parts[0], parts[1], RandomNumberGenerator.GetBytes(32), HMACSHA256.HashData);
+            Assert.Null(fixture.Manager.ValidateAccessToken(forged, app));
+        }
+
+        /// <summary>
+        /// A damaged, truncated, or absent signature is refused instead of being treated as optional.
+        /// </summary>
+        [Fact]
+        public void TamperedOrMissingSignatureIsRejected()
+        {
+            using var fixture = new AuthenticationFixture();
+            var app = fixture.Application;
+            var token = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "alice"), app).AccessToken;
+            var parts = token.Split('.');
+            Assert.NotNull(fixture.Manager.ValidateAccessToken(token, app));
+
+            // flipped on the decoded bytes, because altering the last base64url character may only touch
+            // padding bits and decode to the very same signature
+            var signature = Base64UrlEncoder.DecodeBytes(parts[2]);
+            signature[^1] ^= 0x01;
+            Assert.Null(fixture.Manager.ValidateAccessToken($"{parts[0]}.{parts[1]}.{Base64UrlEncoder.Encode(signature)}", app));
+            Assert.Null(fixture.Manager.ValidateAccessToken($"{parts[0]}.{parts[1]}.{Base64UrlEncoder.Encode(signature[..^1])}", app));
+            Assert.Null(fixture.Manager.ValidateAccessToken($"{parts[0]}.{parts[1]}.", app));
+            Assert.Null(fixture.Manager.ValidateAccessToken($"{parts[0]}.{parts[1]}", app));
+        }
+
+        /// <summary>
+        /// The header cannot choose how the signature is checked: an unsigned token and a token correctly
+        /// signed with the deployment key under another algorithm are both refused.
+        /// </summary>
+        [Fact]
+        public void SignatureAlgorithmCannotBeChosenByToken()
+        {
+            using var fixture = new AuthenticationFixture();
+            var app = fixture.Application;
+            var parts = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "alice"), app).AccessToken.Split('.');
+            var key = Convert.FromBase64String(fixture.Settings.SigningKey);
+            var header = Base64UrlEncoder.Decode(parts[0]);
+            Assert.Contains("\"HS256\"", header);
+
+            var unsigned = Base64UrlEncoder.Encode(header.Replace("\"HS256\"", "\"none\""));
+            Assert.Null(fixture.Manager.ValidateAccessToken($"{unsigned}.{parts[1]}.", app));
+
+            var hs512 = Base64UrlEncoder.Encode(header.Replace("\"HS256\"", "\"HS512\""));
+            Assert.Null(fixture.Manager.ValidateAccessToken(Sign(hs512, parts[1], key, HMACSHA512.HashData), app));
+        }
+
+        /// <summary>
+        /// Builds a compact JWS by hand so a test controls header, payload, key, and algorithm independently
+        /// of the token handler under test.
+        /// </summary>
+        /// <param name="header">The base64url-encoded protected header.</param>
+        /// <param name="payload">The base64url-encoded claim set.</param>
+        /// <param name="key">The HMAC key that produces the signature.</param>
+        /// <param name="hmac">The HMAC function matching the algorithm named in the header.</param>
+        /// <returns>The serialized token in compact form.</returns>
+        private static string Sign(string header, string payload, byte[] key, Func<byte[], byte[], byte[]> hmac)
+        {
+            var signature = hmac(key, System.Text.Encoding.ASCII.GetBytes(header + "." + payload));
+            return header + "." + payload + "." + Base64UrlEncoder.Encode(signature);
+        }
+
+        /// <summary>
         /// Refresh replay revokes its successor across instances and renewal never moves the absolute grant deadline.
         /// </summary>
         [Fact]
