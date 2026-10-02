@@ -30,6 +30,12 @@ namespace WebExpress.WebCore.WebMessage
         private static partial Regex DispositionParamRegex();
 
         /// <summary>
+        /// The initial size of the request body buffer. Typical form posts fit without a resize,
+        /// while larger bodies grow the buffer only as their bytes are received.
+        /// </summary>
+        internal const int InitialContentBufferSize = 64 * 1024;
+
+        /// <summary>
         /// Gets the content.
         /// </summary>
         public byte[] Content { get; private set; }
@@ -63,16 +69,26 @@ namespace WebExpress.WebCore.WebMessage
                 return null;
             }
 
-            // the announced length lets us allocate the exact buffer once instead of
-            // growing a MemoryStream and copying it out again. a byte[] cannot exceed
-            // int.MaxValue, which matches the previous MemoryStream.ToArray() limit.
+            // the announced length is client-controlled, so it only caps the read; memory is
+            // committed as bytes actually arrive, otherwise a slow client announcing a large
+            // body would pin that much memory per connection before sending anything
             var length = (int)Math.Min(contentLength.Value, int.MaxValue);
-            var buffer = new byte[length];
+            var buffer = new byte[Math.Min(length, InitialContentBufferSize)];
 
             var offset = 0;
-            int read;
-            while (offset < length && (read = body.Read(buffer, offset, length - offset)) > 0)
+            while (offset < length)
             {
+                if (offset == buffer.Length)
+                {
+                    Array.Resize(ref buffer, (int)Math.Min((long)buffer.Length * 2, length));
+                }
+
+                var read = body.Read(buffer, offset, buffer.Length - offset);
+                if (read == 0)
+                {
+                    break;
+                }
+
                 offset += read;
             }
 

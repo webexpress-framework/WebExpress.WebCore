@@ -37,7 +37,7 @@ namespace WebExpress.WebCore.WebAsset.Model
             return _dictionary.Values
                 .SelectMany(x => x.Values)
                 .SelectMany(x => x)
-                .FirstOrDefault(x => x.AssetContext?.EndpointId == assetContext.EndpointId);
+                .FirstOrDefault(x => x.AssetContext?.EndpointId?.Equals(assetContext.EndpointId) ?? false);
         }
 
         /// <summary>
@@ -93,7 +93,7 @@ namespace WebExpress.WebCore.WebAsset.Model
 
             var assetList = value;
 
-            assetList.RemoveAll(x => x.AssetContext?.EndpointId == assetItem.AssetContext.EndpointId);
+            assetList.RemoveAll(x => x.AssetContext?.EndpointId?.Equals(assetItem.AssetContext.EndpointId) ?? false);
             assetList.Add(assetItem);
 
             return true;

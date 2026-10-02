@@ -19,6 +19,13 @@ namespace WebExpress.WebCore.WebResource
         private object Gard { get; set; }
 
         /// <summary>
+        /// The entity tags of the delivered files, keyed by resource file name. Embedded resources
+        /// are immutable for the lifetime of the process, so each content hash is computed once
+        /// instead of on every request.
+        /// </summary>
+        private readonly Dictionary<string, string> _eTags = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
         /// Gets the root directory.
         /// </summary>
         public string AssetDirectory { get; protected set; }
@@ -57,7 +64,12 @@ namespace WebExpress.WebCore.WebResource
                 }
 
                 // conditional request: serve 304 when the client already holds the current version
-                var eTag = ComputeETag(Data);
+                if (!_eTags.TryGetValue(file, out var eTag))
+                {
+                    eTag = ComputeETag(Data);
+                    _eTags[file] = eTag;
+                }
+
                 if (IsNotModified(request, eTag))
                 {
                     return CreateNotModifiedResponse(eTag);
