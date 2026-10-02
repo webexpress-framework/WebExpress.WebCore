@@ -901,8 +901,10 @@ namespace WebExpress.WebCore
                 return CreatePlainStatusResponse(response);
             }
 
-            var statusPageManager = WebEx.ComponentHub.StatusPageManager;
-            var applicationManager = WebEx.ComponentHub.ApplicationManager;
+            // the hub is missing when the failure being reported is its own absence, early in
+            // startup; only the built-in page below can be produced then
+            var statusPageManager = WebEx.ComponentHub?.StatusPageManager;
+            var applicationManager = WebEx.ComponentHub?.ApplicationManager;
 
             // a request that failed before its context could be built has none, and the status
             // page still has to be produced - it is the only place the original failure is
@@ -913,10 +915,10 @@ namespace WebExpress.WebCore
                 : new RouteEndpoint(request.Uri.PathSegments)?.ToString();
             var applicationContext = string.IsNullOrEmpty(route)
                 ? null
-                : applicationManager.Applications
+                : applicationManager?.Applications
                     .FirstOrDefault(x => route.StartsWith(x.Route.ToString()));
 
-            if (searchResult is not null)
+            if (statusPageManager is not null && searchResult is not null)
             {
                 return statusPageManager.CreateStatusResponse
                 (
@@ -927,7 +929,7 @@ namespace WebExpress.WebCore
                 );
             }
 
-            if (applicationContext is not null)
+            if (statusPageManager is not null && applicationContext is not null)
             {
                 return statusPageManager.CreateStatusResponse
                 (
@@ -1030,6 +1032,10 @@ namespace WebExpress.WebCore
         /// <returns>Provides an asynchronous operation that handles the http context.</returns>
         public async Task ProcessRequestAsync(IHttpContext httpContext)
         {
+            // shared with the pipeline, which stops it once it has recorded its response; a
+            // failure while that response is being sent must not be counted a second time
+            var stopwatch = Stopwatch.StartNew();
+
             try
             {
                 if (_isStopping)
@@ -1060,19 +1066,28 @@ namespace WebExpress.WebCore
                     return;
                 }
 
-                await ProcessRequestCoreAsync(httpContext);
+                await ProcessRequestCoreAsync(httpContext, stopwatch);
             }
             catch (Exception ex)
             {
                 HttpServerContext.Log?.Exception(ex);
 
-                var response = HealthEndpoint.Matches(httpContext)
+                var isHealth = HealthEndpoint.Matches(httpContext);
+                var response = isHealth
                     ? HealthEndpoint.CreateResponse(false, httpContext.Features.Get<IHttpRequestFeature>()?.Method == "HEAD")
                     : CreateStatusPage<ResponseInternalServerError>
                     (
                         Describe(ex),
                         httpContext?.Request
                     );
+
+                // probes stay out of the statistics, as on their regular path; any other request
+                // that failed must show up, since failures are what the error rate is read for
+                if (!isHealth && stopwatch.IsRunning)
+                {
+                    stopwatch.Stop();
+                    UpdateStatistics(response, stopwatch.ElapsedMilliseconds);
+                }
 
                 await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
             }
@@ -1106,11 +1121,13 @@ namespace WebExpress.WebCore
         /// Handles missing sitemap endpoints directly here.
         /// </summary>
         /// <param name="httpContext">The http context that the operation processes.</param>
+        /// <param name="stopwatch">
+        /// Measures the request since it arrived; stopped once its response is recorded in the statistics.
+        /// </param>
         /// <returns>Provides an asynchronous operation that handles the http context.</returns>
-        private async Task ProcessRequestCoreAsync(IHttpContext httpContext)
+        private async Task ProcessRequestCoreAsync(IHttpContext httpContext, Stopwatch stopwatch)
         {
             var sender = new ResponseSender(SecurityHeaders);
-            var stopwatch = Stopwatch.StartNew();
 
             /*
              * Applies pending authentication and optional session cookies even when routing bypasses a handler.
@@ -1123,6 +1140,7 @@ namespace WebExpress.WebCore
             {
                 IssueSessionCookie(context?.Request, response);
                 WebEx.ComponentHub.IdentityManager.ApplyAuthenticationCookies(context?.Request, response);
+                stopwatch.Stop();
                 UpdateStatistics(response, stopwatch.ElapsedMilliseconds);
 
                 await sender.SendAsync(context, response);

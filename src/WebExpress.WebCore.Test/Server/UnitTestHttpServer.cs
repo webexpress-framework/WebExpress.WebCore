@@ -134,6 +134,44 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
+        /// A request that fails inside the pipeline is answered by the outer fallback, which must
+        /// still record it - exactly once - so that the error rate reflects the failures it exists
+        /// to show.
+        /// </summary>
+        /// <returns>A task that completes after the statistics have been verified.</returns>
+        [Fact]
+        public async Task ProcessRequestAsync_UnhandledFailure_IsRecordedOnceAsError()
+        {
+            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var previousHub = WebEx.ComponentHub;
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
+            var context = UnitTestFixture.CreateHttpContextMock($"GET {Endpoint} HTTP/1.1\r\nCookie:\r\n\r\n");
+            var response = new HttpResponseFeature();
+            context.Features.Set<IHttpResponseFeature>(response);
+            context.Features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(new MemoryStream()));
+
+            // summed over all minutes so the assertion holds when the clock crosses a minute boundary
+            var requestsBefore = HttpServer.Statistics.Sum(x => x.Requests);
+            var errorsBefore = HttpServer.Statistics.Sum(x => x.Errors);
+
+            try
+            {
+                // without a component hub the pipeline throws before it records any response
+                hubField.SetValue(null, null);
+
+                await server.ProcessRequestAsync(context);
+
+                Assert.Equal(500, response.StatusCode);
+                Assert.Equal(requestsBefore + 1, HttpServer.Statistics.Sum(x => x.Requests));
+                Assert.Equal(errorsBefore + 1, HttpServer.Statistics.Sum(x => x.Errors));
+            }
+            finally
+            {
+                hubField.SetValue(null, previousHub);
+            }
+        }
+
+        /// <summary>
         /// Answers a request through the server and returns what the client would see of it.
         /// </summary>
         /// <remarks>

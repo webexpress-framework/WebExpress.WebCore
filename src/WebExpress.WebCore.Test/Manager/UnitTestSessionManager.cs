@@ -1,6 +1,7 @@
 ﻿using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebParameter;
+using WebExpress.WebCore.WebSession;
 using WebExpress.WebCore.WebSession.Model;
 
 namespace WebExpress.WebCore.Test.Manager
@@ -333,23 +334,28 @@ namespace WebExpress.WebCore.Test.Manager
         /// <summary>
         /// With no explicit timeout, cleanup reclaims exactly what the access check would already
         /// refuse - it sweeps by the manager's own <see cref="WebExpress.WebCore.WebSession.SessionManager.Timeout"/>
-        /// rather than by the old year-long default.
+        /// rather than by the old year-long default. The call goes through the interface on
+        /// purpose: a default argument is taken from the type the caller sees, so a default that
+        /// only the implementation declares never reaches a caller such as the cleanup job.
         /// </summary>
         [Fact]
         public void CleanUp_WithoutExplicitTimeout_UsesTheManagerTimeout()
         {
             // arrange
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            componentHub.SessionManager.Timeout = TimeSpan.FromMinutes(30);
-            var seeded = componentHub.SessionManager.GetSession(UnitTestFixture.CreateRequestMock());
+            ISessionManager sessionManager = componentHub.SessionManager;
+            sessionManager.Timeout = TimeSpan.FromMinutes(30);
+            var seeded = sessionManager.GetSession(UnitTestFixture.CreateRequestMock());
             var staleId = seeded.Id;
             seeded.Updated = DateTime.Now.AddHours(-1);
             var applicationContext = new WebExpress.WebCore.WebApplication.ApplicationContext();
 
             // act
-            componentHub.SessionManager.CleanUp(applicationContext);
+            sessionManager.CleanUp(applicationContext);
 
-            // validation - the swept id now resolves to a brand new session
+            // validation - expiry on access is switched off, so the stale id could only fail to
+            // resolve because the sweep removed it, not because the lookup refused it
+            sessionManager.Timeout = TimeSpan.Zero;
             var request = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={staleId}\n\n");
             Assert.NotEqual(staleId, componentHub.SessionManager.GetSession(request).Id);
         }

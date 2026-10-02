@@ -56,6 +56,6 @@ namespace WebExpress.WebCore.WebSession
         /// the effective timeout is non-positive, cleanup is skipped.
         /// </param>
         /// <returns>The current instance of the session manager, allowing for method chaining.</returns>
-        ISessionManager CleanUp(IApplicationContext applicationContext, int timeoutMinutes = 60 * 24 * 365);
+        ISessionManager CleanUp(IApplicationContext applicationContext, int timeoutMinutes = 0);
     }
 }
