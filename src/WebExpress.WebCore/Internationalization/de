@@ -64,6 +64,7 @@ packagemanager.settings.deployed=Die Einstellungsdatei '{0}' wurde in das Einste
 packagemanager.settings.existing=Die Einstellungsdatei '{0}' existiert bereits im Einstellungsverzeichnis und wurde beibehalten.
 packagemanager.settings.ignored=Der Paketeintrag '{0}' ist keine Einstellungsdatei und wurde ignoriert.
 packagemanager.settings.invalid=Die Einstellungsdatei '{0}' des Pakets ist kein gültiges JSON und wurde nicht übernommen.
+packagemanager.settings.outofscope=Die Einstellungsdatei '{0}' des Pakets setzt den Schlüssel '{1}' außerhalb von '{2}' und wurde nicht übernommen.
 
 pluginmanager.initialization=Der Pluginmanager wurde initialisiert.
 pluginmanager.load={0}.dll wird geladen. Version = '{1}'

@@ -247,12 +247,42 @@ namespace WebExpress.WebCore.WebApplication
 
             DiscardFailures(pluginContext);
 
-            foreach (var applicationContext in _dictionary.RemoveApplications(pluginContext))
+            foreach (var applicationItem in _dictionary.RemoveApplications(pluginContext))
             {
-                OnRemoveApplication(applicationContext);
+                // a still running Run() sees the cancellation before the instance goes away
+                applicationItem.CancellationTokenSource.Cancel();
+
+                // listeners such as the job manager release what they bound to the application
+                // while it is still intact
+                OnRemoveApplication(applicationItem.ApplicationContext);
+
+                Release(applicationItem);
             }
 
             Log();
+        }
+
+        /// <summary>
+        /// Disposes a removed application. It runs while its plugin is removed, before the plugin's
+        /// load context is unloaded, so an application cannot outlive its code with open handles or
+        /// background work. A failing application must not keep the remaining ones from being released.
+        /// </summary>
+        /// <param name="applicationItem">The entry of the removed application.</param>
+        private void Release(ApplicationItem applicationItem)
+        {
+            try
+            {
+                applicationItem.CancellationTokenSource.Cancel();
+                applicationItem.Application?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _httpServerContext?.Log?.Exception(ex);
+            }
+            finally
+            {
+                applicationItem.CancellationTokenSource.Dispose();
+            }
         }
 
         /// <summary>
@@ -562,17 +592,7 @@ namespace WebExpress.WebCore.WebApplication
 
             foreach (var context in _dictionary.All.ToArray())
             {
-                var item = _dictionary.GetApplicationItem(context);
-                try
-                {
-                    item.CancellationTokenSource.Cancel();
-                    item.Application?.Dispose();
-                    item.CancellationTokenSource.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    _httpServerContext?.Log?.Exception(ex);
-                }
+                Release(_dictionary.GetApplicationItem(context));
             }
         }
     }

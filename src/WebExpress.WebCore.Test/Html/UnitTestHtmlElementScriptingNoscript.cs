@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementScriptingNoscript();
 
-            Assert.Equal(@"<span></span>", html.Trim());
+            Assert.Equal(@"<noscript></noscript>", html.Trim());
         }
     }
 }

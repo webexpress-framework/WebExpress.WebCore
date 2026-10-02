@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementTextSemanticsKdb();
 
-            Assert.Equal(@"<kdb></kdb>", html.Trim());
+            Assert.Equal(@"<kbd></kbd>", html.Trim());
         }
     }
 }

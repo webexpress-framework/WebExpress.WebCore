@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementEmbeddedEmbed();
 
-            Assert.Equal(@"<embed></embed>", html.Trim());
+            Assert.Equal(@"<embed>", html.Trim());
         }
     }
 }

@@ -36,5 +36,21 @@ namespace WebExpress.WebCore.Test.Message
             // validation
             Assert.Equal(location.ToString(), response.Header.Location);
         }
+
+        /// <summary>
+        /// Tests that the reason phrase is set regardless of the constructor used, so a
+        /// response created without a location still writes a complete status line.
+        /// </summary>
+        [Fact]
+        public void Reason()
+        {
+            // act
+            var withoutLocation = new ResponseTemporaryRedirect();
+            var withLocation = new ResponseTemporaryRedirect(new UriEndpoint("/target"));
+
+            // validation
+            Assert.Equal("Temporary Redirect", withoutLocation.Reason);
+            Assert.Equal("Temporary Redirect", withLocation.Reason);
+        }
     }
 }

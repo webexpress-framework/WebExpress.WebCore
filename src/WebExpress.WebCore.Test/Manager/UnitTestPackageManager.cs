@@ -710,6 +710,89 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A package may only configure its own plugin: a settings file that sets any key outside
+        /// of Plugins:&lt;plugin-id&gt; - a server section, another plugin, or a sibling id that
+        /// merely starts with the same name - is refused as a whole and never deployed.
+        /// </summary>
+        [Theory]
+        [InlineData("""{ "Http": { "Port": "8080" } }""")]
+        [InlineData("""{ "Plugins": { "other": { "Greeting": "hello" } } }""")]
+        [InlineData("""{ "Plugins": { "withsettingsx": { "Greeting": "hello" } } }""")]
+        [InlineData("""{ "Plugins:other:Greeting": "hello" }""")]
+        [InlineData("""{ "Plugins": "hello" }""")]
+        [InlineData("""{ "Plugins": { "withsettings": { "Greeting": "hello" } }, "Security": { "Enabled": "false" } }""")]
+        public void InstallRefusesSettingsOutsideOwnPluginSection(string settings)
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", settings);
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.False(Directory.Exists(settingsPath));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// Configuration keys are case-insensitive, so a settings file that addresses its own
+        /// plugin section in different casing - or through a colon-separated property name - is
+        /// still within scope and deployed.
+        /// </summary>
+        [Theory]
+        [InlineData("""{ "plugins": { "WithSettings": { "Greeting": "hello" } } }""")]
+        [InlineData("""{ "Plugins:withsettings": { "Greeting": "hello" } }""")]
+        public void InstallDeploysSettingsOfOwnPluginSection(string settings)
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", settings);
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.Equal("hello", configuration.GetPluginSettings("withsettings")["Greeting"]);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+
+                if (Directory.Exists(settingsPath))
+                {
+                    Directory.Delete(settingsPath, true);
+                }
+            }
+        }
+
+        /// <summary>
         /// Only a json file directly below settings/ is a settings file; an entry that tries to
         /// leave the directory is ignored and never written anywhere.
         /// </summary>

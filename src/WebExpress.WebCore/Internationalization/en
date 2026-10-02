@@ -64,6 +64,7 @@ packagemanager.settings.deployed=The settings file '{0}' was deployed to the set
 packagemanager.settings.existing=The settings file '{0}' already exists in the settings directory and was kept.
 packagemanager.settings.ignored=The package entry '{0}' is not a settings file and was ignored.
 packagemanager.settings.invalid=The settings file '{0}' of the package is not valid json and was not deployed.
+packagemanager.settings.outofscope=The settings file '{0}' of the package sets the key '{1}' outside of '{2}' and was not deployed.
 
 pluginmanager.initialization=The plugin manager has been initialized.
 pluginmanager.load={0}.dll is loading. Version = '{1}'

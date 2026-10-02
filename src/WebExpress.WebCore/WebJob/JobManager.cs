@@ -230,15 +230,18 @@ namespace WebExpress.WebCore.WebJob
             // the plugin has not been registered in the manager
             if (_staticScheduleDictionary.TryGetValue(pluginContext, out var value))
             {
-                foreach (var scheduleItem in value.Values
+                var scheduleItems = value.Values
                     .SelectMany(x => x.Values)
-                    .SelectMany(x => x))
-                {
-                    OnRemoveJob(scheduleItem.JobContext);
-                    scheduleItem.Dispose();
-                }
+                    .SelectMany(x => x)
+                    .ToList();
 
                 _staticScheduleDictionary.Remove(pluginContext);
+
+                foreach (var scheduleItem in scheduleItems)
+                {
+                    OnRemoveJob(scheduleItem.JobContext);
+                    Release(scheduleItem);
+                }
             }
         }
 
@@ -253,18 +256,20 @@ namespace WebExpress.WebCore.WebJob
                 return;
             }
 
+            var scheduleItems = new List<ScheduleItem>();
+
             foreach (var pluginDict in _staticScheduleDictionary.Values)
             {
-                foreach (var appDict in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
+                if (pluginDict.Remove(applicationContext, out var appDict))
                 {
-                    foreach (var scheduleItem in appDict.Values.SelectMany(x => x))
-                    {
-                        OnRemoveJob(scheduleItem.JobContext);
-                        scheduleItem.Dispose();
-                    }
+                    scheduleItems.AddRange(appDict.Values.SelectMany(x => x));
                 }
+            }
 
-                pluginDict.Remove(applicationContext);
+            foreach (var scheduleItem in scheduleItems)
+            {
+                OnRemoveJob(scheduleItem.JobContext);
+                Release(scheduleItem);
             }
         }
 
@@ -274,7 +279,35 @@ namespace WebExpress.WebCore.WebJob
         /// <param name="job">The job to remove.</param>
         public void Remove(IJob job)
         {
-            _dynamicScheduleList.RemoveAll(x => x == job);
+            var scheduleItems = _dynamicScheduleList
+                .Where(x => x.Instance == job)
+                .ToList();
+
+            _dynamicScheduleList.RemoveAll(scheduleItems.Contains);
+
+            foreach (var scheduleItem in scheduleItems)
+            {
+                OnRemoveJob(scheduleItem.JobContext);
+                Release(scheduleItem);
+            }
+        }
+
+        /// <summary>
+        /// Disposes a removed job. A job that fails to release its resources must not keep
+        /// the remaining jobs - or the other managers listening to the same plugin removal -
+        /// from being cleaned up.
+        /// </summary>
+        /// <param name="scheduleItem">The schedule entry of the removed job.</param>
+        private void Release(ScheduleItem scheduleItem)
+        {
+            try
+            {
+                scheduleItem.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _httpServerContext?.Log?.Exception(ex);
+            }
         }
 
         /// <summary>
@@ -380,6 +413,12 @@ namespace WebExpress.WebCore.WebJob
 
                         _httpServerContext.Lifetime.TryRun(() =>
                         {
+                            // the job may have been removed between scheduling and running
+                            if (scheduleItemValue.IsDisposed)
+                            {
+                                return;
+                            }
+
                             scheduleItemValue.Instance?.Process();
                         });
                     }
@@ -418,16 +457,11 @@ namespace WebExpress.WebCore.WebJob
             foreach (var item in _staticScheduleDictionary.Values.SelectMany(x => x.Values)
                 .SelectMany(x => x.Values).SelectMany(x => x).Concat(_dynamicScheduleList).Distinct())
             {
-                try
-                {
-                    item.Instance?.Dispose();
-                    item.TokenSource.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    _httpServerContext?.Log?.Exception(ex);
-                }
+                Release(item);
             }
+
+            _staticScheduleDictionary.Clear();
+            _dynamicScheduleList.Clear();
         }
     }
 }

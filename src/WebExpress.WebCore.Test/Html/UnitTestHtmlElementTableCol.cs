@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementTableCol();
 
-            Assert.Equal(@"<col></col>", html.Trim());
+            Assert.Equal(@"<col>", html.Trim());
         }
     }
 }

@@ -1,5 +1,7 @@
-﻿using WebExpress.WebCore.Test.Fixture;
+﻿using System.Reflection;
+using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebApplication;
+using WebExpress.WebCore.WebApplication.Model;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebPlugin;
 
@@ -47,6 +49,80 @@ namespace WebExpress.WebCore.Test.Manager
 
             // validation
             Assert.Empty(applicationManager.Applications);
+        }
+
+        /// <summary>
+        /// Removing the applications of a plugin disposes them and their cancellation token
+        /// sources at once, so a hot unload leaves no application running on unloaded code.
+        /// </summary>
+        [Fact]
+        public void RemoveDisposesApplicationsImmediately()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var applicationManager = componentHub.ApplicationManager as ApplicationManager;
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+            var applicationItems = GetApplicationItems(applicationManager, plugin);
+
+            // act
+            applicationManager.Remove(plugin);
+
+            // validation
+            Assert.NotEmpty(applicationItems);
+            Assert.True(applicationItems.Select(x => x.Application).OfType<TestApplicationA>().Single().IsDisposed);
+            Assert.All(applicationItems, x =>
+            {
+                Assert.True(x.CancellationTokenSource.IsCancellationRequested);
+                Assert.Throws<ObjectDisposedException>(() => x.CancellationTokenSource.Token);
+            });
+        }
+
+        /// <summary>
+        /// The listeners of the removal event see the application before it is disposed, so
+        /// they can still release what they bound to it.
+        /// </summary>
+        [Fact]
+        public void RemoveRaisesEventBeforeDisposing()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var applicationManager = componentHub.ApplicationManager as ApplicationManager;
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+            var application = GetApplicationItems(applicationManager, plugin)
+                .Select(x => x.Application)
+                .OfType<TestApplicationA>()
+                .Single();
+            bool? disposedDuringEvent = null;
+
+            applicationManager.RemoveApplication += (s, e) =>
+            {
+                if (e.ApplicationId == "webexpress.webcore.test.testapplicationa")
+                {
+                    disposedDuringEvent = application.IsDisposed;
+                }
+            };
+
+            // act
+            applicationManager.Remove(plugin);
+
+            // validation
+            Assert.False(disposedDuringEvent);
+            Assert.True(application.IsDisposed);
+        }
+
+        /// <summary>
+        /// Returns the registry entries of the applications of a plugin.
+        /// </summary>
+        /// <param name="applicationManager">The application manager.</param>
+        /// <param name="plugin">The plugin.</param>
+        /// <returns>The application entries.</returns>
+        private static List<ApplicationItem> GetApplicationItems(ApplicationManager applicationManager, IPluginContext plugin)
+        {
+            var dictionary = typeof(ApplicationManager)
+                .GetField("_dictionary", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(applicationManager) as ApplicationDictionary;
+
+            return [.. dictionary.GetApplicationItems(plugin)];
         }
 
         /// <summary>

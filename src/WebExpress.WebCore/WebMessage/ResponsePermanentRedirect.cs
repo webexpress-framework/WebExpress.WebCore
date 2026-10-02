@@ -14,6 +14,7 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         public ResponsePermanentRedirect()
         {
+            Reason = "Permanent Redirect";
         }
 
         /// <summary>
@@ -21,8 +22,8 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         /// <param name="location">The URI to which the client should be redirected.</param>
         public ResponsePermanentRedirect(IUri location)
+            : this()
         {
-            Reason = "Permanent Redirect";
             Header.Location = location?.ToString();
         }
     }

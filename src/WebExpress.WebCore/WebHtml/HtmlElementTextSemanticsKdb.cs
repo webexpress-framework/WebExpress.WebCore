@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.WebHtml
         /// Initializes a new instance of the class.
         /// </summary>
         public HtmlElementTextSemanticsKdb()
-            : base("kdb")
+            : base("kbd")
         {
         }
 

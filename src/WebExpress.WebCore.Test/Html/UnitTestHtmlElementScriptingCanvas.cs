@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementScriptingCanvas();
 
-            Assert.Equal(@"<canvas>", html.Trim());
+            Assert.Equal(@"<canvas></canvas>", html.Trim());
         }
     }
 }

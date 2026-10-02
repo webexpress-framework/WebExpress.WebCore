@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementFormKeygen();
 
-            Assert.Equal(@"<keygen></keygen>", html.Trim());
+            Assert.Equal(@"<keygen>", html.Trim());
         }
     }
 }

@@ -48,7 +48,6 @@ namespace WebExpress.WebCore.WebHtml
         public HtmlElementFormFieldset()
             : base("fieldset")
         {
-            CloseTag = false;
         }
 
         /// <summary>

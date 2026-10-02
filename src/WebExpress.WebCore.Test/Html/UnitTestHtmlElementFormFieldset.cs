@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementFormFieldset();
 
-            Assert.Equal(@"<fieldset>", html.Trim());
+            Assert.Equal(@"<fieldset></fieldset>", html.Trim());
         }
     }
 }

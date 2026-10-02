@@ -377,6 +377,13 @@ namespace WebExpress.WebCore.WebPlugin
         /// <summary>
         /// Removes all elemets associated with the specified plugin context.
         /// </summary>
+        /// <remarks>
+        /// The plugin is released completely before its assembly load context is unloaded: the
+        /// listeners of the removal event dispose the applications and jobs bound to the plugin,
+        /// then the plugin itself and its cancellation token source are disposed. Unloading first
+        /// would leave instances whose code is gone, and anything they still hold - timers,
+        /// handles, background work - would keep running or pin the load context in memory.
+        /// </remarks>
         /// <param name="pluginContext">The context of the plugin that contains the elemets to remove.</param>
         public void Remove(IPluginContext pluginContext)
         {
@@ -385,12 +392,70 @@ namespace WebExpress.WebCore.WebPlugin
                 return;
             }
 
+            // a plugin still waiting for its dependencies has an instance as well
+            var pluginItem = _dictionary.GetValueOrDefault(pluginContext.PluginId)
+                ?? _unfulfilledDependencies.GetValueOrDefault(pluginContext.PluginId);
+
+            // a still running Run() sees the cancellation before anything is torn down
+            Cancel(pluginItem);
+
             OnRemovePlugin(pluginContext);
 
-            var pluginItem = GetPluginItem(pluginContext);
-            pluginItem?.PluginLoadContext?.Unload();
-
             _dictionary.Remove(pluginContext.PluginId);
+            _unfulfilledDependencies.Remove(pluginContext.PluginId);
+
+            Release(pluginItem);
+
+            pluginItem?.PluginLoadContext?.Unload();
+        }
+
+        /// <summary>
+        /// Signals a plugin's background work to stop, tolerating a token source that is already disposed.
+        /// </summary>
+        /// <param name="pluginItem">The plugin entry or null.</param>
+        private void Cancel(PluginItem pluginItem)
+        {
+            try
+            {
+                pluginItem?.CancellationTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (Exception ex)
+            {
+                // a callback registered on the token threw; the plugin is released regardless
+                _httpServerContext?.Log?.Exception(ex);
+            }
+        }
+
+        /// <summary>
+        /// Disposes a plugin instance and its cancellation token source. A plugin that fails to
+        /// release its resources must not keep its load context from being unloaded or the
+        /// remaining plugins from being released.
+        /// </summary>
+        /// <param name="pluginItem">The plugin entry or null.</param>
+        private void Release(PluginItem pluginItem)
+        {
+            if (pluginItem is null)
+            {
+                return;
+            }
+
+            Cancel(pluginItem);
+
+            try
+            {
+                pluginItem.Plugin?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _httpServerContext?.Log?.Exception(ex);
+            }
+            finally
+            {
+                pluginItem.CancellationTokenSource.Dispose();
+            }
         }
 
         /// <summary>
@@ -751,19 +816,13 @@ namespace WebExpress.WebCore.WebPlugin
         /// </summary>
         public void Dispose()
         {
-            foreach (var item in _dictionary.Values)
+            foreach (var item in _dictionary.Values.Concat(_unfulfilledDependencies.Values).ToArray())
             {
-                try
-                {
-                    item.CancellationTokenSource.Cancel();
-                    item.Plugin?.Dispose();
-                    item.CancellationTokenSource.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    _httpServerContext?.Log?.Exception(ex);
-                }
+                Release(item);
             }
+
+            _dictionary.Clear();
+            _unfulfilledDependencies.Clear();
         }
     }
 }

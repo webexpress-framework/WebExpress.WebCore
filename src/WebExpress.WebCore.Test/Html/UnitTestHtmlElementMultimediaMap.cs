@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementMultimediaMap();
 
-            Assert.Equal(@"<map>", html.Trim());
+            Assert.Equal(@"<map></map>", html.Trim());
         }
     }
 }

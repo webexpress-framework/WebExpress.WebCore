@@ -45,15 +45,15 @@ namespace WebExpress.WebCore.WebApplication.Model
         /// Removes applications from the dictionary.
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
-        /// <returns>An IEnumerable of application contexts that were removed.</returns>
-        public IEnumerable<IApplicationContext> RemoveApplications(IPluginContext pluginContext)
+        /// <returns>The items of the removed applications, so the caller can raise removal events and release the instances.</returns>
+        public IEnumerable<ApplicationItem> RemoveApplications(IPluginContext pluginContext)
         {
             // removal events need the contexts after the registry entry has been deleted
-            var applicationContexts = GetApplications(pluginContext).ToArray();
+            var applicationItems = GetApplicationItems(pluginContext).ToArray();
 
             _dict.Remove(pluginContext);
 
-            return applicationContexts;
+            return applicationItems;
         }
 
         /// <summary>

@@ -14,6 +14,7 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         public ResponseTemporaryRedirect()
         {
+            Reason = "Temporary Redirect";
         }
 
         /// <summary>
@@ -21,8 +22,8 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         /// <param name="location">The URI to which the client should be redirected.</param>
         public ResponseTemporaryRedirect(IUri location)
+            : this()
         {
-            Reason = "Temporary Redirect";
             Header.Location = location?.ToString();
         }
     }

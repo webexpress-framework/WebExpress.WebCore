@@ -13,11 +13,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Serialization;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebPackage.Model;
 using WebExpress.WebCore.WebPlugin;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebPackage
 {
@@ -928,7 +930,7 @@ namespace WebExpress.WebCore.WebPackage
 
                     if (normalized.StartsWith(PackageBuilder.SettingsDirectory + "/", StringComparison.OrdinalIgnoreCase))
                     {
-                        deployedSettings |= DeploySettings(entry, normalized);
+                        deployedSettings |= DeploySettings(entry, normalized, package.Metadata?.Id ?? package.Id);
 
                         continue;
                     }
@@ -989,10 +991,18 @@ namespace WebExpress.WebCore.WebPackage
         /// existing file is left alone: it is the administrator's by then, and a package update
         /// must not undo the changes made to it.
         /// </summary>
+        /// <remarks>
+        /// Every file in the settings directory is merged into the one configuration the whole
+        /// server reads, so a package could otherwise set server keys the main file leaves out
+        /// (endpoints, security, authentication) or replace the settings of another plugin. The
+        /// file is therefore only deployed when every key it sets lies below
+        /// <c>Plugins:&lt;plugin-id&gt;</c> of the package's own plugin.
+        /// </remarks>
         /// <param name="entry">The archive entry of the settings file.</param>
         /// <param name="normalized">The entry path with forward slashes and no leading slash.</param>
+        /// <param name="pluginId">The id of the plugin the settings belong to.</param>
         /// <returns><see langword="true"/> when the file was written, <see langword="false"/> when it was skipped.</returns>
-        private bool DeploySettings(ZipArchiveEntry entry, string normalized)
+        private bool DeploySettings(ZipArchiveEntry entry, string normalized, string pluginId)
         {
             var settingsPath = _httpServerContext?.SettingsPath;
             var segments = normalized.Split('/');
@@ -1030,9 +1040,23 @@ namespace WebExpress.WebCore.WebPackage
 
             // a file that does not parse is refused before it reaches the directory: once there,
             // it would fail every following start of the server, not just this installation
-            if (!IsJson(content))
+            var keys = ReadSettingsKeys(content);
+
+            if (keys is null)
             {
                 _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.invalid", entry.FullName));
+
+                return false;
+            }
+
+            var scope = ConfigurationPath.Combine(HttpServerSettings.PluginSection, pluginId ?? string.Empty);
+            var foreignKey = string.IsNullOrWhiteSpace(pluginId)
+                ? keys.FirstOrDefault()
+                : keys.FirstOrDefault(x => !IsWithinScope(x, scope));
+
+            if (foreignKey is not null)
+            {
+                _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.outofscope", entry.FullName, foreignKey, scope));
 
                 return false;
             }
@@ -1046,27 +1070,45 @@ namespace WebExpress.WebCore.WebPackage
         }
 
         /// <summary>
-        /// Checks whether the content is a json document the configuration would accept: comments
-        /// and trailing commas included, as the json configuration provider allows them too.
+        /// Reads the configuration keys a settings file would set. The file is parsed by the same
+        /// json configuration provider the settings directory uses, so comments, trailing commas
+        /// and colons inside property names (<c>"Plugins:other": {}</c>) are flattened exactly as
+        /// they would be once the file is deployed.
         /// </summary>
-        /// <param name="content">The content to check.</param>
-        /// <returns><see langword="true"/> when the content parses as json.</returns>
-        private static bool IsJson(byte[] content)
+        /// <param name="content">The content of the settings file.</param>
+        /// <returns>The keys that carry a value, or null when the configuration would refuse the content.</returns>
+        private static IReadOnlyList<string> ReadSettingsKeys(byte[] content)
         {
             try
             {
-                using var document = JsonDocument.Parse(content, new JsonDocumentOptions
-                {
-                    CommentHandling = JsonCommentHandling.Skip,
-                    AllowTrailingCommas = true
-                });
+                using var stream = new MemoryStream(content);
+                var configuration = new ConfigurationBuilder()
+                    .AddJsonStream(stream)
+                    .Build();
 
-                return true;
+                using (configuration as IDisposable)
+                {
+                    // the settings directory merges only keys with a value; containers set nothing
+                    return [.. configuration.AsEnumerable().Where(x => x.Value is not null).Select(x => x.Key)];
+                }
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException or FormatException or InvalidDataException)
             {
-                return false;
+                return null;
             }
+        }
+
+        /// <summary>
+        /// Checks whether a configuration key lies at or below the given section.
+        /// </summary>
+        /// <param name="key">The configuration key.</param>
+        /// <param name="scope">The section the key must stay within.</param>
+        /// <returns><see langword="true"/> when the key belongs to the section.</returns>
+        private static bool IsWithinScope(string key, string scope)
+        {
+            // configuration keys are case-insensitive, so a differently cased key reaches the same section
+            return key.Equals(scope, StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith(scope + ConfigurationPath.KeyDelimiter, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

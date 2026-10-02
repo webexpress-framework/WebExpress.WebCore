@@ -14,6 +14,7 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         public ResponseSeeOther()
         {
+            Reason = "See Other";
         }
 
         /// <summary>
@@ -21,8 +22,8 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         /// <param name="location">The URI to which the client should be redirected.</param>
         public ResponseSeeOther(IUri location)
+            : this()
         {
-            Reason = "See Other";
             Header.Location = location?.ToString();
         }
     }

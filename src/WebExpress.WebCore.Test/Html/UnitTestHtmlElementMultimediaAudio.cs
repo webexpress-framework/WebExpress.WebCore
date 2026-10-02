@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementMultimediaAudio();
 
-            Assert.Equal(@"<audio>", html.Trim());
+            Assert.Equal(@"<audio></audio>", html.Trim());
         }
     }
 }

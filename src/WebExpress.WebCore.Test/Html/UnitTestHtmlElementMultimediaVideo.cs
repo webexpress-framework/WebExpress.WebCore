@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementMultimediaVideo();
 
-            Assert.Equal(@"<video>", html.Trim());
+            Assert.Equal(@"<video></video>", html.Trim());
         }
     }
 }
