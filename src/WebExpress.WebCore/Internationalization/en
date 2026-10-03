@@ -228,3 +228,7 @@ health.component_unavailable=A component manager failed to initialize.
 health.application_unavailable=The application '{0}' of the plugin '{1}' could not be created: {2}
 health.failed=Health check {0}/{1} failed: {2}
 health.timeout=Health check {0}/{1} exceeded its time budget of {2}.
+
+metrics.failed=Metric collector {0}/{1} failed: {2}
+metrics.timeout=Metric collector {0}/{1} exceeded its time budget of {2}.
+metrics.conflict=Metric values of {0} were dropped: {1}

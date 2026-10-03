@@ -37,7 +37,7 @@ namespace WebExpress.WebCore.WebHealt
         /// </summary>
         /// <param name="context">The context of the probe request.</param>
         /// <returns>The path without query, or null when the context carries none.</returns>
-        private static string RequestPath(IHttpContext context)
+        internal static string RequestPath(IHttpContext context)
         {
             var feature = context?.Features.Get<IHttpRequestFeature>();
             return string.IsNullOrEmpty(feature?.Path) ? feature?.RawTarget?.Split('?')[0] : feature.Path;

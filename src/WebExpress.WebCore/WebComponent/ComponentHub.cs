@@ -15,6 +15,7 @@ using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebInclude;
 using WebExpress.WebCore.WebJob;
 using WebExpress.WebCore.WebLog;
+using WebExpress.WebCore.WebMetrics;
 using WebExpress.WebCore.WebPackage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
@@ -62,6 +63,7 @@ namespace WebExpress.WebCore.WebComponent
         private readonly SocketManager _socketManager;
         private readonly ThemeManager _themeManager;
         private readonly HealthManager _healthManager;
+        private readonly MetricsManager _metricsManager;
         private int _lastCounter = 0;
         private int _disposed;
 
@@ -109,6 +111,7 @@ namespace WebExpress.WebCore.WebComponent
                 _taskManager,
                 _socketManager,
                 _healthManager,
+                _metricsManager,
                 _themeManager
             }.Concat(_dictionary.Values.SelectMany(x => x).Select(x => x.ComponentInstance));
 
@@ -260,6 +263,11 @@ namespace WebExpress.WebCore.WebComponent
         public IHealthManager HealthManager => _healthManager;
 
         /// <summary>
+        /// Gets the shared metrics registry used by the host, the framework managers and application components.
+        /// </summary>
+        public IMetricsManager MetricsManager => _metricsManager;
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         /// <param name="httpServerContext">The reference to the context of the host.</param>
@@ -319,6 +327,8 @@ namespace WebExpress.WebCore.WebComponent
 
             _healthManager = CreateInstance(typeof(HealthManager)) as HealthManager
                 ?? throw new InvalidOperationException("Failed to create HealthManager.");
+            _metricsManager = CreateInstance(typeof(MetricsManager)) as MetricsManager
+                ?? throw new InvalidOperationException("Failed to create MetricsManager.");
 
             _internationalizationManager.Register(typeof(HttpServer).Assembly, typeof(HttpServer).Assembly.GetName().Name?.ToLower());
 

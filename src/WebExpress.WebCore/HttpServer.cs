@@ -28,6 +28,8 @@ using WebExpress.WebCore.WebHealt;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
+using WebExpress.WebCore.WebMetrics;
+using WebExpress.WebCore.WebMetrics.Model;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebParameter;
 using WebExpress.WebCore.WebSetting;
@@ -838,6 +840,37 @@ namespace WebExpress.WebCore
         }
 
         /// <summary>
+        /// Gets the framework series of the metrics manager, resolved on use because the hub is
+        /// created after this server.
+        /// </summary>
+        private static FrameworkMetrics Metrics => (WebEx.ComponentHub?.MetricsManager as MetricsManager)?.Framework;
+
+        /// <summary>
+        /// Determines whether a request is a scrape of the metrics endpoint. A disabled endpoint
+        /// leaves the path to application routing.
+        /// </summary>
+        /// <param name="httpContext">The context of the request.</param>
+        /// <returns>True when the request must be answered by the metrics endpoint.</returns>
+        private bool IsMetricsRequest(IHttpContext httpContext)
+        {
+            return (Settings?.Metrics?.Enabled ?? true) && MetricsEndpoint.Matches(httpContext);
+        }
+
+        /// <summary>
+        /// Records a handled request in the metrics, next to the statistics and with the same
+        /// exclusions, so both views agree on what counts as traffic.
+        /// </summary>
+        /// <param name="httpContext">The context of the request.</param>
+        /// <param name="response">The response sent.</param>
+        /// <param name="duration">The processing time.</param>
+        private static void RecordRequest(IHttpContext httpContext, IResponse response, TimeSpan duration)
+        {
+            // the parsed method rather than the raw one: a client choosing arbitrary methods
+            // would otherwise create any number of series
+            Metrics?.RecordRequest(httpContext?.Request?.Method.ToString(), response?.Status ?? 0, duration);
+        }
+
+        /// <summary>
         /// Builds the answer to a request that is refused access, in place - at the address that
         /// was asked for, without a redirect.
         /// </summary>
@@ -1071,15 +1104,49 @@ namespace WebExpress.WebCore
                     return;
                 }
 
-                await ProcessRequestCoreAsync(httpContext, stopwatch);
+                if (IsMetricsRequest(httpContext))
+                {
+                    if (httpContext is HttpExceptionContext metricsException)
+                    {
+                        HttpServerContext.Log?.Exception(metricsException.Exception);
+                        var unavailable = MetricsEndpoint.CreateUnavailable(
+                            httpContext.Features.Get<IHttpRequestFeature>()?.Method == "HEAD");
+                        await new ResponseSender(SecurityHeaders).SendAsync(httpContext, unavailable);
+                        return;
+                    }
+
+                    var cancellationToken = httpContext.Features.Get<IHttpRequestLifetimeFeature>()?.RequestAborted
+                        ?? CancellationToken.None;
+                    var response = await MetricsEndpoint.HandleAsync(httpContext.Request, WebEx.ComponentHub?.MetricsManager,
+                        Settings?.Metrics, HttpServerContext.Log, cancellationToken);
+                    await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
+                    return;
+                }
+
+                // an open websocket is a connection, not a request being processed
+                var inFlight = httpContext is HttpWebSocketContext ? null : Metrics?.RequestsInFlight;
+                inFlight?.Increment();
+
+                try
+                {
+                    await ProcessRequestCoreAsync(httpContext, stopwatch);
+                }
+                finally
+                {
+                    inFlight?.Decrement();
+                }
             }
             catch (Exception ex)
             {
                 HttpServerContext.Log?.Exception(ex);
 
                 var isHealth = HealthEndpoint.Matches(httpContext);
+                var isMetrics = !isHealth && IsMetricsRequest(httpContext);
+                var head = httpContext?.Features.Get<IHttpRequestFeature>()?.Method == "HEAD";
                 var response = isHealth
-                    ? HealthEndpoint.CreateResponse(false, httpContext.Features.Get<IHttpRequestFeature>()?.Method == "HEAD")
+                    ? HealthEndpoint.CreateResponse(false, head)
+                    : isMetrics
+                    ? MetricsEndpoint.CreateUnavailable(head)
                     : CreateStatusPage<ResponseInternalServerError>
                     (
                         Describe(ex),
@@ -1088,10 +1155,11 @@ namespace WebExpress.WebCore
 
                 // probes stay out of the statistics, as on their regular path; any other request
                 // that failed must show up, since failures are what the error rate is read for
-                if (!isHealth && stopwatch.IsRunning)
+                if (!isHealth && !isMetrics && stopwatch.IsRunning)
                 {
                     stopwatch.Stop();
                     UpdateStatistics(response, stopwatch.ElapsedMilliseconds);
+                    RecordRequest(httpContext, response, stopwatch.Elapsed);
                 }
 
                 await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
@@ -1182,6 +1250,7 @@ namespace WebExpress.WebCore
                 WebEx.ComponentHub.IdentityManager.ApplyAuthenticationCookies(context?.Request, response);
                 stopwatch.Stop();
                 UpdateStatistics(response, stopwatch.ElapsedMilliseconds);
+                RecordRequest(context, response, stopwatch.Elapsed);
 
                 await sender.SendAsync(context, response);
             }

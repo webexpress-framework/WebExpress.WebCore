@@ -12,6 +12,7 @@ using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebInclude;
 using WebExpress.WebCore.WebJob;
 using WebExpress.WebCore.WebLog;
+using WebExpress.WebCore.WebMetrics;
 using WebExpress.WebCore.WebPackage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
@@ -198,6 +199,11 @@ namespace WebExpress.WebCore.WebComponent
         /// Gets the shared health registry used by the host and application dependencies.
         /// </summary>
         IHealthManager HealthManager { get; }
+
+        /// <summary>
+        /// Gets the shared metrics registry used by the host, the framework managers and application components.
+        /// </summary>
+        IMetricsManager MetricsManager { get; }
 
         /// <summary>
         /// Returns a component based on its id.

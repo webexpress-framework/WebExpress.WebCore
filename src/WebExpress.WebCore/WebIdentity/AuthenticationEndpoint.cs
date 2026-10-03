@@ -97,13 +97,13 @@ namespace WebExpress.WebCore.WebIdentity
                     case "/api/auth/login":
                         using (var lease = _loginLimiter.AttemptAcquire(_clientResolver.Resolve(request)?.ToString() ?? "unknown"))
                         {
-                            if (!lease.IsAcquired) { return Error(new ResponseTooManyRequests(), "try_again_later"); }
+                            if (!lease.IsAcquired) { manager.Metrics?.Logins.Increment("throttled"); return Error(new ResponseTooManyRequests(), "try_again_later"); }
                             using var body = ReadBody(request);
                             var username = body.RootElement.GetProperty("username").GetString();
                             var password = body.RootElement.GetProperty("password").GetString();
                             var identity = _hub.IdentityProviderManager.GetProviders(application).OfType<LocalIdentityProvider>()
                                 .Select(x => x.Authenticate(username, password)).FirstOrDefault(x => x is not null);
-                            if (identity is null) { return Unauthorized(); }
+                            if (identity is null) { manager.Metrics?.Logins.Increment("failure"); return Unauthorized(); }
                             return SignedIn(manager.Login(identity, request));
                         }
                     case IdentityManager.RefreshPath:
@@ -121,6 +121,7 @@ namespace WebExpress.WebCore.WebIdentity
                         if (providers.Length != 1) { return Error(new ResponseBadRequest(), "unknown_provider"); }
                         if (path == "/api/auth/authorize") { return await providers[0].CreateChallengeAsync(manager, application); }
                         var external = await providers[0].AuthenticateCallbackAsync(request, manager);
+                        if (external is null) { manager.Metrics?.Logins.Increment("failure"); }
                         var callback = external is null ? Unauthorized() : SignedIn(manager.Login(external, request));
                         callback.Header.Cookies.Add(IdentityManager.CreateCookie(OpenIdConnectIdentityProvider.ChallengeCookieName,
                             null, "/api/auth/callback", null));

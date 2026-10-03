@@ -19,6 +19,11 @@ namespace WebExpress.WebCore.WebSession
         TimeSpan Timeout { get; set; }
 
         /// <summary>
+        /// Gets the number of sessions held, including expired ones the cleanup has not removed yet.
+        /// </summary>
+        int Count { get; }
+
+        /// <summary>
         /// Returns the session a request belongs to, creating one when it has none yet.
         /// </summary>
         /// <remarks>

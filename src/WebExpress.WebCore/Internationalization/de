@@ -228,3 +228,7 @@ health.component_unavailable=Ein Komponentenmanager konnte nicht initialisiert w
 health.application_unavailable=Die Anwendung '{0}' des Plugins '{1}' konnte nicht erzeugt werden: {2}
 health.failed=Healthcheck {0}/{1} fehlgeschlagen: {2}
 health.timeout=Healthcheck {0}/{1} hat sein Zeitlimit von {2} überschritten.
+
+metrics.failed=Metrik-Collector {0}/{1} fehlgeschlagen: {2}
+metrics.timeout=Metrik-Collector {0}/{1} hat sein Zeitlimit von {2} überschritten.
+metrics.conflict=Metrikwerte von {0} wurden verworfen: {1}

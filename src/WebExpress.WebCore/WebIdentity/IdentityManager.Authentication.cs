@@ -6,6 +6,8 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebMessage;
+using WebExpress.WebCore.WebMetrics;
+using WebExpress.WebCore.WebMetrics.Model;
 
 namespace WebExpress.WebCore.WebIdentity
 {
@@ -48,6 +50,12 @@ namespace WebExpress.WebCore.WebIdentity
         private readonly ConditionalWeakTable<IRequest, AuthenticationState> _authenticationStates = new();
 
         /// <summary>
+        /// Gets the framework series for logins and active users, resolved on use because the
+        /// metrics manager is created after this manager.
+        /// </summary>
+        internal FrameworkMetrics Metrics => (_componentHub?.MetricsManager as MetricsManager)?.Framework;
+
+        /// <summary>
         /// Keeps pending authentication changes local to one HTTP request.
         /// </summary>
         private sealed class AuthenticationState
@@ -73,6 +81,8 @@ namespace WebExpress.WebCore.WebIdentity
             state.Identity = snapshot;
             state.Pair = pair;
             state.Changed = true;
+            Metrics?.Logins.Increment("success");
+            Metrics?.RecordActiveUser(snapshot.Id);
             return pair;
         }
 
@@ -106,6 +116,7 @@ namespace WebExpress.WebCore.WebIdentity
             state.Identity = null;
             state.Pair = null;
             state.Changed = true;
+            Metrics?.Logouts.Increment();
         }
 
         /// <summary>
@@ -118,6 +129,10 @@ namespace WebExpress.WebCore.WebIdentity
             if (request?.ApplicationContext is null) { return null; }
             if (_authenticationStates.TryGetValue(request, out var state)) { return state.Identity; }
             var identity = AuthenticateRequest(request);
+            if (identity is not null)
+            {
+                Metrics?.RecordActiveUser(identity.Id);
+            }
             // kept for the rest of the request: a page checks policies once per protected fragment, and
             // each check would otherwise verify the signature again. unchanged state queues no cookies
             _authenticationStates.GetOrCreateValue(request).Identity = identity;

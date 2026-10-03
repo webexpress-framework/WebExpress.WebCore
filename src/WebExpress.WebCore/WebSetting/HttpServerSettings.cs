@@ -97,6 +97,12 @@ namespace WebExpress.WebCore.WebSetting
         public SecuritySettings Security { get; set; }
 
         /// <summary>
+        /// Optional settings of the global metrics endpoint. When the block is omitted the endpoint
+        /// is served without access protection.
+        /// </summary>
+        public MetricsSettings Metrics { get; set; }
+
+        /// <summary>
         /// The log settings. A missing block keeps logging switched off.
         /// </summary>
         public LogSettings Log { get; set; } = new();

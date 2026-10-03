@@ -20,6 +20,24 @@ We hope you enjoy using `WebExpress.WebCore` and find it valuable for your proje
 
 The container health endpoint is documented in the [Health model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#health-model) section of the Development Guide. WebCore provides `/health` globally, and applications contribute critical dependency checks as public sealed `IHealth` components in `WebExpress.WebCore.WebHealt`. The `HealthManager` discovers these components through the plugin and application lifecycle. The guide includes the component model, a database example, the HTTP contract, and Docker and Kubernetes probe configuration.
 
+## Metrics
+
+The Prometheus endpoint is documented in the [Metrics model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#metrics-model) section of the Development Guide. WebCore provides `/metrics` globally with request, error, login, active user, process, and runtime metrics. Applications record their own values with `MetricCounter`, `MetricGauge`, and `MetricHistogram` instruments, or report them at scrape time as public sealed `IMetric` components in `WebExpress.WebCore.WebMetrics`. The `MetricsManager` discovers these components through the plugin and application lifecycle and labels every series with its application. The guide includes an LDAP example, the list of framework metrics, the HTTP contract, and Prometheus, Kubernetes, and alerting configuration.
+
+An open endpoint reveals load and login failures to anyone who can reach the listener. Set a scrape token when the listener is reachable from outside the cluster:
+
+```json
+{
+  "WebExpress": {
+    "Metrics": {
+      "BearerToken": "a-long-random-secret"
+    }
+  }
+}
+```
+
+The equivalent environment variable is `WEBEXPRESS_WebExpress__Metrics__BearerToken`. `Metrics:Enabled` set to `false` switches the endpoint off, and `Metrics:ActiveUserWindowMinutes` sets how recently a user must have sent an authenticated request to count as active (default `5`).
+
 ## Graceful shutdown
 
 The container lifecycle is described in the [Graceful shutdown guide](graceful-shutdown.md). It covers `Shutdown: "graceful"`, the shared drain budget, background synchronization, resource ownership, and Docker and Kubernetes termination settings.

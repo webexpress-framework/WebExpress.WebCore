@@ -40,6 +40,20 @@ namespace WebExpress.WebCore.WebSession
         public TimeSpan Timeout { get; set; } = DefaultTimeout;
 
         /// <summary>
+        /// Gets the number of sessions held, including expired ones the cleanup has not removed yet.
+        /// </summary>
+        public int Count
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _dictionary.Count;
+                }
+            }
+        }
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         /// <param name="context">The reference to the context of the host.</param>
