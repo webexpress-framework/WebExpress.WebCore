@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Identity;
 using System.Text.Json;
 using WebExpress.WebCore.Test.Data;
 using WebExpress.WebCore.Test.Fixture;
@@ -303,7 +302,8 @@ namespace WebExpress.WebCore.Test.Manager
             /// </summary>
             internal PasswordProvider()
             {
-                var hash = new PasswordHasher<IIdentity>().HashPassword(null, "correct");
+                // hashed through the public helper, so every login test proves its format verifies
+                var hash = IdentityManager.HashPassword("correct");
                 _user = new MockIdentity(Guid.NewGuid(), "alice", "alice@example.test", hash);
             }
             /// <summary>

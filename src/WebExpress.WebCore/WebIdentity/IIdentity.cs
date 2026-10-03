@@ -25,7 +25,9 @@ namespace WebExpress.WebCore.WebIdentity
         public string Email { get; }
 
         /// <summary>
-        /// Gets the hash of the password.
+        /// Gets the hash of the password, as produced by <see cref="IdentityManager.HashPassword"/>;
+        /// any other format never matches at sign-in. Null or empty for an identity that cannot sign
+        /// in with a password.
         /// </summary>
         string PasswordHash { get; }
 

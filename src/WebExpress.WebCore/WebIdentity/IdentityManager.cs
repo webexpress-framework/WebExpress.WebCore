@@ -1,10 +1,8 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Identity;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Security;
-using System.Security.Cryptography;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
@@ -597,40 +595,17 @@ namespace WebExpress.WebCore.WebIdentity
         }
 
         /// <summary>
-        /// Computes the SHA-256 hash of the input string.
+        /// Hashes a password for <see cref="IIdentity.PasswordHash"/>, in the format the sign-in
+        /// (<see cref="LocalIdentityProvider"/>) verifies. The hash is salted and deliberately slow,
+        /// so a leaked user store does not yield its passwords to a quick dictionary attack.
         /// </summary>
-        /// <param name="input">The input string to hash.</param>
-        /// <returns>The computed hash as a hexadecimal string.</returns>
-        public static string ComputeHash(SecureString input)
+        /// <param name="password">The password to hash.</param>
+        /// <returns>The hash to store with the identity.</returns>
+        public static string HashPassword(string password)
         {
-            if (input is null)
-            {
-                return string.Empty;
-            }
+            ArgumentNullException.ThrowIfNull(password);
 
-            var bstr = IntPtr.Zero;
-            try
-            {
-                bstr = Marshal.SecureStringToBSTR(input);
-                var length = Marshal.ReadInt32(bstr, -4);
-                var bytes = new byte[length];
-
-                // copy unmanaged string memory to a managed byte array
-                Marshal.Copy(bstr, bytes, 0, length);
-
-                // compute sha256 hash and convert to lower-case hex string
-                var hashBytes = SHA256.HashData(bytes);
-
-                return Convert.ToHexString(hashBytes).ToLowerInvariant();
-            }
-            finally
-            {
-                if (bstr != IntPtr.Zero)
-                {
-                    // safely free the unmanaged memory
-                    Marshal.ZeroFreeBSTR(bstr);
-                }
-            }
+            return new PasswordHasher<IIdentity>().HashPassword(null, password);
         }
 
         /// <summary>

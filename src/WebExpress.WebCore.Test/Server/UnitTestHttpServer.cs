@@ -87,6 +87,15 @@ namespace WebExpress.WebCore.Test.Server
                 Assert.Null(exception);
                 Assert.False(started);
                 Assert.Equal(errors + 1, server.HttpServerContext.Log.ErrorCount);
+                Assert.Empty(server.ListeningEndpoints);
+
+                // act - the port is still taken, so a retry fails the same way instead of on a disposed part
+                exception = Record.Exception(() => started = server.Start());
+
+                // validation
+                Assert.Null(exception);
+                Assert.False(started);
+                Assert.Empty(server.ListeningEndpoints);
             }
             finally
             {
@@ -129,6 +138,46 @@ namespace WebExpress.WebCore.Test.Server
             finally
             {
                 componentHub?.IdentityProviderManager.Dispose();
+                hubField.SetValue(null, previousHub);
+            }
+        }
+
+        /// <summary>
+        /// A bad request is the caller's to fix, so its message is shown - encoded, since it
+        /// commonly quotes what the caller sent - while the internals behind it follow the same
+        /// switch as any other error page. A rejection that was never thrown carries no stack trace
+        /// and must still produce a page.
+        /// </summary>
+        /// <param name="detailedErrors">The configured switch.</param>
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void BadRequest_EncodesTheMessage(bool detailedErrors)
+        {
+            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var previousHub = WebEx.ComponentHub;
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
+            {
+                Settings = new HttpServerSettings { Security = new SecuritySettings { DetailedErrors = detailedErrors } }
+            };
+            var create = typeof(HttpServer).GetMethod("CreateBadRequestResponse", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            var rejection = new WebMessage.BadRequestException("unknown value <script>alert(1)</script>");
+
+            try
+            {
+                // without a hub the built-in page renders the message as given, so nothing else encodes it
+                hubField.SetValue(null, null);
+
+                var response = (WebMessage.IResponse)create.Invoke(server, [rejection, null, null]);
+                var content = response.Content as string;
+
+                Assert.Equal(400, response.Status);
+                Assert.Contains("unknown value &lt;script&gt;", content);
+                Assert.DoesNotContain("<script>", content);
+                Assert.Equal(detailedErrors, content.Contains("StackTrace"));
+            }
+            finally
+            {
                 hubField.SetValue(null, previousHub);
             }
         }

@@ -194,7 +194,7 @@ namespace WebExpress.WebCore.WebCertificate
             }
 
             var material = Resolve(GetEndpointKey(endpoint));
-            if (uri.Host != "*" && !material.Certificate.MatchesHostname(NormalizeHostName(uri.Host), allowCommonName: false))
+            if (!EndpointSettings.IsAnyHost(uri.Host) && !material.Certificate.MatchesHostname(NormalizeHostName(uri.Host), allowCommonName: false))
             {
                 throw new InvalidOperationException($"The certificate does not cover HTTPS endpoint '{endpoint.Uri}'.");
             }
@@ -273,7 +273,7 @@ namespace WebExpress.WebCore.WebCertificate
             foreach (var endpoint in settings.Endpoints ?? [])
             {
                 var uri = endpoint.GetBindingAddress();
-                if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) && uri.Host != "*" &&
+                if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) && !EndpointSettings.IsAnyHost(uri.Host) &&
                     registrations.TryGetValue(NormalizeKey(GetEndpointKey(endpoint)), out var registration))
                 {
                     registration.HostNames = registration.HostNames.Append(NormalizeHostName(uri.Host))

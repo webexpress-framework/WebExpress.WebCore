@@ -1,5 +1,4 @@
-﻿using System.Security;
-using WebExpress.WebCore.WebIdentity;
+﻿using WebExpress.WebCore.WebIdentity;
 
 namespace WebExpress.WebCore.Test.Data
 {
@@ -59,58 +58,54 @@ namespace WebExpress.WebCore.Test.Data
         /// <returns>A list of identities.</returns>
         private static IEnumerable<MockIdentity> CreateTestUsers()
         {
-            var password = new SecureString();
-            password.AppendChar('a');
-            password.AppendChar('b');
-            password.AppendChar('c');
-            password.MakeReadOnly();
+            const string password = "abc";
 
-            var user = new MockIdentity(Guid.NewGuid(), "Alice", "alice@example.com", IdentityManager.ComputeHash(password));
+            var user = new MockIdentity(Guid.NewGuid(), "Alice", "alice@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(0)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Bob", "bob@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Bob", "bob@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Charlie", "charlie@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Charlie", "charlie@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(2)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "David", "david@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "David", "david@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1), _groups.ElementAt(2)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Eve", "eve@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Eve", "eve@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Frank", "frank@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Frank", "frank@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Grace", "grace@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Grace", "grace@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Heidi", "heidi@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Heidi", "heidi@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Ivan", "ivan@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Ivan", "ivan@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1)]);
 
             yield return user;
 
-            user = new MockIdentity(Guid.NewGuid(), "Judy", "judy@example.com", IdentityManager.ComputeHash(password));
+            user = new MockIdentity(Guid.NewGuid(), "Judy", "judy@example.com", IdentityManager.HashPassword(password));
             user.Assign([_groups.ElementAt(1)]);
 
             yield return user;

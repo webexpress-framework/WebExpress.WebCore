@@ -204,6 +204,34 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A binding to every address of the machine - the rule in containers - names no host a
+        /// certificate could be issued for, so the certificate is accepted without a hostname check.
+        /// </summary>
+        /// <param name="uri">The endpoint binding every address.</param>
+        [Theory]
+        [InlineData("https://*:443")]
+        [InlineData("https://+:443")]
+        [InlineData("https://0.0.0.0:443")]
+        [InlineData("https://[::]:443")]
+        public void AnyAddressBindingSkipsTheHostnameCheck(string uri)
+        {
+            // arrange
+            var pfx = WriteCertificate("any.pfx", "app.example");
+            var settings = new HttpServerSettings
+            {
+                Endpoints = [new() { Uri = uri, PfxFile = pfx, Password = "test-secret" }]
+            };
+            using var manager = new CertificateManager(timeProvider: _clock);
+
+            // act
+            manager.Load(settings);
+
+            // validation
+            Assert.True(manager.Resolve(settings.Endpoints[0]).Certificate.HasPrivateKey);
+            Assert.True(manager.GetCertificates().Single().IsUsable);
+        }
+
+        /// <summary>
         /// Separates TLS suitability failures from provider loading failures.
         /// </summary>
         /// <param name="failure">The suitability rule the generated material violates.</param>

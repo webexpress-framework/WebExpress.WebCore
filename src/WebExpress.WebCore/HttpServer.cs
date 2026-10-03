@@ -197,6 +197,7 @@ namespace WebExpress.WebCore
                 _webHost?.Dispose();
                 _webHost = null;
                 Kestrel = null;
+                _listeningEndpoints.Clear();
                 HttpServerContext.CertificateManager.Unload();
 
                 // kestrel wraps the socket error of an occupied address into an io exception
@@ -218,6 +219,8 @@ namespace WebExpress.WebCore
         {
             var settings = Settings ?? new HttpServerSettings { Endpoints = HttpServerContext.Endpoints?.ToList() ?? [] };
             settings.ValidateShutdown();
+            // a start can be retried, and the list must describe only this attempt's listeners
+            _listeningEndpoints.Clear();
             HttpServerContext.CertificateManager.Load(settings);
             foreach (var endpoint in (settings.Endpoints ?? []).Where(x => x.GetBindingAddress().Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
             {
@@ -332,7 +335,7 @@ namespace WebExpress.WebCore
             try
             {
                 var uri = endPoint.GetBindingAddress();
-                var asterisk = uri.Host.Equals("*");
+                var asterisk = uri.Host is "*" or "+";
                 var certificate = uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
                     ? HttpServerContext.CertificateManager.Resolve(endPoint) : null;
 
@@ -630,16 +633,7 @@ namespace WebExpress.WebCore
             }
             catch (BadRequestException ex)
             {
-                var message = $"<h4>Message</h4>{ex.Message}<br/><br/>" +
-                        $"<h5>Source</h5>{ex.Source}<br/><br/>" +
-                        $"<h5>StackTrace</h5>{ex.StackTrace.Replace("\n", "<br/>\n")}";
-
-                response = CreateStatusPage<ResponseBadRequest>
-                (
-                    message,
-                    request,
-                    searchResult
-                );
+                response = CreateBadRequestResponse(ex, request, searchResult);
             }
             catch (Exception ex)
             {
@@ -653,6 +647,10 @@ namespace WebExpress.WebCore
                 {
                     // a page's Process is invoked through reflection, which wraps what it throws
                     response = CreateAccessDeniedResponse(request, searchResult, WebEx.ComponentHub?.IdentityManager?.GetCurrentIdentity(request));
+                }
+                else if (ex is TargetInvocationException { InnerException: BadRequestException badRequest })
+                {
+                    response = CreateBadRequestResponse(badRequest, request, searchResult);
                 }
                 else
                 {
@@ -1121,13 +1119,39 @@ namespace WebExpress.WebCore
                 return "The server could not complete the request. The cause has been logged.";
             }
 
-            // messages routinely quote request data such as the path, which must not become markup
-            static string Encode(string text) => WebUtility.HtmlEncode(text)?.Replace("\n", "<br/>\n");
+            return $"<h4>Message</h4>{EncodeHtml(ex.Message)}<br/><br/>" +
+                $"<h5>Source</h5>{EncodeHtml(ex.Source)}<br/><br/>" +
+                $"<h5>StackTrace</h5>{EncodeHtml(ex.StackTrace)}<br/><br/>" +
+                $"<h5>InnerException</h5>{EncodeHtml(ex.InnerException?.ToString())}";
+        }
 
-            return $"<h4>Message</h4>{Encode(ex.Message)}<br/><br/>" +
-                $"<h5>Source</h5>{Encode(ex.Source)}<br/><br/>" +
-                $"<h5>StackTrace</h5>{Encode(ex.StackTrace)}<br/><br/>" +
-                $"<h5>InnerException</h5>{Encode(ex.InnerException?.ToString())}";
+        /// <summary>
+        /// Answers a request an endpoint rejected as malformed. Unlike an internal failure, the
+        /// cause is the caller's to fix, so the message is meant for them and always shown; the
+        /// internals behind it follow only where <see cref="Describe"/> would show them.
+        /// </summary>
+        /// <param name="ex">The rejection raised by the endpoint.</param>
+        /// <param name="request">The rejected request.</param>
+        /// <param name="searchResult">The endpoint that raised the rejection.</param>
+        /// <returns>The bad request response.</returns>
+        private IResponse CreateBadRequestResponse(BadRequestException ex, IRequest request, SearchResult searchResult)
+        {
+            var message = Settings?.Security?.DetailedErrors ?? false
+                ? Describe(ex)
+                : EncodeHtml(ex.Message);
+
+            return CreateStatusPage<ResponseBadRequest>(message, request, searchResult);
+        }
+
+        /// <summary>
+        /// Encodes text for an error page. Exception messages routinely quote request data such as
+        /// the path or a parameter, which must not become markup.
+        /// </summary>
+        /// <param name="text">The text to encode, possibly null.</param>
+        /// <returns>The encoded text with line breaks kept, or null.</returns>
+        private static string EncodeHtml(string text)
+        {
+            return WebUtility.HtmlEncode(text)?.Replace("\n", "<br/>\n");
         }
 
         /// <summary>
