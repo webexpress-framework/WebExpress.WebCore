@@ -2,21 +2,22 @@ namespace WebExpress.WebCore.WebSetting
 {
     /// <summary>
     /// Optional settings of the global metrics endpoint. The whole block and every property in it is
-    /// optional: a value left unset keeps the built-in default.
+    /// optional: a value left unset keeps the built-in default, and without the block the endpoint
+    /// is not served.
     /// </summary>
     public sealed class MetricsSettings
     {
         /// <summary>
         /// Whether <c>/metrics</c> is served. Switched off, the path is left to normal application
-        /// routing. Defaults to <c>true</c>, matching the health endpoint, so a scrape configuration
-        /// works without touching the server settings.
+        /// routing. Defaults to <c>false</c>: the series reveal load, login failures and the framework
+        /// version, so a deployment publishes them only by an explicit decision.
         /// </summary>
-        public bool Enabled { get; set; } = true;
+        public bool Enabled { get; set; }
 
         /// <summary>
         /// A secret the scraper must send as <c>Authorization: Bearer &lt;token&gt;</c>. The series name
         /// no user, but they do reveal load, login failures and the framework version, so an endpoint
-        /// reachable from outside the cluster should set one. Left unset, the endpoint is open.
+        /// reachable from outside the cluster should set one. Left unset, an enabled endpoint is open.
         /// </summary>
         public string BearerToken { get; set; }
 

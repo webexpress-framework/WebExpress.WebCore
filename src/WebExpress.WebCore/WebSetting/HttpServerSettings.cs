@@ -98,7 +98,7 @@ namespace WebExpress.WebCore.WebSetting
 
         /// <summary>
         /// Optional settings of the global metrics endpoint. When the block is omitted the endpoint
-        /// is served without access protection.
+        /// is not served.
         /// </summary>
         public MetricsSettings Metrics { get; set; }
 

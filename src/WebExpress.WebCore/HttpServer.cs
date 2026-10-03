@@ -846,14 +846,14 @@ namespace WebExpress.WebCore
         private static FrameworkMetrics Metrics => (WebEx.ComponentHub?.MetricsManager as MetricsManager)?.Framework;
 
         /// <summary>
-        /// Determines whether a request is a scrape of the metrics endpoint. A disabled endpoint
-        /// leaves the path to application routing.
+        /// Determines whether a request is a scrape of the metrics endpoint. The endpoint is served
+        /// only when enabled explicitly; otherwise the path is left to application routing.
         /// </summary>
         /// <param name="httpContext">The context of the request.</param>
         /// <returns>True when the request must be answered by the metrics endpoint.</returns>
         private bool IsMetricsRequest(IHttpContext httpContext)
         {
-            return (Settings?.Metrics?.Enabled ?? true) && MetricsEndpoint.Matches(httpContext);
+            return (Settings?.Metrics?.Enabled ?? false) && MetricsEndpoint.Matches(httpContext);
         }
 
         /// <summary>

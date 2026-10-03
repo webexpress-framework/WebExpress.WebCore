@@ -144,16 +144,27 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
-        /// Leaves the path to application routing when the endpoint is switched off.
+        /// Leaves the path to application routing unless the endpoint is switched on explicitly.
         /// </summary>
+        /// <param name="configuration">Whether the settings, the metrics block, or an explicit switch is absent.</param>
         /// <returns>A task that completes after the routed response has been validated.</returns>
-        [Fact]
-        public async Task ProcessRequestAsync_Disabled_FallsThroughToRouting()
+        [Theory]
+        [InlineData("no-settings")]
+        [InlineData("no-block")]
+        [InlineData("empty-block")]
+        [InlineData("disabled")]
+        public async Task ProcessRequestAsync_NotEnabled_FallsThroughToRouting(string configuration)
         {
             // arrange
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
             {
-                Settings = new HttpServerSettings { Metrics = new MetricsSettings { Enabled = false } }
+                Settings = configuration switch
+                {
+                    "no-settings" => null,
+                    "no-block" => new HttpServerSettings(),
+                    "empty-block" => new HttpServerSettings { Metrics = new MetricsSettings() },
+                    _ => new HttpServerSettings { Metrics = new MetricsSettings { Enabled = false, BearerToken = "secret" } }
+                }
             };
             var hub = UnitTestFixture.CreateComponentHubMock(server.HttpServerContext);
             var context = UnitTestFixture.CreateHttpContextMock("GET /metrics HTTP/1.1\r\n\r\n");
@@ -185,7 +196,7 @@ namespace WebExpress.WebCore.Test.Server
                 Settings = new HttpServerSettings
                 {
                     Endpoints = [new EndpointSettings { Uri = "http://127.0.0.1:0/" }],
-                    Metrics = new MetricsSettings { BearerToken = "scrape-secret" }
+                    Metrics = new MetricsSettings { Enabled = true, BearerToken = "scrape-secret" }
                 }
             };
             using var hub = UnitTestFixture.CreateComponentHubMock(server.HttpServerContext);

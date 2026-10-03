@@ -24,19 +24,20 @@ The container health endpoint is documented in the [Health model](https://github
 
 The Prometheus endpoint is documented in the [Metrics model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#metrics-model) section of the Development Guide. WebCore provides `/metrics` globally with request, error, login, active user, process, and runtime metrics. Applications record their own values with `MetricCounter`, `MetricGauge`, and `MetricHistogram` instruments, or report them at scrape time as public sealed `IMetric` components in `WebExpress.WebCore.WebMetrics`. The `MetricsManager` discovers these components through the plugin and application lifecycle and labels every series with its application. The guide includes an LDAP example, the list of framework metrics, the HTTP contract, and Prometheus, Kubernetes, and alerting configuration.
 
-An open endpoint reveals load and login failures to anyone who can reach the listener. Set a scrape token when the listener is reachable from outside the cluster:
+The endpoint is switched off by default, because the metrics reveal load and login failures to anyone who can reach the listener. Enable it explicitly, and set a scrape token when the listener is reachable from outside the cluster:
 
 ```json
 {
   "WebExpress": {
     "Metrics": {
+      "Enabled": true,
       "BearerToken": "a-long-random-secret"
     }
   }
 }
 ```
 
-The equivalent environment variable is `WEBEXPRESS_WebExpress__Metrics__BearerToken`. `Metrics:Enabled` set to `false` switches the endpoint off, and `Metrics:ActiveUserWindowMinutes` sets how recently a user must have sent an authenticated request to count as active (default `5`).
+The equivalent environment variables are `WEBEXPRESS_WebExpress__Metrics__Enabled` and `WEBEXPRESS_WebExpress__Metrics__BearerToken`. While the endpoint is off, `/metrics` is left to application routing. `Metrics:ActiveUserWindowMinutes` sets how recently a user must have sent an authenticated request to count as active (default `5`).
 
 ## Graceful shutdown
 
