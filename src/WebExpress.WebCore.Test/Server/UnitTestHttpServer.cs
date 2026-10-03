@@ -134,6 +134,49 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
+        /// The page answering an unhandled failure goes to whoever sent the request, so it names
+        /// the cause - message, types, stack trace - only when the deployment asks for it.
+        /// </summary>
+        /// <param name="detailedErrors">The configured switch, or null when the deployment sets none.</param>
+        /// <param name="detailed">Whether the page is expected to carry the exception details.</param>
+        /// <returns>A task that completes after the error page has been verified.</returns>
+        [Theory]
+        [InlineData(null, false)]
+        [InlineData(false, false)]
+        [InlineData(true, true)]
+        public async Task ProcessRequestAsync_UnhandledFailure_ShowsDetailsOnlyWhenEnabled(bool? detailedErrors, bool detailed)
+        {
+            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            var previousHub = WebEx.ComponentHub;
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
+            {
+                Settings = new HttpServerSettings { Security = new SecuritySettings { DetailedErrors = detailedErrors } }
+            };
+            var context = UnitTestFixture.CreateHttpContextMock($"GET {Endpoint} HTTP/1.1\r\nCookie:\r\n\r\n");
+            var response = new HttpResponseFeature();
+            using var output = new MemoryStream();
+            context.Features.Set<IHttpResponseFeature>(response);
+            context.Features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(output));
+
+            try
+            {
+                // without a component hub the pipeline throws a NullReferenceException
+                hubField.SetValue(null, null);
+
+                await server.ProcessRequestAsync(context);
+                var body = System.Text.Encoding.UTF8.GetString(output.ToArray());
+
+                Assert.Equal(500, response.StatusCode);
+                Assert.Equal(detailed, body.Contains("StackTrace"));
+                Assert.Equal(detailed, body.Contains(nameof(NullReferenceException)) || body.Contains("Object reference"));
+            }
+            finally
+            {
+                hubField.SetValue(null, previousHub);
+            }
+        }
+
+        /// <summary>
         /// A request that fails inside the pipeline is answered by the outer fallback, which must
         /// still record it - exactly once - so that the error rate reflects the failures it exists
         /// to show.

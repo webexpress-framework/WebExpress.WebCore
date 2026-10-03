@@ -413,6 +413,39 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A server whose start failed - an endpoint held by another process, say - releases its
+        /// certificates but must be able to start again, so the manager and its registered stores
+        /// stay usable for the next load.
+        /// </summary>
+        [Fact]
+        public void UnloadReleasesMaterialButAllowsReload()
+        {
+            // arrange
+            using var certificate = CreateCertificate("localhost", _clock.Now.AddDays(-1), _clock.Now.AddDays(90));
+            var store = new MemoryStore(certificate.Export(X509ContentType.Pfx, "test-secret"));
+            using var manager = new CertificateManager(timeProvider: _clock);
+            manager.RegisterStore(store);
+            var settings = Settings();
+            settings.Certificates.Items[0].Store = "memory";
+            settings.Certificates.Items[0].Reference = "provider-reference";
+            manager.Load(settings);
+            var borrowed = manager.Resolve("primary");
+
+            // act
+            manager.Unload();
+
+            // validation
+            Assert.Equal(IntPtr.Zero, borrowed.Certificate.Handle);
+            Assert.Empty(manager.GetCertificates());
+
+            // act - the registered store is still known, so the same settings load again
+            manager.Load(settings);
+
+            // validation
+            Assert.True(manager.Resolve("primary").Certificate.HasPrivateKey);
+        }
+
+        /// <summary>
         /// Keeps provider exceptions containing credentials out of the shared log.
         /// </summary>
         [Fact]

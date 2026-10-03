@@ -102,6 +102,13 @@ namespace WebExpress.WebCore.WebMessage
         public string IfNoneMatch { get; private set; }
 
         /// <summary>
+        /// Gets the X-Forwarded-For header, the chain of addresses a request passed through on its
+        /// way to the server. Anyone can send it, so it is only meaningful on a request that comes
+        /// from a trusted proxy (see <see cref="ForwardedClientResolver"/>).
+        /// </summary>
+        public string XForwardedFor { get; private set; }
+
+        /// <summary>
         /// Gets the upgrade header (e.g. "websocket" for WebSocket upgrades).
         /// </summary>
         public string Upgrade { get; private set; }
@@ -144,6 +151,7 @@ namespace WebExpress.WebCore.WebMessage
             AuthenticationRequest = requestFeature.Headers["X-WebExpress-Auth"];
             SecFetchSite = requestFeature.Headers["Sec-Fetch-Site"];
             IfNoneMatch = requestFeature.Headers.IfNoneMatch;
+            XForwardedFor = requestFeature.Headers["X-Forwarded-For"];
             Upgrade = requestFeature.Headers.Upgrade;
             SecWebSocketKey = requestFeature.Headers.SecWebSocketKey;
             SecWebSocketProtocol = requestFeature.Headers.SecWebSocketProtocol;

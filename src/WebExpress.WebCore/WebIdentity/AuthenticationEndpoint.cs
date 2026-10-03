@@ -1,7 +1,6 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using System;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.RateLimiting;
@@ -20,6 +19,7 @@ namespace WebExpress.WebCore.WebIdentity
     {
         private readonly IComponentHub _hub;
         private readonly IHttpServerContext _server;
+        private readonly ForwardedClientResolver _clientResolver;
         private readonly PartitionedRateLimiter<string> _loginLimiter = PartitionedRateLimiter.Create<string, string>(
             key => RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
             {
@@ -31,10 +31,15 @@ namespace WebExpress.WebCore.WebIdentity
         /// </summary>
         /// <param name="componentHub">The component hub that supplies application-scoped authentication services.</param>
         /// <param name="httpServerContext">The server context that supplies deployment configuration and framework services.</param>
-        public AuthenticationEndpoint(IComponentHub componentHub, IHttpServerContext httpServerContext)
+        /// <param name="clientResolver">
+        /// Names the client behind trusted proxies, so the login throttle limits each client instead of
+        /// the proxy; null limits by the connection's own address.
+        /// </param>
+        public AuthenticationEndpoint(IComponentHub componentHub, IHttpServerContext httpServerContext, ForwardedClientResolver clientResolver = null)
         {
             _hub = componentHub;
             _server = httpServerContext;
+            _clientResolver = clientResolver ?? new ForwardedClientResolver(null);
         }
 
         /// <summary>
@@ -90,7 +95,7 @@ namespace WebExpress.WebCore.WebIdentity
                 switch (path)
                 {
                     case "/api/auth/login":
-                        using (var lease = _loginLimiter.AttemptAcquire((request.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "unknown"))
+                        using (var lease = _loginLimiter.AttemptAcquire(_clientResolver.Resolve(request)?.ToString() ?? "unknown"))
                         {
                             if (!lease.IsAcquired) { return Error(new ResponseTooManyRequests(), "try_again_later"); }
                             using var body = ReadBody(request);

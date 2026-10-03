@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -434,12 +434,34 @@ namespace WebExpress.WebCore.WebCertificate
             {
                 if (_disposed) { return; }
                 _disposed = true;
-                foreach (var material in _materials) { material.Dispose(); }
-                _materials.Clear();
-                _entries = [];
-                _lookup.Clear();
+                ReleaseMaterials();
                 _stores.Clear();
             }
+        }
+
+        /// <summary>
+        /// Releases the loaded material while the manager stays usable, so a server whose start
+        /// failed - an endpoint held by another process, say - can start again with a fresh
+        /// <see cref="Load"/>. Registered stores are kept, because their modules register them once.
+        /// </summary>
+        public void Unload()
+        {
+            lock (_sync)
+            {
+                if (_disposed) { return; }
+                ReleaseMaterials();
+            }
+        }
+
+        /// <summary>
+        /// Disposes all active and retired material and empties the inventory. Callers hold the lock.
+        /// </summary>
+        private void ReleaseMaterials()
+        {
+            foreach (var material in _materials) { material.Dispose(); }
+            _materials.Clear();
+            _entries = [];
+            _lookup.Clear();
         }
     }
 }

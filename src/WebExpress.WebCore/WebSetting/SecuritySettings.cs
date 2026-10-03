@@ -62,5 +62,23 @@ namespace WebExpress.WebCore.WebSetting
         /// browser's origin differs from the one the server sees.
         /// </summary>
         public List<string> TrustedOrigins { get; set; }
+
+        /// <summary>
+        /// The reverse proxies, as addresses such as <c>10.0.0.5</c> or ranges such as
+        /// <c>172.16.0.0/12</c>, whose <c>X-Forwarded-For</c> header names the client. Behind a
+        /// proxy every request arrives from the proxy's address, so per-client limits such as the
+        /// login throttle would otherwise treat all users as one. The header is honoured only on
+        /// requests that come from one of these proxies, since any other client could use it to
+        /// pick the address it is limited under. Left unset, the connection's own address is used.
+        /// </summary>
+        public List<string> TrustedProxies { get; set; }
+
+        /// <summary>
+        /// Shows the exception behind an internal server error - its message, source and stack
+        /// trace - on the error page. Off by default, because those details name types, paths and
+        /// configuration values an anonymous caller must not see; the log records them either way.
+        /// Meant for development only.
+        /// </summary>
+        public bool? DetailedErrors { get; set; }
     }
 }

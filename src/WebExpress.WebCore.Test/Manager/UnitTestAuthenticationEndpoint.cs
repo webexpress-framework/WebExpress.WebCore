@@ -3,6 +3,8 @@ using System.Text.Json;
 using WebExpress.WebCore.Test.Data;
 using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebIdentity;
+using WebExpress.WebCore.WebMessage;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.Test.Manager
 {
@@ -73,6 +75,36 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Behind a reverse proxy every login arrives from the proxy's address. With the proxy
+        /// trusted, the throttle limits each client it reports, so one client guessing passwords
+        /// does not lock everyone else behind the same proxy out of signing in.
+        /// </summary>
+        /// <returns>A task that completes after the per-client limits have been verified.</returns>
+        [Fact]
+        public async Task LoginThrottleLimitsEachClientBehindATrustedProxy()
+        {
+            // arrange - the fixture's requests arrive from 127.0.0.1, which plays the proxy
+            using var fixture = new AuthenticationFixture(requireHttps: false);
+            var resolver = new ForwardedClientResolver(new SecuritySettings { TrustedProxies = ["127.0.0.1"] });
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server, resolver);
+            fixture.Hub.IdentityProviderManager.Register(new PasswordProvider(), fixture.Application);
+
+            Task<IResponse> LoginAsync(string client) => endpoint.HandleAsync(fixture.Request(
+                $"X-WebExpress-Auth: 1\r\nX-Forwarded-For: {client}\r\n", "POST",
+                "/api/auth/login", "{\"username\":\"alice\",\"password\":\"wrong\"}", https: false));
+
+            // act - one client uses up its attempts
+            for (var i = 0; i < 10; i++)
+            {
+                Assert.NotEqual(429, (await LoginAsync("203.0.113.7")).Status);
+            }
+
+            // validation
+            Assert.Equal(429, (await LoginAsync("203.0.113.7")).Status);
+            Assert.NotEqual(429, (await LoginAsync("198.51.100.4")).Status);
+        }
+
+        /// <summary>
         /// Keeps HTTPS mandatory when a deployment has not explicitly enabled development HTTP.
         /// </summary>
         /// <returns>A task that completes after the default transport rejection has been verified.</returns>
@@ -119,8 +151,9 @@ namespace WebExpress.WebCore.Test.Manager
             var authenticatedRequest = fixture.Request($"Cookie: {access.Name}={access.Value}\r\n", https: false);
             Assert.Equal("alice", fixture.Manager.GetCurrentIdentity(authenticatedRequest)?.Name);
 
+            // the identity is resolved once per request, so the changed setting governs the next one
             fixture.Server.Configuration["WebExpress:Authentication:RequireHttps"] = "true";
-            Assert.Null(fixture.Manager.GetCurrentIdentity(authenticatedRequest));
+            Assert.Null(fixture.Manager.GetCurrentIdentity(fixture.Request($"Cookie: {access.Name}={access.Value}\r\n", https: false)));
             fixture.Server.Configuration["WebExpress:Authentication:RequireHttps"] = "false";
 
             var renewed = await endpoint.HandleAsync(fixture.Request($"X-WebExpress-Auth: 1\r\nCookie: {refresh.Name}={refresh.Value}\r\n",

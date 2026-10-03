@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -117,6 +117,20 @@ namespace WebExpress.WebCore.WebIdentity
         {
             if (request?.ApplicationContext is null) { return null; }
             if (_authenticationStates.TryGetValue(request, out var state)) { return state.Identity; }
+            var identity = AuthenticateRequest(request);
+            // kept for the rest of the request: a page checks policies once per protected fragment, and
+            // each check would otherwise verify the signature again. unchanged state queues no cookies
+            _authenticationStates.GetOrCreateValue(request).Identity = identity;
+            return identity;
+        }
+
+        /// <summary>
+        /// Verifies the credential a request carries, preferring an explicit authorization header over the browser cookie.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The verified request identity, or null when no accepted credential authenticates it.</returns>
+        private IIdentity AuthenticateRequest(IRequest request)
+        {
             var authorization = request.Header.Authorization;
             // an explicit, invalid authorization header must never fall back to browser credentials
             if (authorization is not null)

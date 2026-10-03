@@ -23,6 +23,12 @@ namespace WebExpress.WebCore.WebCertificate
         void Load(HttpServerSettings settings);
 
         /// <summary>
+        /// Releases the loaded material while the manager stays usable, so a host whose start
+        /// failed can load again and retry. Registered stores are kept.
+        /// </summary>
+        void Unload();
+
+        /// <summary>
         /// Resolves usable material by a case-insensitive alias or configured hostname.
         /// </summary>
         /// <param name="aliasOrHostName">The configured lookup key.</param>

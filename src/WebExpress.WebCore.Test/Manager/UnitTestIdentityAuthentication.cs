@@ -68,6 +68,56 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A signing key the configuration gets wrong leaves every credential unverifiable. That has
+        /// to read as "not signed in" - a throw would fail each request that carries a cookie and
+        /// hand the exception to the error page an anonymous caller sees.
+        /// </summary>
+        /// <param name="signingKey">The rejected signing key.</param>
+        [Theory]
+        [InlineData("not base64!")]
+        [InlineData("c2hvcnQ=")]
+        [InlineData("")]
+        public void RejectedSigningKeyReadsAsUnauthenticated(string signingKey)
+        {
+            using var fixture = new AuthenticationFixture();
+            var pair = fixture.Manager.Login(MockIdentityFactory.GetIdentity("Alice"), fixture.Request());
+            var cookie = $"Cookie: {IdentityManager.AccessCookieName}={pair.AccessToken}\r\n";
+            fixture.Settings.SigningKey = signingKey;
+            var misconfigured = fixture.Instance();
+
+            var exception = Record.Exception(() => Assert.Null(misconfigured.GetCurrentIdentity(fixture.Request(cookie))));
+
+            Assert.Null(exception);
+            Assert.False(misconfigured.IsAuthenticationConfigured(fixture.Application));
+        }
+
+        /// <summary>
+        /// A page checks policies once per protected fragment; the identity behind a request is
+        /// verified once and reused for the rest of it, while the next request verifies anew.
+        /// </summary>
+        [Fact]
+        public void IdentityIsVerifiedOncePerRequest()
+        {
+            using var fixture = new AuthenticationFixture();
+            var pair = fixture.Manager.Login(MockIdentityFactory.GetIdentity("Alice"), fixture.Request());
+            var cookie = $"Cookie: {IdentityManager.AccessCookieName}={pair.AccessToken}\r\n";
+            var request = fixture.Request(cookie);
+            var identity = fixture.Manager.GetCurrentIdentity(request);
+
+            // past expiry a fresh verification fails, so only the reused result still names Alice
+            fixture.Clock.Now = pair.AccessTokenExpiresAt.AddSeconds(1);
+
+            Assert.NotNull(identity);
+            Assert.Same(identity, fixture.Manager.GetCurrentIdentity(request));
+            Assert.Null(fixture.Manager.GetCurrentIdentity(fixture.Request(cookie)));
+
+            // reusing the result changes nothing about the credentials, so no cookie is queued
+            var response = new ResponseOK();
+            fixture.Manager.ApplyAuthenticationCookies(request, response);
+            Assert.Empty(response.Header.Cookies.Cast<System.Net.Cookie>());
+        }
+
+        /// <summary>
         /// Signature, audience, issuer, expiration, and token purpose remain mandatory even when claims look plausible.
         /// </summary>
         [Fact]

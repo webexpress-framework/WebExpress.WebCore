@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using System;
@@ -21,6 +21,7 @@ namespace WebExpress.WebCore.WebIdentity
         private readonly JsonWebTokenHandler _tokenHandler = new() { MaximumTokenSizeInBytes = 16384 };
         private readonly object _authorityGate = new();
         private TokenAuthority _authority;
+        private string _reportedAuthorityError;
 
         /// <summary>
         /// Holds the validated trust boundary so weak secrets are rejected before any credential is signed.
@@ -339,7 +340,7 @@ namespace WebExpress.WebCore.WebIdentity
         /// <returns>The verified JWT, or null when any required trust check fails.</returns>
         private JsonWebToken ValidateToken(string token, IApplicationContext applicationContext, string purpose, bool validateLifetime = true)
         {
-            var authority = Authority;
+            var authority = TryGetAuthority();
             if (authority is null || string.IsNullOrEmpty(token) || token.Length > 16384 ||
                 string.IsNullOrEmpty(applicationContext?.ApplicationId)) { return null; }
             var result = _tokenHandler.ValidateTokenAsync(token, new TokenValidationParameters
@@ -366,6 +367,36 @@ namespace WebExpress.WebCore.WebIdentity
         private TokenAuthority RequireAuthority()
         {
             return Authority ?? throw new InvalidOperationException("Configure WebExpress:Authentication before signing in.");
+        }
+
+        /// <summary>
+        /// Reads the signing authority for verification, where a rejected configuration has to mean
+        /// "not authenticated" rather than a failed request. Verification runs for every request that
+        /// carries a credential, so a throwing authority would turn a configuration mistake into an
+        /// outage and hand its exception to the error page an anonymous caller sees.
+        /// </summary>
+        /// <returns>The signing authority, or null when none is configured or the configuration is rejected.</returns>
+        private TokenAuthority TryGetAuthority()
+        {
+            try
+            {
+                return Authority;
+            }
+            catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidOperationException)
+            {
+                // reported once per distinct problem, otherwise every credential-bearing request logs it again
+                lock (_authorityGate)
+                {
+                    if (_reportedAuthorityError == ex.Message) { return null; }
+                    _reportedAuthorityError = ex.Message;
+                }
+
+                _httpServerContext?.Log?.Warning
+                (
+                    I18N.Translate("webexpress.webcore:identitymanager.authentication.invalid", ex.Message)
+                );
+                return null;
+            }
         }
 
         /// <summary>

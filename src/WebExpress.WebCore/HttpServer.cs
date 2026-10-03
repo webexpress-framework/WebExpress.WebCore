@@ -69,6 +69,13 @@ namespace WebExpress.WebCore
         /// </summary>
         public RequestOriginGuard OriginGuard => _originGuard ??= new RequestOriginGuard(Settings?.Security);
 
+        private ForwardedClientResolver _clientResolver;
+
+        /// <summary>
+        /// Gets the resolution of the client address behind trusted proxies, resolved on first use for the same reason.
+        /// </summary>
+        public ForwardedClientResolver ClientResolver => _clientResolver ??= new ForwardedClientResolver(Settings?.Security);
+
         private readonly List<HttpEndpointInfo> _listeningEndpoints = [];
 
         /// <summary>
@@ -164,7 +171,7 @@ namespace WebExpress.WebCore
             Culture = HttpServerContext.Culture;
             // webex creates the hub after this server because its managers require the server context
             _authenticationEndpoint = new Lazy<AuthenticationEndpoint>(() =>
-                new AuthenticationEndpoint(WebEx.ComponentHub, HttpServerContext));
+                new AuthenticationEndpoint(WebEx.ComponentHub, HttpServerContext, ClientResolver));
         }
 
         /// <summary>
@@ -190,7 +197,7 @@ namespace WebExpress.WebCore
                 _webHost?.Dispose();
                 _webHost = null;
                 Kestrel = null;
-                HttpServerContext.CertificateManager.Dispose();
+                HttpServerContext.CertificateManager.Unload();
 
                 // kestrel wraps the socket error of an occupied address into an io exception
                 if (ex is IOException { InnerException: AddressInUseException })
@@ -1097,14 +1104,23 @@ namespace WebExpress.WebCore
         /// Renders an exception as the html fragment a status page shows.
         /// </summary>
         /// <remarks>
+        /// The details are shown only when <see cref="SecuritySettings.DetailedErrors"/> asks for
+        /// them: they name types, paths and configuration values, and the page goes to whoever
+        /// sent the request. Every caller logs the exception, so nothing is lost by withholding it.
+        ///
         /// The stack trace is read defensively: an exception that was constructed but never
         /// thrown carries none, and reading it unguarded fails inside the very code that
         /// exists to report the first failure.
         /// </remarks>
         /// <param name="ex">The exception to describe.</param>
         /// <returns>The html fragment.</returns>
-        private static string Describe(Exception ex)
+        private string Describe(Exception ex)
         {
+            if (!(Settings?.Security?.DetailedErrors ?? false))
+            {
+                return "The server could not complete the request. The cause has been logged.";
+            }
+
             // messages routinely quote request data such as the path, which must not become markup
             static string Encode(string text) => WebUtility.HtmlEncode(text)?.Replace("\n", "<br/>\n");
 
@@ -1148,6 +1164,8 @@ namespace WebExpress.WebCore
 
             if (httpContext is HttpExceptionContext exceptionContext)
             {
+                HttpServerContext.Log?.Exception(exceptionContext.Exception);
+
                 var message = "<html><head><title>404</title></head><body>" +
                     Describe(exceptionContext.Exception) +
                     "</body></html>";
