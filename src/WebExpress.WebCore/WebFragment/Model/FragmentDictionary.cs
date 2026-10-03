@@ -32,7 +32,7 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContext">The application context.</param>
         /// <param name="fragmentItem">The fragment item.</param>
-        /// <returns>True if the fragment item was added successfully, false if an element with the same status code already exists.</returns>
+        /// <returns>True if the fragment item was added successfully, false if an element with the same key already exists.</returns>
         public bool AddFragmentItem(IPluginContext pluginContext, IApplicationContext applicationContext, FragmentItem fragmentItem)
         {
             var type = fragmentItem.FragmentClass;

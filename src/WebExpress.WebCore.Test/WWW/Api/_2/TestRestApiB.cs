@@ -11,6 +11,11 @@ namespace WebExpress.WebCore.Test.WWW.Api._2
     public sealed class TestRestApiB : IRestApi
     {
         /// <summary>
+        /// Gets or sets a synchronization hook for exercising real requests during host shutdown.
+        /// </summary>
+        internal static Action BeforeGet { get; set; }
+
+        /// <summary>
         /// Initialization of the rest api resource. Here, for example, managed resources can be loaded. 
         /// </summary>
         /// <param name="restApiContext">The context of the restapi resource.</param>
@@ -41,6 +46,7 @@ namespace WebExpress.WebCore.Test.WWW.Api._2
         [Method(RequestMethod.GET)]
         public Response GetData(Request request)
         {
+            BeforeGet?.Invoke();
             return new ResponseBadRequest(new StatusMessage("Not implemented."));
         }
 

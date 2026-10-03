@@ -8,15 +8,18 @@ using System.Reflection;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Serialization;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebPackage.Model;
 using WebExpress.WebCore.WebPlugin;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebPackage
 {
@@ -99,9 +102,9 @@ namespace WebExpress.WebCore.WebPackage
                     I18N.Translate("webexpress.webcore:packagemanager.existing", package.File)
                 );
 
-                if (package.State != PackageCatalogeItemState.Disable)
+                if (package.State != PackageCatalogItemState.Disable)
                 {
-                    package.State = PackageCatalogeItemState.Active;
+                    package.State = PackageCatalogItemState.Active;
                     ExtractPackage(package);
                     RegisterPackage(package);
                     BootPackage(package);
@@ -113,17 +116,18 @@ namespace WebExpress.WebCore.WebPackage
             // build sitemap
             _componentHub?.SitemapManager.Refresh();
 
-            Task.Factory.StartNew(() =>
+            _httpServerContext.Lifetime.TryRun(async stopping =>
             {
-                while (!TokenSource.IsCancellationRequested)
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stopping, TokenSource.Token);
+                while (!linked.IsCancellationRequested)
                 {
                     Scan();
 
-                    var secendsLeft = 60 - DateTime.Now.Second;
-                    Thread.Sleep(secendsLeft * 1000);
+                    var secondsLeft = 60 - DateTime.Now.Second;
+                    await Task.Delay(TimeSpan.FromSeconds(secondsLeft), linked.Token).ConfigureAwait(false);
                 }
 
-            }, TokenSource.Token);
+            });
         }
 
         /// <summary>
@@ -189,7 +193,7 @@ namespace WebExpress.WebCore.WebPackage
                         continue;
                     }
 
-                    packagesFromFile.State = PackageCatalogeItemState.Active;
+                    packagesFromFile.State = PackageCatalogItemState.Active;
 
                     ExtractPackage(packagesFromFile);
                     RegisterPackage(packagesFromFile);
@@ -225,7 +229,7 @@ namespace WebExpress.WebCore.WebPackage
                     }
 
                     // respect disabled state; only update metadata without activating
-                    if (existing.State == PackageCatalogeItemState.Disable)
+                    if (existing.State == PackageCatalogItemState.Disable)
                     {
                         existing.Metadata = fromFile.Metadata;
                         _httpServerContext?.Log?.Debug($"package '{package}' metadata updated while disabled");
@@ -240,7 +244,7 @@ namespace WebExpress.WebCore.WebPackage
                         // update metadata and identification
                         existing.Id = fromFile.Id;
                         existing.Metadata = fromFile.Metadata;
-                        existing.State = PackageCatalogeItemState.Active;
+                        existing.State = PackageCatalogItemState.Active;
 
                         // extract, register and boot new content
                         ExtractPackage(existing);
@@ -293,19 +297,33 @@ namespace WebExpress.WebCore.WebPackage
         }
 
         /// <summary>
-        /// Returns all package entries from the package catalog.
+        /// Returns all package entries, the installed ones and the plugins that ship with the
+        /// application.
         /// </summary>
+        /// <remarks>
+        /// The catalog only ever knows what was installed from a *.wxp file. In a plain build
+        /// deployment every plugin is referenced statically, the catalog is empty, and a management
+        /// surface reading it alone shows nothing while the server logs four running plugins. The
+        /// union is formed here rather than in the pages so that a third consumer cannot inherit
+        /// the blind spot; it is a read-only view and never touches
+        /// <see cref="PackageCatalog.Packages"/>, which is what keeps the synthesized entries out
+        /// of the persisted catalog.
+        /// </remarks>
         /// <returns>An enumerable collection with all package entries.</returns>
         public IEnumerable<PackageCatalogItem> GetPackages()
         {
             lock (_scanLock)
             {
-                return [.. Catalog.Packages.Where(x => x is not null)];
+                var packages = Catalog.Packages.Where(x => x is not null).ToList();
+
+                packages.AddRange(GetBuiltInPackages(packages));
+
+                return packages;
             }
         }
 
         /// <summary>
-        /// Returns a package by id.
+        /// Returns a package by id, the installed ones as well as the built-in plugins.
         /// </summary>
         /// <param name="packageId">The package id.</param>
         /// <returns>The package or null.</returns>
@@ -318,9 +336,97 @@ namespace WebExpress.WebCore.WebPackage
 
             lock (_scanLock)
             {
-                return Catalog.Packages
-                    .FirstOrDefault(x => x is not null && x.Id.Equals(packageId, StringComparison.OrdinalIgnoreCase));
+                return GetPackages()
+                    .FirstOrDefault(x => x.Id is not null && x.Id.Equals(packageId, StringComparison.OrdinalIgnoreCase));
             }
+        }
+
+        /// <summary>
+        /// Builds a catalog entry for every registered plugin that no catalog entry accounts for.
+        /// </summary>
+        /// <remarks>
+        /// A plugin is covered when a catalog entry lists it among its own plugins, or when a
+        /// catalog entry carries its id - so a plugin that is present statically and as a package
+        /// is reported once, by the package, which is the entry the operations can act on.
+        /// </remarks>
+        /// <param name="packages">The installed packages the plugins are matched against.</param>
+        /// <returns>The synthesized entries, ordered by id.</returns>
+        private IEnumerable<PackageCatalogItem> GetBuiltInPackages(IEnumerable<PackageCatalogItem> packages)
+        {
+            var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var package in packages)
+            {
+                if (!string.IsNullOrWhiteSpace(package.Id))
+                {
+                    covered.Add(package.Id);
+                }
+
+                foreach (var plugin in package.Plugins.Where(x => x?.PluginId is not null))
+                {
+                    covered.Add(plugin.PluginId.ToString());
+                }
+            }
+
+            return (_pluginManager?.Plugins ?? [])
+                .Where(x => x?.PluginId is not null && !covered.Contains(x.PluginId.ToString()))
+                .Select(CreateBuiltInItem)
+                .OrderBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Creates the catalog entry that stands for a plugin loaded from the application directory.
+        /// </summary>
+        /// <param name="plugin">The plugin context.</param>
+        /// <returns>The synthesized catalog entry.</returns>
+        private static PackageCatalogItem CreateBuiltInItem(IPluginContext plugin)
+        {
+            var id = plugin.PluginId.ToString();
+
+            return new PackageCatalogItem()
+            {
+                Id = id,
+                // there is no package file behind a built-in plugin. the empty name is deliberate:
+                // every path built from it fails to resolve, which is the second line of defence
+                // behind the guards on the operations
+                File = string.Empty,
+                State = PackageCatalogItemState.Active,
+                BuiltIn = true,
+                Plugins = [plugin],
+                Metadata = new PackageItem()
+                {
+                    FileName = string.Empty,
+                    Id = id,
+                    Version = plugin.Version,
+                    Title = plugin.PluginName,
+                    Authors = plugin.Manufacturer,
+                    License = plugin.License,
+                    Icon = plugin.Icon?.Display,
+                    Description = plugin.Description,
+                    PluginSources = [],
+                    Dependencies = []
+                }
+            };
+        }
+
+        /// <summary>
+        /// Rejects an operation that was asked to modify a plugin shipping with the application.
+        /// </summary>
+        /// <remarks>
+        /// None of the package operations can be carried out on such a plugin: its assembly lives
+        /// in the application directory, is loaded into the default context and cannot be replaced
+        /// or removed while the process runs. Failing up front is what keeps a request from leaving
+        /// the plugin half unregistered.
+        /// </remarks>
+        /// <param name="package">The package the operation was addressed to.</param>
+        /// <param name="operation">The name of the operation, used in the message.</param>
+        /// <returns>The failure result, or null when the package may be operated on.</returns>
+        private static PackageOperationResult RejectBuiltIn(PackageCatalogItem package, string operation)
+        {
+            return package is not null && package.BuiltIn
+                ? PackageOperationResult.Failed($"Package '{package.Id}' ships with the application and cannot be {operation}.", package)
+                : null;
         }
 
         /// <summary>
@@ -543,7 +649,7 @@ namespace WebExpress.WebCore.WebPackage
 
                 if (!activate)
                 {
-                    existing.State = PackageCatalogeItemState.Disable;
+                    existing.State = PackageCatalogItemState.Disable;
                     SaveCatalog();
                     _componentHub?.SitemapManager.Refresh();
                     return PackageOperationResult.Ok($"Package '{existing.Id}' installed (disabled).", existing);
@@ -571,7 +677,13 @@ namespace WebExpress.WebCore.WebPackage
                     return PackageOperationResult.Failed($"Package '{packageId}' was not found.");
                 }
 
-                if (package.State == PackageCatalogeItemState.Active)
+                var builtIn = RejectBuiltIn(package, "activated");
+                if (builtIn is not null)
+                {
+                    return builtIn;
+                }
+
+                if (package.State == PackageCatalogItemState.Active)
                 {
                     return PackageOperationResult.Ok($"Package '{packageId}' is already active.", package);
                 }
@@ -579,7 +691,7 @@ namespace WebExpress.WebCore.WebPackage
                 var missingDependencies = GetUnfulfilledPackageDependencies(package).ToList();
                 if (missingDependencies.Count > 0)
                 {
-                    package.State = PackageCatalogeItemState.Disable;
+                    package.State = PackageCatalogItemState.Disable;
                     SaveCatalog();
                     return PackageOperationResult.Failed($"Package '{packageId}' has missing dependencies: {string.Join(", ", missingDependencies)}", package);
                 }
@@ -590,7 +702,7 @@ namespace WebExpress.WebCore.WebPackage
                 ExtractPackage(package);
                 RegisterPackage(package);
                 BootPackage(package);
-                package.State = PackageCatalogeItemState.Active;
+                package.State = PackageCatalogItemState.Active;
 
                 SaveCatalog();
                 _componentHub?.SitemapManager.Refresh();
@@ -614,9 +726,15 @@ namespace WebExpress.WebCore.WebPackage
                     return PackageOperationResult.Failed($"Package '{packageId}' was not found.");
                 }
 
+                var builtIn = RejectBuiltIn(package, "deactivated");
+                if (builtIn is not null)
+                {
+                    return builtIn;
+                }
+
                 DeactivateAndUnregisterPackage(package);
                 RemoveExtractedDirectory(package);
-                package.State = PackageCatalogeItemState.Disable;
+                package.State = PackageCatalogItemState.Disable;
 
                 SaveCatalog();
                 _componentHub?.SitemapManager.Refresh();
@@ -636,6 +754,12 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>The operation result.</returns>
         public PackageOperationResult UpdatePackage(string packageId, string packageFile, bool activate = true, long maxPackageBytes = 0, string expectedSha256 = null)
         {
+            var builtIn = RejectBuiltIn(GetPackage(packageId), "updated");
+            if (builtIn is not null)
+            {
+                return builtIn;
+            }
+
             var validation = ValidatePackage(packageFile, maxPackageBytes, expectedSha256);
             if (!validation.IsValid)
             {
@@ -663,6 +787,12 @@ namespace WebExpress.WebCore.WebPackage
                 if (package is null)
                 {
                     return PackageOperationResult.Failed($"Package '{packageId}' was not found.");
+                }
+
+                var builtIn = RejectBuiltIn(package, "uninstalled");
+                if (builtIn is not null)
+                {
+                    return builtIn;
                 }
 
                 DeactivateAndUnregisterPackage(package);
@@ -792,9 +922,18 @@ namespace WebExpress.WebCore.WebPackage
                     Directory.CreateDirectory(extractedPath);
                 }
 
+                var deployedSettings = false;
+
                 foreach (var entry in zip.Entries)
                 {
                     var normalized = (entry.FullName ?? string.Empty).Replace('\\', '/').TrimStart('/');
+
+                    if (normalized.StartsWith(PackageBuilder.SettingsDirectory + "/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deployedSettings |= DeploySettings(entry, normalized, package.Metadata?.Id ?? package.Id);
+
+                        continue;
+                    }
 
                     if (!normalized.StartsWith("lib/", StringComparison.OrdinalIgnoreCase))
                     {
@@ -837,7 +976,139 @@ namespace WebExpress.WebCore.WebPackage
 
                     entry.ExtractToFile(targetFilePath, true);
                 }
+
+                // the configuration everyone holds is reloaded in place, so the plugin about to
+                // boot finds its settings without a restart
+                if (deployedSettings)
+                {
+                    _httpServerContext?.Configuration?.Reload();
+                }
             }
+        }
+
+        /// <summary>
+        /// Deploys a settings file of a package to the settings directory of the server. An
+        /// existing file is left alone: it is the administrator's by then, and a package update
+        /// must not undo the changes made to it.
+        /// </summary>
+        /// <remarks>
+        /// Every file in the settings directory is merged into the one configuration the whole
+        /// server reads, so a package could otherwise set server keys the main file leaves out
+        /// (endpoints, security, authentication) or replace the settings of another plugin. The
+        /// file is therefore only deployed when every key it sets lies below
+        /// <c>Plugins:&lt;plugin-id&gt;</c> of the package's own plugin.
+        /// </remarks>
+        /// <param name="entry">The archive entry of the settings file.</param>
+        /// <param name="normalized">The entry path with forward slashes and no leading slash.</param>
+        /// <param name="pluginId">The id of the plugin the settings belong to.</param>
+        /// <returns><see langword="true"/> when the file was written, <see langword="false"/> when it was skipped.</returns>
+        private bool DeploySettings(ZipArchiveEntry entry, string normalized, string pluginId)
+        {
+            var settingsPath = _httpServerContext?.SettingsPath;
+            var segments = normalized.Split('/');
+
+            // directory entries carry no file
+            if (string.IsNullOrEmpty(entry.Name) || string.IsNullOrWhiteSpace(settingsPath))
+            {
+                return false;
+            }
+
+            // only json files directly below the settings directory are settings; a nested path
+            // could escape the directory and another extension would never be merged
+            if (segments.Length != 2
+                || !segments[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                || segments[1].IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.ignored", entry.FullName));
+
+                return false;
+            }
+
+            var targetFilePath = Path.Combine(settingsPath, segments[1]);
+
+            if (File.Exists(targetFilePath))
+            {
+                _httpServerContext?.Log?.Debug(I18N.Translate("webexpress.webcore:packagemanager.settings.existing", segments[1]));
+
+                return false;
+            }
+
+            using var stream = entry.Open();
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            var content = buffer.ToArray();
+
+            // a file that does not parse is refused before it reaches the directory: once there,
+            // it would fail every following start of the server, not just this installation
+            var keys = ReadSettingsKeys(content);
+
+            if (keys is null)
+            {
+                _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.invalid", entry.FullName));
+
+                return false;
+            }
+
+            var scope = ConfigurationPath.Combine(HttpServerSettings.PluginSection, pluginId ?? string.Empty);
+            var foreignKey = string.IsNullOrWhiteSpace(pluginId)
+                ? keys.FirstOrDefault()
+                : keys.FirstOrDefault(x => !IsWithinScope(x, scope));
+
+            if (foreignKey is not null)
+            {
+                _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.outofscope", entry.FullName, foreignKey, scope));
+
+                return false;
+            }
+
+            Directory.CreateDirectory(settingsPath);
+            File.WriteAllBytes(targetFilePath, content);
+
+            _httpServerContext?.Log?.Info(I18N.Translate("webexpress.webcore:packagemanager.settings.deployed", segments[1]));
+
+            return true;
+        }
+
+        /// <summary>
+        /// Reads the configuration keys a settings file would set. The file is parsed by the same
+        /// json configuration provider the settings directory uses, so comments, trailing commas
+        /// and colons inside property names (<c>"Plugins:other": {}</c>) are flattened exactly as
+        /// they would be once the file is deployed.
+        /// </summary>
+        /// <param name="content">The content of the settings file.</param>
+        /// <returns>The keys that carry a value, or null when the configuration would refuse the content.</returns>
+        private static IReadOnlyList<string> ReadSettingsKeys(byte[] content)
+        {
+            try
+            {
+                using var stream = new MemoryStream(content);
+                var configuration = new ConfigurationBuilder()
+                    .AddJsonStream(stream)
+                    .Build();
+
+                using (configuration as IDisposable)
+                {
+                    // the settings directory merges only keys with a value; containers set nothing
+                    return [.. configuration.AsEnumerable().Where(x => x.Value is not null).Select(x => x.Key)];
+                }
+            }
+            catch (Exception ex) when (ex is JsonException or FormatException or InvalidDataException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Checks whether a configuration key lies at or below the given section.
+        /// </summary>
+        /// <param name="key">The configuration key.</param>
+        /// <param name="scope">The section the key must stay within.</param>
+        /// <returns><see langword="true"/> when the key belongs to the section.</returns>
+        private static bool IsWithinScope(string key, string scope)
+        {
+            // configuration keys are case-insensitive, so a differently cased key reaches the same section
+            return key.Equals(scope, StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith(scope + ConfigurationPath.KeyDelimiter, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -1019,7 +1290,7 @@ namespace WebExpress.WebCore.WebPackage
             }
 
             package.Plugins.Clear();
-            package.State = PackageCatalogeItemState.Available;
+            package.State = PackageCatalogItemState.Available;
         }
 
         /// <summary>
@@ -1078,7 +1349,7 @@ namespace WebExpress.WebCore.WebPackage
             {
                 Id = spec.Id,
                 File = Path.GetFileName(file),
-                State = PackageCatalogeItemState.Available,
+                State = PackageCatalogItemState.Available,
                 Metadata = new PackageItem()
                 {
                     FileName = Path.GetFileName(file),
@@ -1151,10 +1422,12 @@ namespace WebExpress.WebCore.WebPackage
                     continue;
                 }
 
-                var dependencyPackage = Catalog.Packages
-                    .FirstOrDefault(x => x is not null && x.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+                // built-in plugins count as fulfilled dependencies: a package that depends on
+                // webexpress.webui must install against a build deployment, where that plugin is
+                // referenced statically and therefore never appears in the catalog
+                var dependencyPackage = GetPackage(id);
 
-                if (dependencyPackage is null || dependencyPackage.State == PackageCatalogeItemState.Disable)
+                if (dependencyPackage is null || dependencyPackage.State == PackageCatalogItemState.Disable)
                 {
                     missing.Add(dependency);
                     continue;
@@ -1277,6 +1550,7 @@ namespace WebExpress.WebCore.WebPackage
         /// </summary>
         public void Dispose()
         {
+            ShutDown();
         }
     }
 }

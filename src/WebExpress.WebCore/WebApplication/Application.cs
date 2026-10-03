@@ -3,7 +3,9 @@
 namespace WebExpress.WebCore.WebApplication
 {
     /// <summary>
-    /// This represents an application.
+    /// Base class for a WebExpress application. Derive from it to create an application; the
+    /// framework instantiates the subclass, supplies its <see cref="ApplicationContext"/> (id, name,
+    /// paths, route), and calls <c>Run</c> at start-up. See <see cref="IApplication"/>.
     /// </summary>
     public abstract class Application : IApplication
     {

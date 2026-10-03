@@ -5,7 +5,9 @@ using WebExpress.WebCore.WebStatusPage;
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// Represents a response for upgrade required (426) according to RFC 7231 section 6.5.15.
+    /// HTTP 426 (Upgrade Required): tells the client it must switch to a different protocol
+    /// (such as a WebSocket connection) before the request can be served
+    /// (see RFC 7231 Section 6.5.15).
     /// </summary>
     [StatusCode(426)]
     public class ResponseUpgradeRequired : Response

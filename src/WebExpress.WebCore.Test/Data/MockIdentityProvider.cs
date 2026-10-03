@@ -106,7 +106,7 @@ namespace WebExpress.WebCore.Test.Data
         /// A response representing the forbidden page if this provider can handle the forbidden
         /// scenario; otherwise, <c>null</c>.
         /// </returns>
-        public IResponse CreateForbiddenPage(IRequest request, IPageContext initiator, IIdentity identity)
+        public IResponse CreateForbiddenResponse(IRequest request, IPageContext initiator, IIdentity identity)
         {
             return null;
         }

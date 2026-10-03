@@ -11,7 +11,9 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebResource
 {
     /// <summary>
-    /// Represents the context of a resource.
+    /// Read-only descriptor of a registered resource endpoint, handed to components so they can
+    /// learn about the resource and the application and plugin it belongs to without referencing
+    /// the resource instance itself.
     /// </summary>
     public class ResourceContext : IResourceContext
     {

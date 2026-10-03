@@ -47,7 +47,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <summary>
         /// Gets the http version.
         /// </summary>
-        string Protocoll { get; }
+        string Protocol { get; }
 
         /// <summary>
         /// Gets the options from the header.

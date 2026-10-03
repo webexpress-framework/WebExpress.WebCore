@@ -1,17 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebComponent.Model;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
+using WebExpress.WebCore.WebHealth;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebInclude;
 using WebExpress.WebCore.WebJob;
 using WebExpress.WebCore.WebLog;
+using WebExpress.WebCore.WebMetrics;
 using WebExpress.WebCore.WebPackage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
@@ -54,9 +58,19 @@ namespace WebExpress.WebCore.WebComponent
         private readonly JobManager _jobManager;
         private readonly TaskManager _taskManager;
         private readonly IdentityManager _identityManager;
+        private readonly IdentityProviderManager _identityProviderManager;
+        private readonly IdentityTokenStoreManager _identityTokenStoreManager;
         private readonly SocketManager _socketManager;
         private readonly ThemeManager _themeManager;
+        private readonly HealthManager _healthManager;
+        private readonly MetricsManager _metricsManager;
         private int _lastCounter = 0;
+        private int _disposed;
+
+        /// <summary>
+        /// Gets the host-owned certificate service without creating a second certificate inventory.
+        /// </summary>
+        public ICertificateManager CertificateManager => _httpServerContext.CertificateManager;
 
         /// <summary>
         /// An event that fires when an component is added.
@@ -91,9 +105,13 @@ namespace WebExpress.WebCore.WebComponent
                 _statusPageManager,
                 _internationalizationManager,
                 _identityManager,
+                _identityProviderManager,
+                _identityTokenStoreManager,
                 _sessionManager,
                 _taskManager,
                 _socketManager,
+                _healthManager,
+                _metricsManager,
                 _themeManager
             }.Concat(_dictionary.Values.SelectMany(x => x).Select(x => x.ComponentInstance));
 
@@ -212,6 +230,16 @@ namespace WebExpress.WebCore.WebComponent
         public IIdentityManager IdentityManager => _identityManager;
 
         /// <summary>
+        /// Keeps provider discovery independent of credential issuance.
+        /// </summary>
+        public IIdentityProviderManager IdentityProviderManager => _identityProviderManager;
+
+        /// <summary>
+        /// Keeps replay and revocation storage replaceable by plugins without changing credential issuance.
+        /// </summary>
+        public IIdentityTokenStoreManager IdentityTokenStoreManager => _identityTokenStoreManager;
+
+        /// <summary>
         /// Gets the session manager.
         /// </summary>
         /// <returns>The instance of the session manager.</returns>
@@ -228,6 +256,16 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         /// <returns>The instance of the theme manager.</returns>
         public IThemeManager ThemeManager => _themeManager;
+
+        /// <summary>
+        /// Gets the shared health registry used by the host and application dependencies.
+        /// </summary>
+        public IHealthManager HealthManager => _healthManager;
+
+        /// <summary>
+        /// Gets the shared metrics registry used by the host, the framework managers and application components.
+        /// </summary>
+        public IMetricsManager MetricsManager => _metricsManager;
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -276,12 +314,21 @@ namespace WebExpress.WebCore.WebComponent
                 ?? throw new InvalidOperationException("Failed to create SessionManager.");
             _taskManager = CreateInstance(typeof(TaskManager)) as TaskManager
                 ?? throw new InvalidOperationException("Failed to create TaskManager.");
+            _identityProviderManager = CreateInstance(typeof(IdentityProviderManager)) as IdentityProviderManager
+                ?? throw new InvalidOperationException("Failed to create IdentityProviderManager.");
+            _identityTokenStoreManager = CreateInstance(typeof(IdentityTokenStoreManager)) as IdentityTokenStoreManager
+                ?? throw new InvalidOperationException("Failed to create IdentityTokenStoreManager.");
             _identityManager = CreateInstance(typeof(IdentityManager)) as IdentityManager
                 ?? throw new InvalidOperationException("Failed to create IdentityManager.");
             _socketManager = CreateInstance(typeof(SocketManager)) as SocketManager
                 ?? throw new InvalidOperationException("Failed to create SocketManager.");
             _themeManager = CreateInstance(typeof(ThemeManager)) as ThemeManager
                 ?? throw new InvalidOperationException("Failed to create ThemeManager.");
+
+            _healthManager = CreateInstance(typeof(HealthManager)) as HealthManager
+                ?? throw new InvalidOperationException("Failed to create HealthManager.");
+            _metricsManager = CreateInstance(typeof(MetricsManager)) as MetricsManager
+                ?? throw new InvalidOperationException("Failed to create MetricsManager.");
 
             _internationalizationManager.Register(typeof(HttpServer).Assembly, typeof(HttpServer).Assembly.GetName().Name?.ToLower());
 
@@ -312,7 +359,7 @@ namespace WebExpress.WebCore.WebComponent
             {
                 return null;
             }
-            else if (!componentType.GetInterfaces().Where(x => x == typeof(IComponentManager)).Any())
+            else if (!componentType.GetInterfaces().Any(x => x == typeof(IComponentManager)))
             {
                 _httpServerContext?.Log?.Warning
                 (
@@ -439,8 +486,9 @@ namespace WebExpress.WebCore.WebComponent
             _applicationManager.Boot(pluginContext);
 
             foreach (var component in _dictionary.Values
-                .Where(x => x is IExecutableElements)
-                .Select(x => x as IExecutableElements))
+                .SelectMany(x => x)
+                .Select(x => x.ComponentInstance)
+                .OfType<IExecutableElements>())
             {
                 component.Boot(pluginContext);
             }
@@ -477,10 +525,7 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         public void ShutDown()
         {
-            _httpServerContext?.Log?.Debug
-            (
-                _internationalizationManager.Translate("webexpress.webcore:componentmanager.shutdown")
-            );
+            Dispose();
         }
 
         /// <summary>
@@ -493,8 +538,9 @@ namespace WebExpress.WebCore.WebComponent
             _applicationManager.ShutDown(pluginContext);
 
             foreach (var component in _dictionary.Values
-                .Where(x => x is IExecutableElements)
-                .Select(x => x as IExecutableElements))
+                .SelectMany(x => x)
+                .Select(x => x.ComponentInstance)
+                .OfType<IExecutableElements>())
             {
                 component.ShutDown(pluginContext);
             }
@@ -559,7 +605,10 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         private void Log()
         {
-            if (_lastCounter == Managers.Count())
+            // materialize the (relatively expensive) managers enumeration once
+            var managers = Managers.ToList();
+
+            if (_lastCounter == managers.Count)
             {
                 return;
             }
@@ -570,7 +619,7 @@ namespace WebExpress.WebCore.WebComponent
                 _internationalizationManager.Translate("webexpress.webcore:componentmanager.component")
             };
 
-            foreach (var manager in Managers)
+            foreach (var manager in managers)
             {
                 output.Add
                 (
@@ -580,7 +629,7 @@ namespace WebExpress.WebCore.WebComponent
             }
 
             _httpServerContext?.Log?.Info(string.Join(Environment.NewLine, output));
-            _lastCounter = Managers.Count();
+            _lastCounter = managers.Count;
         }
 
         /// <summary>
@@ -588,6 +637,39 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            var managers = Managers.Distinct().Reverse().ToArray();
+            foreach (var plugin in _pluginManager.Plugins.ToArray())
+            {
+                foreach (var manager in managers.OfType<IExecutableElements>())
+                {
+                    try
+                    {
+                        manager.ShutDown(plugin);
+                    }
+                    catch (Exception ex)
+                    {
+                        _httpServerContext?.Log?.Exception(ex);
+                    }
+                }
+            }
+
+            foreach (var manager in managers)
+            {
+                try
+                {
+                    manager.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _httpServerContext?.Log?.Exception(ex);
+                }
+            }
+
             GC.SuppressFinalize(this);
         }
     }

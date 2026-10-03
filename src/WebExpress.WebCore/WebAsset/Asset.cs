@@ -1,5 +1,7 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebMessage;
@@ -15,6 +17,8 @@ namespace WebExpress.WebCore.WebAsset
         private readonly IAssetContext _assetContext;
         private readonly IHttpServerContext _httpServerContext;
         private readonly string _embeddedResource;
+        private readonly ContentType _contentType;
+        private readonly string _eTag;
         private byte[] _data;
 
         /// <summary>
@@ -38,6 +42,11 @@ namespace WebExpress.WebCore.WebAsset
 
             var assembly = _assetContext.PluginContext.Assembly;
             _data = GetData(assembly);
+
+            // an asset is immutable embedded content, so its content type and entity tag can be
+            // resolved once at construction time instead of on every request.
+            _contentType = ContentTypeExtensions.ToContentType(Path.GetExtension(_assetContext.EndpointId?.ToString()));
+            _eTag = ComputeETag(_data);
         }
 
         /// <summary>
@@ -52,74 +61,32 @@ namespace WebExpress.WebCore.WebAsset
                 return new ResponseNotFound();
             }
 
-            var extension = Path.GetExtension(_assetContext.EndpointId.ToString())?.ToLower() ?? "";
-            var response = new ResponseOK();
+            // conditional request: when the client already holds the current version, skip the body
+            // and answer with 304 Not Modified so the cached copy is reused.
+            if (!string.IsNullOrEmpty(_eTag) && string.Equals(request?.Header?.IfNoneMatch, _eTag, StringComparison.Ordinal))
+            {
+                var notModified = new ResponseNotModified();
+                notModified.Header.CacheControl = "public, max-age=31536000";
+                notModified.Header.AddCustomHeader("ETag", _eTag);
 
+                return notModified;
+            }
+
+            var response = new ResponseOK();
             response.Header.CacheControl = "public, max-age=31536000";
             response.Header.ContentLength = _data.Length;
+            response.Header.ContentType = _contentType.GetMimeType();
             response.Content = _data;
 
-            switch (extension)
+            if (!string.IsNullOrEmpty(_eTag))
             {
-                case ".pdf":
-                    response.Header.ContentType = "application/pdf";
-                    break;
-                case ".txt":
-                    response.Header.ContentType = "text/plain";
-                    break;
-                case ".css":
-                    response.Header.ContentType = "text/css";
-                    break;
-                case ".js":
-                    response.Header.ContentType = "application/javascript";
-                    break;
-                case ".xml":
-                    response.Header.ContentType = "text/xml";
-                    break;
-                case ".html":
-                case ".htm":
-                    response.Header.ContentType = "text/html";
-                    break;
-                case ".zip":
-                    response.Header.ContentDisposition = "attatchment; filename=" + _assetContext.EndpointId + "; size=" + _data.LongLength;
-                    response.Header.ContentType = "application/zip";
-                    break;
-                case ".doc":
-                case ".docx":
-                    response.Header.ContentType = "application/msword";
-                    break;
-                case ".xls":
-                case ".xlx":
-                    response.Header.ContentType = "application/vnd.ms-excel";
-                    break;
-                case ".ppt":
-                    response.Header.ContentType = "application/vnd.ms-powerpoint";
-                    break;
-                case ".gif":
-                    response.Header.ContentType = "image/gif";
-                    break;
-                case ".png":
-                    response.Header.ContentType = "image/png";
-                    break;
-                case ".svg":
-                    response.Header.ContentType = "image/svg+xml";
-                    break;
-                case ".jpeg":
-                case ".jpg":
-                    response.Header.ContentType = "image/jpg";
-                    break;
-                case ".ico":
-                    response.Header.ContentType = "image/x-icon";
-                    break;
-                case ".mp3":
-                    response.Header.ContentType = "audio/mpeg";
-                    break;
-                case ".mp4":
-                    response.Header.ContentType = "video/mp4";
-                    break;
-                default:
-                    response.Header.ContentType = "binary/octet-stream";
-                    break;
+                response.Header.AddCustomHeader("ETag", _eTag);
+            }
+
+            // archives are offered as a download rather than rendered inline
+            if (_contentType == ContentType.Zip)
+            {
+                response.Header.ContentDisposition = $"attachment; filename={_assetContext.EndpointId}; size={_data.LongLength}";
             }
 
             _httpServerContext?.Log?.Debug(I18N.Translate
@@ -144,10 +111,33 @@ namespace WebExpress.WebCore.WebAsset
             }
 
             using var stream = assembly.GetManifestResourceStream(_embeddedResource);
+
+            if (stream is null)
+            {
+                return [];
+            }
+
             using var memoryStream = new MemoryStream();
             stream.CopyTo(memoryStream);
 
             return memoryStream.ToArray();
+        }
+
+        /// <summary>
+        /// Computes a content-based entity tag (ETag) for conditional requests.
+        /// </summary>
+        /// <param name="data">The asset payload.</param>
+        /// <returns>A quoted ETag value, or null when there is no payload.</returns>
+        private static string ComputeETag(byte[] data)
+        {
+            if (data is null || data.Length == 0)
+            {
+                return null;
+            }
+
+            // a content hash is used so the tag changes if and only if the payload changes; SHA-1 is
+            // chosen for speed because the value is a cache validator, not a security token.
+            return "\"" + Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant() + "\"";
         }
 
         /// <summary>

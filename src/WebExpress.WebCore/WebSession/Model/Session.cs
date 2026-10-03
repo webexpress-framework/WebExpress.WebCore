@@ -15,7 +15,11 @@ namespace WebExpress.WebCore.WebSession.Model
         /// <summary>
         /// Gets the session id.
         /// </summary>
-        public Guid Id { get; private set; }
+        /// <remarks>
+        /// The id identifies optional application state and never authenticates a user.
+        /// Applications may regenerate it when replacing sensitive application state.
+        /// </remarks>
+        public Guid Id { get; internal set; }
 
         /// <summary>
         /// Gets the creation time.

@@ -3,7 +3,9 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Interface for HTML elements.
+    /// Lowest-level building block of the HTML object model: anything that can render itself into
+    /// HTML markup. Implementations write their output into a shared <see cref="StringBuilder"/>,
+    /// which lets the whole page be assembled in a single buffer instead of concatenating strings.
     /// </summary>
     public interface IHtml
     {

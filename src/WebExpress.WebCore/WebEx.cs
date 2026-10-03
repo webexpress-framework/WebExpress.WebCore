@@ -1,16 +1,20 @@
 ﻿using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
-using System.Xml.Serialization;
-using WebExpress.WebCore.Config;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebLog;
+using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPackage;
+using WebExpress.WebCore.WebSetting;
 
 [assembly: InternalsVisibleTo("WebExpress.WebCore.Test")]
 
@@ -23,6 +27,9 @@ namespace WebExpress.WebCore
     {
         private static IComponentHub _componentHub;
         private HttpServer _httpServer;
+        private ComponentHub _ownedComponentHub;
+        private IConfigurationRoot _configuration;
+        private readonly TaskCompletionSource _shutdownRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
         /// Occurs when the initialization process is completed.
@@ -66,6 +73,76 @@ namespace WebExpress.WebCore
         public static IComponentHub ComponentHub => _componentHub;
 
         /// <summary>
+        /// Gets the request currently being served on this call chain, or <see langword="null"/>
+        /// outside a request.
+        /// </summary>
+        /// <remarks>
+        /// The request is handed to endpoints, pages, controls and fragments, and passing it on
+        /// from there is the right way to reach it - a method that needs the request should say
+        /// so in its signature. This exists for the layers where that is not possible: a
+        /// manager, a component or a store several calls deep that has to answer a question
+        /// about the caller - who is signed in, which language they read, where they are
+        /// connecting from - and whose signature is shared with callers that have no request at
+        /// all. Threading a request through every one of them would mean changing every
+        /// implementation of an interface for the sake of one of them.
+        /// <para>
+        /// It is an async local set for the duration of one request, so a call chain sees the
+        /// request it belongs to and two requests served at once never see each other's. It is
+        /// null outside a request - during startup, on a background worker, in a test - and
+        /// callers have to answer that case rather than assume a request.
+        /// </para>
+        /// </remarks>
+        public static IRequest CurrentRequest => _currentRequest.Value;
+
+        /// <summary>
+        /// The backing store of <see cref="CurrentRequest"/>.
+        /// </summary>
+        private static readonly AsyncLocal<IRequest> _currentRequest = new();
+
+        /// <summary>
+        /// Makes the supplied request the current one until the returned scope is closed.
+        /// </summary>
+        /// <remarks>
+        /// Called by the server around the handling of one request. It is internal because the
+        /// span of a request is the server's to decide: a host that could open the scope itself
+        /// could also leave it open, and every layer reading <see cref="CurrentRequest"/> would
+        /// then be told about a request that had long been answered.
+        /// </remarks>
+        /// <param name="request">The request being served.</param>
+        /// <returns>The scope. Closing it restores what was current before.</returns>
+        internal static IDisposable BeginRequest(IRequest request)
+        {
+            var previous = _currentRequest.Value;
+
+            _currentRequest.Value = request;
+
+            return new RequestScope(previous);
+        }
+
+        /// <summary>
+        /// The scope handed out by <see cref="BeginRequest"/>.
+        /// </summary>
+        /// <param name="previous">The request that was current when the scope was opened.</param>
+        private sealed class RequestScope(IRequest previous) : IDisposable
+        {
+            private bool _closed;
+
+            /// <summary>
+            /// Restores the request of the enclosing scope.
+            /// </summary>
+            public void Dispose()
+            {
+                if (_closed)
+                {
+                    return;
+                }
+
+                _closed = true;
+                _currentRequest.Value = previous;
+            }
+        }
+
+        /// <summary>
         /// Gets or sets the path to the favicon image used by the application.
         /// </summary>
         public static string Favicon { get; set; } = "webexpress.webui/assets/img/webexpress.svg";
@@ -90,7 +167,7 @@ namespace WebExpress.WebCore
 
             if (argumentDict.ContainsKey("help"))
             {
-                Console.WriteLine(Name + " [-port number | -config dateiname | -help]");
+                Console.WriteLine(Name + " [-port number | -config filename | -help]");
                 Console.WriteLine("Version: " + Version);
 
                 return 0;
@@ -132,33 +209,78 @@ namespace WebExpress.WebCore
                 return 0;
             }
 
-            // configuration
-            if (!argumentDict.ContainsKey("config"))
-            {
-                // check if there is a file called config.xml
-                if (!File.Exists(Path.Combine(Path.Combine(Environment.CurrentDirectory, "config"), "webexpress.config.xml")))
-                {
-                    Console.WriteLine("No configuration file was specified. Usage: " + Name + " -config filename");
+            // settings
+            var settingsFile = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, SettingsLoader.DefaultDirectory, argumentDict.TryGetValue("config", out var configArgument) ? configArgument : SettingsLoader.DefaultMainFile));
 
+            if (!File.Exists(settingsFile))
+            {
+                Console.WriteLine($"The settings file '{settingsFile}' was not found. Usage: {Name} -config filename");
+
+                return 1;
+            }
+
+            Console.CancelKeyPress += OnCancel;
+            using var terminate = OperatingSystem.IsWindows() ? null
+                : PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnSignal);
+            using var interrupt = OperatingSystem.IsWindows() ? null
+                : PosixSignalRegistration.Create(PosixSignal.SIGINT, OnSignal);
+            using var quit = OperatingSystem.IsWindows() ? null
+                : PosixSignalRegistration.Create(PosixSignal.SIGQUIT, OnSignal);
+
+            try
+            {
+                if (!OnInitialization(ArgumentParser.Current.GetValidArguments(args), settingsFile))
+                {
                     return 1;
                 }
 
-                argumentDict.Add("config", "webexpress.config.xml");
+                if (_shutdownRequested.Task.IsCompleted)
+                {
+                    return 0;
+                }
+
+                _ownedComponentHub.Execute();
+                return OnStart() ? 0 : 1;
             }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"WebExpress could not run: {ex.Message}");
+                _httpServer?.HttpServerContext.Log?.Exception(ex);
+                return 1;
+            }
+            finally
+            {
+                try
+                {
+                    if (_httpServer is not null)
+                    {
+                        OnExit();
+                    }
+                }
+                finally
+                {
+                    Console.CancelKeyPress -= OnCancel;
+                    (_configuration as IDisposable)?.Dispose();
+                }
+            }
+        }
 
-            // initialization of the web server
-            OnInitialization(ArgumentParser.Current.GetValidArguments(args), Path.Combine(Path.Combine(Environment.CurrentDirectory, "config"), argumentDict["config"]));
+        /// <summary>
+        /// Requests the same orderly termination used for container and console signals.
+        /// </summary>
+        public void RequestShutdown()
+        {
+            _shutdownRequested.TrySetResult();
+        }
 
-            // start the manager
-            (_componentHub as ComponentHub).Execute();
-
-            // starting the web server
-            OnStart();
-
-            // finish
-            OnExit();
-
-            return 0;
+        /// <summary>
+        /// Suppresses immediate process termination so the execution thread can drain the host.
+        /// </summary>
+        /// <param name="context">The POSIX signal and its default termination behavior.</param>
+        private void OnSignal(PosixSignalContext context)
+        {
+            context.Cancel = true;
+            RequestShutdown();
         }
 
         /// <summary>
@@ -168,27 +290,41 @@ namespace WebExpress.WebCore
         /// <param name="e">The event argument.</param>
         private void OnCancel(object sender, ConsoleCancelEventArgs e)
         {
-            OnExit();
+            e.Cancel = true;
+            RequestShutdown();
         }
 
         /// <summary>
         /// Initialization
         /// </summary>
         /// <param name="args">The valid arguments.</param>
-        /// <param name="configFile">The configuration file.</param>
-        private void OnInitialization(string args, string configFile)
+        /// <param name="settingsFile">The main settings file; its directory is the settings directory.</param>
+        /// <returns><see langword="true"/> when the server is ready to start, <see langword="false"/> when the settings could not be read.</returns>
+        private bool OnInitialization(string args, string settingsFile)
         {
-            // load configuration
-            using var reader = new FileStream(configFile, FileMode.Open);
-            var serializer = new XmlSerializer(typeof(HttpServerConfig));
-            var config = serializer.Deserialize(reader) as HttpServerConfig;
             var log = new Log();
+            IConfigurationRoot configuration;
 
+            // a broken settings file is the most likely reason for a failed start, so it is
+            // reported by name and stops the start instead of surfacing as a stack trace
+            try
+            {
+                configuration = _configuration = SettingsLoader.Load(settingsFile, ex => log.Exception(ex));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"The settings could not be read: {ex.Message}");
+
+                return false;
+            }
+
+            var settings = configuration.GetServerSettings();
+            var settingsPath = Path.GetDirectoryName(settingsFile);
             var culture = CultureInfo.CurrentCulture;
 
             try
             {
-                culture = new CultureInfo(config.Culture);
+                culture = new CultureInfo(settings.Culture);
 
                 CultureInfo.CurrentCulture = culture;
             }
@@ -197,43 +333,42 @@ namespace WebExpress.WebCore
 
             }
 
-            var packageBase = string.IsNullOrWhiteSpace(config.PackageBase) ?
-                Environment.CurrentDirectory : Path.IsPathRooted(config.PackageBase) ?
-                config.PackageBase :
-                Path.Combine(Environment.CurrentDirectory, config.PackageBase);
-
-            var assetBase = string.IsNullOrWhiteSpace(config.AssetBase) ?
-                Environment.CurrentDirectory : Path.IsPathRooted(config.AssetBase) ?
-                config.AssetBase :
-                Path.Combine(Environment.CurrentDirectory, config.AssetBase);
-
-            var dataBase = string.IsNullOrWhiteSpace(config.DataBase) ?
-                Environment.CurrentDirectory : Path.IsPathRooted(config.DataBase) ?
-                config.DataBase :
-                Path.Combine(Environment.CurrentDirectory, config.DataBase);
+            var packageBase = ResolveDirectory(settings.PackagePath);
+            var assetBase = ResolveDirectory(settings.AssetPath);
+            var dataBase = ResolveDirectory(settings.DataPath);
 
             var context = new HttpServerContext
             (
-                new RouteEndpoint(config.Route),
-                config.Endpoints,
-                Path.GetFullPath(packageBase),
-                Path.GetFullPath(assetBase),
-                Path.GetFullPath(dataBase),
-                Path.GetDirectoryName(configFile),
+                new RouteEndpoint(settings.ContextPath),
+                settings.Endpoints,
+                packageBase,
+                assetBase,
+                dataBase,
+                settingsPath,
+                configuration,
                 culture,
                 log,
-                null
+                null,
+                externalUri: settings.ExternalUri
             );
 
             _httpServer = new HttpServer(context)
             {
-                Config = config
+                Settings = settings
             };
 
-            _componentHub = ComponentActivator.CreateInstance<ComponentHub>(_httpServer.HttpServerContext);
+            _ownedComponentHub = ComponentActivator.CreateInstance<ComponentHub>(_httpServer.HttpServerContext);
+            _componentHub = _ownedComponentHub;
+
+            // apply the configured session lifetime once the manager exists; left unset, its
+            // built-in bounded default stands
+            if (settings.Session?.TimeoutMinutes is int timeoutMinutes && _componentHub.SessionManager is not null)
+            {
+                _componentHub.SessionManager.Timeout = TimeSpan.FromMinutes(timeoutMinutes);
+            }
 
             // start logging
-            _httpServer.HttpServerContext.Log?.Begin(config.Log);
+            _httpServer.HttpServerContext.Log?.Begin(settings.Log);
 
             // log program start
             _httpServer.HttpServerContext.Log?.Separator('/');
@@ -242,50 +377,69 @@ namespace WebExpress.WebCore
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.version"), args: Version);
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.arguments"), args: args);
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.workingdirectory"), args: Environment.CurrentDirectory);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.packagebase"), args: config.PackageBase);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.assetbase"), args: config.AssetBase);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.database"), args: config.DataBase);
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.configurationdirectory"), args: Path.GetDirectoryName(configFile));
-            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.configuration"), args: Path.GetFileName(configFile));
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.packagebase"), args: packageBase);
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.assetbase"), args: assetBase);
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.database"), args: dataBase);
+            _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.settingsdirectory"), args: settingsPath);
+            foreach (var file in configuration.Providers.OfType<SettingsDirectoryConfigurationProvider>().SelectMany(x => x.EnumerateFiles()))
+            {
+                _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.settings"), args: Path.GetFileName(file));
+            }
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.logdirectory"), args: Path.GetDirectoryName(_httpServer.HttpServerContext.Log?.Filename));
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.log"), args: Path.GetFileName(_httpServer.HttpServerContext.Log?.Filename));
-            foreach (var v in config.Endpoints)
+            foreach (var v in settings.Endpoints)
             {
                 _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.uri"), args: v.Uri);
             }
 
             _httpServer.HttpServerContext.Log?.Separator('=');
 
-            if (!Directory.Exists(config.PackageBase))
-            {
-                Directory.CreateDirectory(config.PackageBase);
-            }
-
-            if (!Directory.Exists(config.AssetBase))
-            {
-                Directory.CreateDirectory(config.AssetBase);
-            }
-
-            if (!Directory.Exists(config.DataBase))
-            {
-                Directory.CreateDirectory(config.DataBase);
-            }
-
-            Console.CancelKeyPress += OnCancel;
+            Directory.CreateDirectory(packageBase);
+            Directory.CreateDirectory(assetBase);
+            Directory.CreateDirectory(dataBase);
 
             Initialization?.Invoke(this, EventArgs.Empty);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Turns a configured directory into an absolute one. A relative directory is taken
+        /// relative to the working directory; an empty one is the working directory itself.
+        /// </summary>
+        /// <param name="directory">The configured directory.</param>
+        /// <returns>The absolute directory.</returns>
+        private static string ResolveDirectory(string directory)
+        {
+            return Path.GetFullPath(string.IsNullOrWhiteSpace(directory)
+                ? Environment.CurrentDirectory
+                : Path.Combine(Environment.CurrentDirectory, directory));
         }
 
         /// <summary>
         /// Initiates the HTTP server and raises the start event.
         /// </summary>
-        private void OnStart()
+        /// <returns>
+        /// <see langword="false"/> when the server could not listen because an endpoint is
+        /// already in use, so the application ends instead of waiting on a server that never ran.
+        /// </returns>
+        private bool OnStart()
         {
-            _httpServer.Start();
+            if (_shutdownRequested.Task.IsCompleted)
+            {
+                return true;
+            }
+
+            if (!_httpServer.Start())
+            {
+                return false;
+            }
 
             Start?.Invoke(this, EventArgs.Empty);
 
-            Thread.CurrentThread.Join();
+            _shutdownRequested.Task.GetAwaiter().GetResult();
+
+            return true;
         }
 
         /// <summary>
@@ -293,9 +447,28 @@ namespace WebExpress.WebCore
         /// </summary>
         private void OnExit()
         {
-            _httpServer.Stop();
+            try
+            {
+                _httpServer.Stop();
+            }
+            catch (Exception ex)
+            {
+                _httpServer.HttpServerContext.Log?.Exception(ex);
+            }
 
-            Exit?.Invoke(this, EventArgs.Empty);
+            foreach (EventHandler handler in Exit?.GetInvocationList() ?? [])
+            {
+                try
+                {
+                    handler(this, EventArgs.Empty);
+                }
+                catch (Exception ex)
+                {
+                    _httpServer.HttpServerContext.Log?.Exception(ex);
+                }
+            }
+
+            _ownedComponentHub?.ShutDown();
 
             // end of program log
             _httpServer.HttpServerContext.Log?.Separator('=');
@@ -303,9 +476,6 @@ namespace WebExpress.WebCore
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.warnings"), args: _httpServer.HttpServerContext.Log?.WarningCount);
             _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.done"));
             _httpServer.HttpServerContext.Log?.Separator('/');
-
-            // Stop running
-            (_componentHub as ComponentHub).ShutDown();
 
             // stop logging
             _httpServer.HttpServerContext.Log?.Close();

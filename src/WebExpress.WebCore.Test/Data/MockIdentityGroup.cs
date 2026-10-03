@@ -7,7 +7,7 @@ namespace WebExpress.WebCore.Test.Data
     /// </summary>
     internal class MockIdentityGroup : IIdentityGroup
     {
-        private readonly List<string> _roles = [];
+        private readonly List<IIdentityPolicy> _policies = [];
 
         /// <summary>
         /// Gets or sets the id of the group.
@@ -20,9 +20,9 @@ namespace WebExpress.WebCore.Test.Data
         public string Name { get; set; }
 
         /// <summary>
-        /// Gets the roles associated with the group.
+        /// Gets the policies associated with the group.
         /// </summary>
-        public IEnumerable<string> Policies => _roles;
+        public IEnumerable<IIdentityPolicy> Policies => _policies;
 
         /// <summary>
         /// Initializes a new instance of the class with the specified id and name.
@@ -36,12 +36,12 @@ namespace WebExpress.WebCore.Test.Data
         }
 
         /// <summary>
-        /// Assigns roles.
+        /// Assigns policies.
         /// </summary>
-        /// <param name="roles">The list of roles to assign group to.</param>
-        public void Assign(IEnumerable<string> roles)
+        /// <param name="policies">The list of policies to assign to the group.</param>
+        public void Assign(IEnumerable<IIdentityPolicy> policies)
         {
-            _roles.AddRange(roles);
+            _policies.AddRange(policies);
         }
     }
 }

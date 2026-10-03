@@ -1,51 +1,43 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Text;
+using System.Threading;
 
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Provides methods for generating deterministic unique identifiers 
-    /// based on the caller's file path, line number, and an optional 
-    /// index value.
+    /// Provides unique identifiers for HTML elements that need a stable handle within a rendered
+    /// page, for example to wire a label to its input.
     /// </summary>
     /// <remarks>
-    /// This class utilizes a caching mechanism to ensure that repeated 
-    /// calls with the same parameters return the same identifier, 
-    /// enhancing performance and consistency.
+    /// Uniqueness is guaranteed by a process-wide monotonic counter, which is all the generated
+    /// markup requires: every control instance receives a distinct id within the page it renders on.
+    /// An earlier implementation derived the id from the caller's source location and full call
+    /// stack, which made every call walk the managed stack with per-frame reflection. That was
+    /// roughly three orders of magnitude slower (~100 us instead of nanoseconds) and ran once per
+    /// control construction, so it dominated server-side render time on control-heavy pages. It also
+    /// produced duplicate ids for repeated calls from the same source line (e.g. inside a loop),
+    /// because the call stack is identical across iterations.
     /// </remarks>
     public static class DeterministicId
     {
-        private static readonly ConcurrentDictionary<string, string> Cache = new();
+        private static long _counter;
 
         /// <summary>
-        /// Generates a deterministic unique identifier based on the caller's file
-        /// path, line number, and an optional index value.
+        /// Returns a new identifier that is unique within the running process and is suitable as an
+        /// HTML element id.
         /// </summary>
-        /// <remarks>
-        /// This method uses a caching mechanism to ensure that repeated calls with 
-        /// the same parameters return the same identifier. The generated identifier 
-        /// is based on a FNV-1a hash of the signature formed from the file path, 
-        /// line number, and index.
-        /// </remarks>
         /// <param name="context">
-        /// An optional object that provides additional context for generating the 
-        /// identifier. If specified, its hash code is included in the identifier 
-        /// to further distinguish it.
+        /// An optional disambiguator. It no longer influences the result, because the counter
+        /// already guarantees uniqueness; it is retained for source and binary compatibility.
         /// </param>
         /// <param name="file">
-        /// The full path of the source file where the method is called. This 
-        /// value is automatically supplied by the compiler.
+        /// Unused. Retained only for binary compatibility: the C# compiler bakes the
+        /// <see cref="CallerFilePathAttribute"/> value into every existing call site, so removing
+        /// the parameter would break already-compiled callers with a <c>MissingMethodException</c>.
         /// </param>
         /// <param name="line">
-        /// The line number in the source file where the method is called. This 
-        /// value is automatically supplied by the compiler.
+        /// Unused. Retained only for binary compatibility, see <paramref name="file"/>.
         /// </param>
-        /// <returns>
-        /// A unique identifier string that represents the combination of the file path, 
-        /// line number, and optional index.
-        /// </returns>
+        /// <returns>A unique identifier of the form <c>id_{hex}</c>.</returns>
         public static string Create
         (
             object context = null,
@@ -53,73 +45,7 @@ namespace WebExpress.WebCore.WebHtml
             [CallerLineNumber] int line = 0
         )
         {
-            var stack = new StackTrace(skipFrames: 1, fNeedFileInfo: false);
-            var frames = stack.GetFrames();
-
-            var sb = new StringBuilder(128);
-
-            sb.Append(file);
-            sb.Append(':');
-            sb.Append(line);
-
-            if (context is not null)
-            {
-                sb.Append(':');
-                sb.Append(context.GetHashCode());
-            }
-
-            foreach (var f in frames)
-            {
-                var m = f.GetMethod();
-                sb.Append(m.Name);
-                sb.Append(f.GetILOffset());
-            }
-
-            var signature = sb.ToString();
-
-            if (Cache.TryGetValue(signature, out var cached))
-            {
-                return cached;
-            }
-
-            // fnv-1a hash
-            var hash = Fnv1a(signature);
-
-            var id = "id_" + hash.ToString("X");
-
-            Cache[signature] = id;
-
-            return id;
-        }
-
-        /// <summary>
-        /// Calculates the 32-bit FNV-1a hash value for the specified string.
-        /// </summary>
-        /// <remarks>
-        /// The FNV-1a algorithm is a non-cryptographic hash function known 
-        /// for its simplicity and speed. It is commonly used for hash tables
-        /// and checksums, but should not be used for cryptographic purposes.
-        /// </remarks>
-        /// <param name="text">
-        /// The input string for which to compute the hash. This parameter 
-        /// cannot be null.
-        /// </param>
-        /// <returns>
-        /// A 32-bit unsigned integer representing the FNV-1a hash of the 
-        /// input string.
-        /// </returns>
-        private static uint Fnv1a(string text)
-        {
-            unchecked
-            {
-                uint hash = 2166136261;
-                for (int i = 0; i < text.Length; i++)
-                {
-                    hash = (hash ^ text[i]) * 16777619;
-                }
-
-                return hash;
-            }
+            return "id_" + Interlocked.Increment(ref _counter).ToString("X");
         }
     }
 }

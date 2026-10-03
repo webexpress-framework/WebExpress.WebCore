@@ -95,6 +95,55 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that the route resolved for a file of a plugin is the route the asset is
+        /// really mounted on. Consumers that link an embedded file - the includes a page
+        /// renders as link and script elements - resolve it this way instead of composing
+        /// the route themselves, because a route that disagrees with the mount answers 404
+        /// and a browser accepts that html error page as a stylesheet with no rules.
+        /// </summary>
+        [Theory]
+        [InlineData(typeof(TestApplicationA), "/assets/css/mycss.css", "/server/appa/assets/css/mycss.css")]
+        [InlineData(typeof(TestApplicationA), "/assets/js/myjavascript.js", "/server/appa/assets/js/myjavascript.js")]
+        [InlineData(typeof(TestApplicationB), "/assets/css/mycss.css", "/server/appb/assets/css/mycss.css")]
+        [InlineData(typeof(TestApplicationC), "/assets/css/mycss.css", "/server/assets/css/mycss.css")]
+        public void AssetRoute(Type applicationType, string file, string expected)
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var application = componentHub.ApplicationManager.GetApplications(applicationType)?.FirstOrDefault();
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+
+            // act
+            var route = componentHub.AssetManager.GetAssetRoute(application, plugin, file);
+
+            // validation
+            Assert.Equal(expected, route?.ToString());
+            Assert.Contains
+            (
+                expected,
+                componentHub.AssetManager.GetAssets(application).Select(x => x.Route.ToString())
+            );
+        }
+
+        /// <summary>
+        /// Tests that a resolution which does not describe a file answers with nothing rather
+        /// than with a route that leads nowhere.
+        /// </summary>
+        [Fact]
+        public void AssetRouteWithoutFile()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA))?.FirstOrDefault();
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+
+            // act & validation
+            Assert.Null(componentHub.AssetManager.GetAssetRoute(application, plugin, null));
+            Assert.Null(componentHub.AssetManager.GetAssetRoute(application, null, "/assets/css/mycss.css"));
+            Assert.Null(componentHub.AssetManager.GetAssetRoute(null, plugin, "/assets/css/mycss.css"));
+        }
+
+        /// <summary>
         /// Test the request of the asset.
         /// </summary>
         [Theory]
@@ -132,6 +181,104 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.Equal($"webexpress.webcore.test.{resource.Replace('/', '.')}", searchResult?.EndpointContext?.EndpointId.ToString());
             Assert.IsNotType<ResponseNotFound>(response);
             Assert.Equal(embeddedResource, Encoding.UTF8.GetString(response.Content as byte[]));
+        }
+
+        /// <summary>
+        /// Tests that the asset response carries the content type derived from the file extension.
+        /// </summary>
+        [Theory]
+        [InlineData("http://localhost:8080/server/appa/assets/css/mycss.css", "text/css")]
+        [InlineData("http://localhost:8080/server/appa/assets/js/myjavascript.js", "text/javascript")]
+        public void ContentType(string uri, string expectedContentType)
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var context = UnitTestFixture.CreateHttpContextMock();
+            componentHub.SitemapManager.Refresh();
+
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = context
+            });
+
+            // act
+            var response = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext);
+
+            // validation
+            Assert.Equal(expectedContentType, response.Header.ContentType);
+        }
+
+        /// <summary>
+        /// Tests that the asset response exposes a non-empty ETag for cache validation.
+        /// </summary>
+        [Fact]
+        public void ETagIsSet()
+        {
+            // arrange
+            var uri = "http://localhost:8080/server/appa/assets/css/mycss.css";
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var context = UnitTestFixture.CreateHttpContextMock();
+            componentHub.SitemapManager.Refresh();
+
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = context
+            });
+
+            // act
+            var response = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext);
+
+            // validation
+            Assert.True(response.Header.CustomHeader.ContainsKey("ETag"));
+            Assert.False(string.IsNullOrEmpty(response.Header.CustomHeader["ETag"]));
+        }
+
+        /// <summary>
+        /// Tests that a request whose If-None-Match matches the current ETag is answered with
+        /// 304 Not Modified instead of resending the payload.
+        /// </summary>
+        [Fact]
+        public void ConditionalRequestReturnsNotModified()
+        {
+            // arrange
+            var uri = "http://localhost:8080/server/appa/assets/css/mycss.css";
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var context = UnitTestFixture.CreateHttpContextMock();
+            componentHub.SitemapManager.Refresh();
+
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = context
+            });
+
+            // act - first request returns the payload together with its ETag
+            var first = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext);
+            var eTag = first.Header.CustomHeader["ETag"];
+
+            // act - second request presents the ETag via If-None-Match
+            var conditional = $"GET {uri} HTTP/1.1\nIf-None-Match: {eTag}\n\n";
+            var second = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock(conditional, uri), searchResult.EndpointContext);
+
+            // validation
+            Assert.IsType<ResponseOK>(first);
+            Assert.IsType<ResponseNotModified>(second);
         }
 
         /// <summary>

@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a placeholder.
+    /// Renders an HTML <c>&lt;slot&gt;</c> element, a named placeholder inside a web component into which
+    /// externally supplied content is projected when the component is used.
     /// </summary>
     public class HtmlElementWebFragmentsSlot : HtmlElement, IHtmlElementWebFragments
     {

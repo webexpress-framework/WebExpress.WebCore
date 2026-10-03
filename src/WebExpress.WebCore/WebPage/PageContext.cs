@@ -12,7 +12,8 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebPage
 {
     /// <summary>
-    /// Represents the context of a page.
+    /// Read-only descriptor of a registered page, handed to components so they can learn about the
+    /// page and the application and plugin it belongs to without referencing the page instance itself.
     /// </summary>
     public class PageContext : IPageContext
     {

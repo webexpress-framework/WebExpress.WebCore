@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebLog
 {
     /// <summary>
-    /// Log entry
+    /// A single entry in the server log. It captures one logged message together with its severity
+    /// level, the source location that produced it, and the time it occurred.
     /// </summary>
     internal class LogItem
     {
@@ -49,7 +50,7 @@ namespace WebExpress.WebCore.WebLog
         /// <returns>The log entry as a string</returns>
         public override string ToString()
         {
-            if (m_level != LogLevel.Seperartor)
+            if (m_level != LogLevel.Separator)
             {
                 return m_timestamp.ToString(TimePattern) + " " + m_level.ToString().PadRight(9, ' ') + " " + m_instance.PadRight(19, ' ')[..19] + " " + m_message;
             }

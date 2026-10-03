@@ -60,6 +60,10 @@ namespace WebExpress.WebCore.Test.Manager
         /// <summary>
         /// Test the CheckAccess function of the identity manager.
         /// </summary>
+        /// <param name="application">The application whose permission bindings are evaluated.</param>
+        /// <param name="identityName">The identity selected for the authorization scenario.</param>
+        /// <param name="permission">The required permission type.</param>
+        /// <param name="expected">The expected authorization result.</param>
         [Theory]
         [InlineData(typeof(TestApplicationA), "Alice", typeof(TestIdentityPermissionA), true)]
         [InlineData(typeof(TestApplicationA), "Alice", typeof(TestIdentityPermissionB), true)]
@@ -88,6 +92,10 @@ namespace WebExpress.WebCore.Test.Manager
         /// <summary>
         /// Test the CheckAccess function of the identity manager.
         /// </summary>
+        /// <param name="application">The application whose permission bindings are evaluated.</param>
+        /// <param name="groupName">The group selected for the authorization scenario.</param>
+        /// <param name="permission">The required permission type.</param>
+        /// <param name="expected">The expected authorization result.</param>
         [Theory]
         [InlineData(typeof(TestApplicationA), "Admins", typeof(TestIdentityPermissionA), true)]
         [InlineData(typeof(TestApplicationA), "Admins", typeof(TestIdentityPermissionB), true)]
@@ -116,6 +124,10 @@ namespace WebExpress.WebCore.Test.Manager
         /// <summary>
         /// Test the CheckAccess function of the identity manager.
         /// </summary>
+        /// <param name="application">The application whose permission bindings are evaluated.</param>
+        /// <param name="policy">The policy type whose permission binding is evaluated.</param>
+        /// <param name="permission">The required permission type.</param>
+        /// <param name="expected">The expected authorization result.</param>
         [Theory]
         [InlineData(typeof(TestApplicationA), typeof(TestIdentityPolicyA), typeof(TestIdentityPermissionA), true)]
         [InlineData(typeof(TestApplicationA), typeof(TestIdentityPolicyA), typeof(TestIdentityPermissionB), true)]
@@ -135,75 +147,6 @@ namespace WebExpress.WebCore.Test.Manager
 
             // validation
             Assert.Equal(expected, access);
-        }
-
-        /// <summary>
-        /// Test the Login function of the identity manager.
-        /// </summary>
-        [Theory]
-        [InlineData(null, false)]
-        [InlineData("Alice", true)]
-        [InlineData("Bob", true)]
-        public void Login(string identityName, bool expected)
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity(identityName);
-
-            // act
-            var res = identityManager.Login(identity, request);
-
-            // validation
-            Assert.Equal(expected, res is not null);
-        }
-
-        /// <summary>
-        /// Test the Login function of the identity manager.
-        /// </summary>
-        [Theory]
-        [InlineData("Alice")]
-        [InlineData("Bob")]
-        [InlineData("Charlie")]
-        public void Logout(string identityName)
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity(identityName);
-            identityManager.Login(identity, request);
-
-            // act
-            identityManager.Logout(request);
-
-            // validation
-            var res = identityManager.GetCurrentIdentity(request);
-            Assert.Null(res);
-        }
-
-        /// <summary>
-        /// Test the GetCurrentIdentity function of the identity manager.
-        /// </summary>
-        [Theory]
-        [InlineData("Alice")]
-        [InlineData("Bob")]
-        [InlineData("Charlie")]
-        public void GetCurrentIdentity(string identityName)
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var identityManager = componentHub.IdentityManager as IdentityManager;
-            var request = UnitTestFixture.CreateRequestMock();
-            var identity = MockIdentityFactory.GetIdentity(identityName);
-            identityManager.Login(identity, request);
-
-            // act
-            var res = identityManager.GetCurrentIdentity(request);
-
-            // validation
-            Assert.Equal(identity, res);
         }
 
         /// <summary>
@@ -239,7 +182,7 @@ namespace WebExpress.WebCore.Test.Manager
             provider.Identities.Add(identity);
 
             // act
-            identityManager.RegisterIdentityProvider(provider, applicationContext);
+            componentHub.IdentityProviderManager.Register(provider, applicationContext);
             var identities = identityManager.GetIdentities(applicationContext).ToList();
 
             // validation
@@ -266,14 +209,14 @@ namespace WebExpress.WebCore.Test.Manager
 
             provider.Identities.Add(identity);
 
-            identityManager.RegisterIdentityProvider(provider, applicationContext);
+            componentHub.IdentityProviderManager.Register(provider, applicationContext);
 
             var identitiesBefore = identityManager.GetIdentities(applicationContext).ToList();
             Assert.Contains(identity, identitiesBefore);
             Assert.Single(identitiesBefore);
 
             // act
-            var removed = identityManager.UnregisterIdentityProvider(provider, applicationContext);
+            var removed = componentHub.IdentityProviderManager.Unregister(provider, applicationContext);
             var identitiesAfter = identityManager.GetIdentities(applicationContext).ToList();
 
             // validation

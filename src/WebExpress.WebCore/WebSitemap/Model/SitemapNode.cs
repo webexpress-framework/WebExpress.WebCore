@@ -6,7 +6,9 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebSitemap.Model
 {
     /// <summary>
-    /// A Sitemap node.
+    /// One node in the sitemap — the tree of all routes the server can serve. Each node represents a
+    /// path segment, optionally the endpoint reachable there, and links to its parent and child
+    /// nodes. Routing a request means walking this tree segment by segment.
     /// </summary>
     public class SitemapNode
     {

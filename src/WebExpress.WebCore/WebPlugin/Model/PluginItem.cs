@@ -5,7 +5,9 @@ using System.Threading;
 namespace WebExpress.WebCore.WebPlugin.Model
 {
     /// <summary>
-    /// Represents a plugin entry.
+    /// Internal record the plugin manager keeps for one loaded plugin. It bundles everything needed
+    /// to run and later unload the plugin: its load context, plugin class and instance, public
+    /// context, declared dependencies, and the application types it supports.
     /// </summary>
     internal class PluginItem
     {

@@ -5,7 +5,8 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebStatusPage.Model
 {
     /// <summary>
-    /// Represents a status page item.
+    /// Internal record the status-page manager keeps for one registered status page, linking it to
+    /// the application and plugin that provided it.
     /// </summary>
     internal class StatusPageItem
     {

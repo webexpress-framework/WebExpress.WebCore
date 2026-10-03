@@ -1,3 +1,4 @@
+using System.Reflection;
 using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebPlugin;
@@ -91,6 +92,57 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.Empty(componentHub.PluginManager?.Plugins);
             Assert.Equal(0, i);
             Assert.True(triggered);
+        }
+
+        /// <summary>
+        /// Removing a plugin releases it completely: the listeners of the removal event still
+        /// find it intact, afterwards the plugin, its cancellation token source and the
+        /// applications bound to it are disposed - all before the load context is unloaded.
+        /// </summary>
+        [Fact]
+        public void RemoveDisposesPluginAndApplications()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateComponentHubMock();
+            var pluginManager = componentHub.PluginManager as PluginManager;
+            pluginManager.Register();
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+            var dictionary = typeof(PluginManager)
+                .GetField("_dictionary", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(pluginManager) as PluginDictionary;
+            var pluginItem = dictionary[plugin.PluginId];
+            var pluginInstance = (TestPlugin)pluginItem.Plugin;
+            var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).Single();
+            bool? disposedDuringEvent = null;
+
+            componentHub.PluginManager.RemovePlugin += (s, e) => disposedDuringEvent = pluginInstance.IsDisposed;
+
+            // act
+            pluginManager.Remove(plugin);
+
+            // validation
+            Assert.False(disposedDuringEvent);
+            Assert.True(pluginInstance.IsDisposed);
+            Assert.True(pluginItem.CancellationTokenSource.IsCancellationRequested);
+            Assert.Throws<ObjectDisposedException>(() => pluginItem.CancellationTokenSource.Token);
+            Assert.Empty(componentHub.ApplicationManager.Applications);
+            Assert.Null(componentHub.ApplicationManager.GetApplication(application.ApplicationId));
+        }
+
+        /// <summary>
+        /// A plugin's load context must be collectible, otherwise unloading it on removal fails.
+        /// </summary>
+        [Fact]
+        public void PluginLoadContextIsCollectible()
+        {
+            // arrange
+            var loadContext = new PluginLoadContext(typeof(TestPlugin).Assembly.Location);
+
+            // act
+            loadContext.Unload();
+
+            // validation
+            Assert.True(loadContext.IsCollectible);
         }
 
         /// <summary>

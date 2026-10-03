@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// String variable path segment.
+    /// A placeholder path segment that matches any free-form text at that position (any value
+    /// without a double quote). This is the default, least restrictive variable segment.
     /// </summary>
     /// <typeparam name="TParameter">The parameter type.</typeparam>
     public class UriPathSegmentVariableString<TParameter> : UriPathSegmentVariable<TParameter>

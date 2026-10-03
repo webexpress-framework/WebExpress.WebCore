@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// Variable path segment.
+    /// A placeholder path segment that only matches when the value at that position is a decimal
+    /// number. Use it to restrict a route parameter to floating-point values.
     /// </summary>
     /// <typeparam name="TParameter">The parameter type.</typeparam>
     public class UriPathSegmentVariableDouble<TParameter> : UriPathSegmentVariable<TParameter>
@@ -17,7 +18,7 @@ namespace WebExpress.WebCore.WebUri
         public UriPathSegmentVariableDouble(object tag = null)
             : base(tag)
         {
-            Expression = @"^[+-]?(\d*,\d+|\d+(,\d*)?)( +[eE][+-]?\d+)?$";
+            Expression = @"^[+-]?(\d*,\d+|\d+(,\d*)?)([eE][+-]?\d+)?$";
             Tag = tag;
         }
 

@@ -1,8 +1,9 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
-using WebExpress.WebCore.Setting;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebLog
 {
@@ -85,6 +86,25 @@ namespace WebExpress.WebCore.WebLog
         public string TimePattern { set; get; }
 
         /// <summary>
+        /// Gets or sets the maximum number of recent log entries retained in memory for live
+        /// inspection. The retained entries are independent of whether a log file is written.
+        /// </summary>
+        public int RecentCapacity { get; set; }
+
+        /// <summary>
+        /// Occurs immediately after a log entry has been recorded. Handlers run on the calling
+        /// (logging) thread and must therefore be fast and must not throw; a faulty handler is
+        /// isolated so it cannot break logging.
+        /// </summary>
+        public event EventHandler<LogEntry> EntryLogged;
+
+        /// <summary>
+        /// Returns a snapshot of the most recent log entries currently retained in memory, oldest first.
+        /// </summary>
+        /// <returns>A point-in-time copy that is safe to enumerate without further locking.</returns>
+        public IReadOnlyList<LogEntry> GetRecentEntries();
+
+        /// <summary>
         /// Starts logging
         /// </summary>
         /// <param name="path">The path where the log file is created.</param>
@@ -101,7 +121,7 @@ namespace WebExpress.WebCore.WebLog
         /// Starts logging
         /// </summary>
         /// <param name="settings">The log settings</param>
-        public void Begin(SettingLogItem settings);
+        public void Begin(LogSettings settings);
 
         /// <summary>
         /// A dividing line with * characters

@@ -1,7 +1,8 @@
 ﻿namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// Defines the contract for a response according to RFC 2616 Section 6.
+    /// Defines what every server response must expose (see RFC 2616): the header fields, the
+    /// content (body), the numeric HTTP status code, and the human-readable reason phrase.
     /// </summary>
     public interface IResponse
     {

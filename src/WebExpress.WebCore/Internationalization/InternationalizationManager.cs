@@ -11,7 +11,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.Internationalization
 {
     /// <summary>
-    /// Internationalization
+    /// Central registry for translations (internationalization, i18n). It collects the language
+    /// files a plugin ships, and returns the text for a given key in the requested language so the
+    /// UI can be shown in different languages.
     /// </summary>
     public sealed class InternationalizationManager : IInternationalizationManager, IComponentManagerPlugin, ISystemComponent
     {

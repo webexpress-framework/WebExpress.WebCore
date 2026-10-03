@@ -84,6 +84,7 @@ namespace WebExpress.WebCore.WebTask
             }
 
             var task = ComponentActivator.CreateInstance<Task>(_httpServerContext, _componentHub, [id, args]);
+            task.Lifetime = _httpServerContext.Lifetime;
 
             // register events for the newly created task
             SubscribeTaskEvents(task);
@@ -124,6 +125,7 @@ namespace WebExpress.WebCore.WebTask
             }
 
             var task = ComponentActivator.CreateInstance<TTask>(_httpServerContext, _componentHub, [id, args]);
+            task.Lifetime = _httpServerContext.Lifetime;
 
             // register events for the newly created task
             SubscribeTaskEvents(task);

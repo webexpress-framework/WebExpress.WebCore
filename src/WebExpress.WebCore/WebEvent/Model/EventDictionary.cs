@@ -12,12 +12,12 @@ namespace WebExpress.WebCore.WebEvent.Model
     internal class EventDictionary : Dictionary<IPluginContext, Dictionary<IApplicationContext, Dictionary<Type, IList<EventItem>>>>
     {
         /// <summary>
-        /// Adds a event item to the dictionary.
+        /// Adds an event item to the dictionary.
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContext">The application context.</param>
         /// <param name="eventItem">The event item.</param>
-        /// <returns>True if the event handler item was added successfully, false if an element with the same status code already exists.</returns>
+        /// <returns>True if the event handler item was added successfully, false if an element with the same key already exists.</returns>
         public bool AddEventItem(IPluginContext pluginContext, IApplicationContext applicationContext, EventItem eventItem)
         {
             var type = eventItem.EventClass;

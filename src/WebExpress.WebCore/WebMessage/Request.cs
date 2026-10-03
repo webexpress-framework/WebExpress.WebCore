@@ -10,8 +10,11 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// See RFC 2616, The Request class encapsulates and extends the 
-    /// original request of the HttpListener call.
+    /// Represents a single incoming HTTP request (see RFC 2616). It wraps the raw request data
+    /// provided by ASP.NET Core and makes it easy to consume: besides the common request
+    /// information from <see cref="RequestBase"/> (method, URI, headers, session), it reads the
+    /// request body and turns it into parameters, supporting URL-encoded forms, plain text, and
+    /// multipart form data including file uploads.
     /// </summary>
     public partial class Request : RequestBase
     {
@@ -20,6 +23,17 @@ namespace WebExpress.WebCore.WebMessage
 
         [GeneratedRegex(@"Content-Type:\s*(.*)", RegexOptions.IgnoreCase, "de-DE")]
         private static partial Regex ContentRegex();
+
+        // matching whole tokens (name|filename) prevents the "name" parameter from being
+        // confused with the trailing "name" inside "filename" regardless of their order.
+        [GeneratedRegex(@"(?:^|[;\s])(name|filename)\s*=\s*""([^""]*)""", RegexOptions.IgnoreCase)]
+        private static partial Regex DispositionParamRegex();
+
+        /// <summary>
+        /// The initial size of the request body buffer. Typical form posts fit without a resize,
+        /// while larger bodies grow the buffer only as their bytes are received.
+        /// </summary>
+        internal const int InitialContentBufferSize = 64 * 1024;
 
         /// <summary>
         /// Gets the content.
@@ -47,18 +61,44 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         /// <param name="body">The content of a request.</param>
         /// <param name="contentLength">The number of bytes sent in the body or zero.</param>
-        /// <returns>Der Content als Byte-Array</returns>
+        /// <returns>The content as a byte array, or null if the body is empty.</returns>
         internal static byte[] GetContent(Stream body, long? contentLength)
         {
-            if (!contentLength.HasValue || contentLength.Value == 0)
+            if (!contentLength.HasValue || contentLength.Value <= 0)
             {
                 return null;
             }
 
-            using var ms = new MemoryStream();
-            body.CopyTo(ms);
+            // the announced length is client-controlled, so it only caps the read; memory is
+            // committed as bytes actually arrive, otherwise a slow client announcing a large
+            // body would pin that much memory per connection before sending anything
+            var length = (int)Math.Min(contentLength.Value, int.MaxValue);
+            var buffer = new byte[Math.Min(length, InitialContentBufferSize)];
 
-            return ms.ToArray();
+            var offset = 0;
+            while (offset < length)
+            {
+                if (offset == buffer.Length)
+                {
+                    Array.Resize(ref buffer, (int)Math.Min((long)buffer.Length * 2, length));
+                }
+
+                var read = body.Read(buffer, offset, buffer.Length - offset);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                offset += read;
+            }
+
+            if (offset == 0)
+            {
+                return null;
+            }
+
+            // the client announced more bytes than it actually sent; trim to what arrived
+            return offset == length ? buffer : buffer[..offset];
         }
 
         /// <summary>
@@ -71,19 +111,10 @@ namespace WebExpress.WebCore.WebMessage
                 return;
             }
 
-            // normalize content-type
-            var ct = Header.ContentType.Split(';')
-                .Select(x => x.Trim())
-                .ToArray();
-
-            var mainType = ct.FirstOrDefault()?.ToLowerInvariant();
-            var enctype = TypeEnctypeExtensions.Convert(mainType);
-
-            // detect multipart/form-data even if Convert() fails
-            if (mainType.StartsWith("multipart/form-data"))
-            {
-                enctype = TypeEnctype.Multipart;
-            }
+            // normalize content-type; the first segment is the media type, the
+            // remaining segments carry parameters such as the multipart boundary.
+            var ct = Header.ContentType.Split(';', StringSplitOptions.TrimEntries);
+            var enctype = TypeEnctypeExtensions.Convert(ct[0].ToLowerInvariant());
 
             switch (enctype)
             {
@@ -155,9 +186,21 @@ namespace WebExpress.WebCore.WebMessage
 
                 var headerText = Encoding.UTF8.GetString(Content, headerStart, headerEnd - headerStart);
 
-                // parse headers
-                var name = ExtractHeaderValue(headerText, "name");
-                var filename = ExtractHeaderValue(headerText, "filename");
+                // parse the content-disposition parameters in a single pass
+                var name = string.Empty;
+                var filename = string.Empty;
+                foreach (Match dispo in DispositionParamRegex().Matches(headerText))
+                {
+                    if (string.Equals(dispo.Groups[1].Value, "filename", StringComparison.OrdinalIgnoreCase))
+                    {
+                        filename = dispo.Groups[2].Value;
+                    }
+                    else
+                    {
+                        name = dispo.Groups[2].Value;
+                    }
+                }
+
                 var contentType = ExtractContentType(headerText);
 
                 // content start
@@ -245,9 +288,11 @@ namespace WebExpress.WebCore.WebMessage
             var text = Encoding.UTF8.GetString(Content);
             foreach (var pair in text.Split('&'))
             {
-                var parts = pair.Split('=');
+                // split into at most two parts so that values containing '=' stay intact;
+                // '+' decoding is handled by the Parameter constructor's UrlDecode.
+                var parts = pair.Split('=', 2);
                 var key = parts[0];
-                var value = parts.Length > 1 ? parts[1].Replace('+', ' ') : string.Empty;
+                var value = parts.Length > 1 ? parts[1] : string.Empty;
 
                 AddParameter(new Parameter(key, value, ParameterScope.Parameter));
             }
@@ -292,24 +337,27 @@ namespace WebExpress.WebCore.WebMessage
         /// Finds the end of multipart headers and returns the separator length.
         /// Supports both CRLF and LF line endings.
         /// </summary>
+        /// <remarks>
+        /// The headers end at the first blank line (two consecutive line breaks). Scanning
+        /// forward and stopping there avoids walking the entire body — which may be large and
+        /// binary — looking for a separator that only exists right after the part headers.
+        /// </remarks>
         private static int FindHeaderEnd(byte[] content, int headerStart, out int separatorLength)
         {
-            var crlfSeparator = Encoding.UTF8.GetBytes("\r\n\r\n");
-            var lfSeparator = Encoding.UTF8.GetBytes("\n\n");
-
-            var crlfEnd = IndexOf(content, crlfSeparator, headerStart);
-            var lfEnd = IndexOf(content, lfSeparator, headerStart);
-
-            if (crlfEnd >= 0 && (lfEnd < 0 || crlfEnd <= lfEnd))
+            for (int i = headerStart; i < content.Length; i++)
             {
-                separatorLength = crlfSeparator.Length;
-                return crlfEnd;
-            }
+                var firstBreak = GetLineBreakLength(content, i);
+                if (firstBreak == 0)
+                {
+                    continue;
+                }
 
-            if (lfEnd >= 0)
-            {
-                separatorLength = lfSeparator.Length;
-                return lfEnd;
+                var secondBreak = GetLineBreakLength(content, i + firstBreak);
+                if (secondBreak > 0)
+                {
+                    separatorLength = firstBreak + secondBreak;
+                    return i;
+                }
             }
 
             separatorLength = 0;
@@ -390,25 +438,6 @@ namespace WebExpress.WebCore.WebMessage
                 }
             }
             return true;
-        }
-
-        /// <summary>
-        /// Extracts the value associated with the specified key from a header string formatted 
-        /// as key-value pairs.
-        /// </summary>
-        /// <param name="header">
-        /// The header string containing key-value pairs, where values are enclosed in double quotes.
-        /// </param>
-        /// <param name="key">
-        /// The key whose associated value is to be extracted from the header. The search is case-insensitive.
-        /// </param>
-        /// <returns>
-        /// The value associated with the specified key if found; otherwise, an empty string.
-        /// </returns>
-        private static string ExtractHeaderValue(string header, string key)
-        {
-            var match = Regex.Match(header, key + "=\"([^\"]*)\"", RegexOptions.IgnoreCase);
-            return match.Success ? match.Groups[1].Value : string.Empty;
         }
 
         /// <summary>

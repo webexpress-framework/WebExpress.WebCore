@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebTheme.Model
 {
     /// <summary>
-    /// Represents an theme item.
+    /// Internal record the theme manager keeps for one registered theme, holding the theme class
+    /// and the information needed to apply it (such as its stylesheet).
     /// </summary>
     public class ThemeItem : IDisposable
     {

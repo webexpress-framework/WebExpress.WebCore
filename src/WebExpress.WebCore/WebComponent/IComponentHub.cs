@@ -3,13 +3,16 @@ using System.Collections.Generic;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
+using WebExpress.WebCore.WebHealth;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebInclude;
 using WebExpress.WebCore.WebJob;
 using WebExpress.WebCore.WebLog;
+using WebExpress.WebCore.WebMetrics;
 using WebExpress.WebCore.WebPackage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
@@ -30,6 +33,11 @@ namespace WebExpress.WebCore.WebComponent
     /// </summary>
     public interface IComponentHub : IComponentManager
     {
+        /// <summary>
+        /// Gets the shared certificate service used by hosting and application components.
+        /// </summary>
+        ICertificateManager CertificateManager { get; }
+
         /// <summary>
         /// An event that fires when an component is added.
         /// </summary>
@@ -160,6 +168,16 @@ namespace WebExpress.WebCore.WebComponent
         IIdentityManager IdentityManager { get; }
 
         /// <summary>
+        /// Provides application-scoped authentication sources.
+        /// </summary>
+        IIdentityProviderManager IdentityProviderManager { get; }
+
+        /// <summary>
+        /// Resolves the durable replay and revocation store bound to each application.
+        /// </summary>
+        IIdentityTokenStoreManager IdentityTokenStoreManager { get; }
+
+        /// <summary>
         /// Gets the session manager.
         /// </summary>
         /// <returns>The instance of the session manager.</returns>
@@ -176,6 +194,16 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         /// <returns>The instance of the theme manager.</returns>
         IThemeManager ThemeManager { get; }
+
+        /// <summary>
+        /// Gets the shared health registry used by the host and application dependencies.
+        /// </summary>
+        IHealthManager HealthManager { get; }
+
+        /// <summary>
+        /// Gets the shared metrics registry used by the host, the framework managers and application components.
+        /// </summary>
+        IMetricsManager MetricsManager { get; }
 
         /// <summary>
         /// Returns a component based on its id.

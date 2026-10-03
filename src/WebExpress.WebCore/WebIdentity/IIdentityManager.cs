@@ -5,7 +5,6 @@ using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
-using WebExpress.WebCore.WebSession.Model;
 
 namespace WebExpress.WebCore.WebIdentity
 {
@@ -39,7 +38,8 @@ namespace WebExpress.WebCore.WebIdentity
         /// </param>
         /// <returns>
         /// An object that represents the response to the login dialog, including authentication results and any
-        /// relevant status information.
+        /// relevant status information. Returns <c>null</c> when no registered identity provider can handle the
+        /// scenario; the server then falls back to the status page.
         /// </returns>
         IResponse CreateAuthenticationPrompt(IRequest request, IPageContext initiator, IIdentity identity = null);
 
@@ -58,24 +58,56 @@ namespace WebExpress.WebCore.WebIdentity
         /// The authenticated identity that lacks sufficient permissions. Cannot be null.
         /// </param>
         /// <returns>
-        /// A response representing the forbidden page if a registered identity provider can handle the 
-        /// forbidden scenario; otherwise, <c>null</c>.
+        /// A response representing the forbidden page if a registered identity provider can handle the
+        /// forbidden scenario; otherwise, <c>null</c>. The server then falls back to the status page.
         /// </returns>
         IResponse CreateForbiddenResponse(IRequest request, IPageContext initiator, IIdentity identity);
 
         /// <summary>
-        /// Login an identity.
+        /// Issues a provider-independent token pair and queues its protected response cookies.
         /// </summary>
-        /// <param name="identity">The identity.</param>
-        /// <param name="request">The request.</param>
-        /// <returns>The session of the logged-in identity, or null if the login process failed.</returns>
-        Session Login(IIdentity identity, IRequest request);
+        /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The issued token pair, or null when no identity was authenticated.</returns>
+        IdentityTokenPair Login(IIdentity identity, IRequest request);
 
         /// <summary>
-        /// Logout an identity.
+        /// Clears authentication cookies and revokes renewal for the current login grant.
         /// </summary>
-        /// <param name="request">The request.</param>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
         void Logout(IRequest request);
+
+        /// <summary>
+        /// Rotates the refresh cookie at the dedicated endpoint without creating a session.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The rotated token pair, or null when validation or replay protection rejects renewal.</returns>
+        IdentityTokenPair Refresh(IRequest request);
+
+        /// <summary>
+        /// Issues a bounded bearer credential with a subset of the owner's permissions.
+        /// </summary>
+        /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
+        /// <param name="applicationContext">The application context that owns the requested operation.</param>
+        /// <param name="lifetime">The explicit validity period requested for the personal credential.</param>
+        /// <param name="permissions">The requested permission identifiers, limited to the owner's grants.</param>
+        /// <returns>The signed personal credential with the requested authorized permissions.</returns>
+        string CreatePersonalAccessToken(IIdentity identity, IApplicationContext applicationContext, TimeSpan lifetime, IEnumerable<string> permissions);
+
+        /// <summary>
+        /// Revokes a personal credential on every instance sharing the durable token store.
+        /// </summary>
+        /// <param name="token">The serialized credential that must pass the required trust checks.</param>
+        /// <param name="applicationContext">The application context that owns the requested operation.</param>
+        /// <returns>True when a valid personal credential was revoked; otherwise, false.</returns>
+        bool RevokePersonalAccessToken(string token, IApplicationContext applicationContext);
+
+        /// <summary>
+        /// Delivers login, renewal, or logout cookie changes on the actual HTTP response.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <param name="response">The outgoing response governed by the authentication transport contract.</param>
+        void ApplyAuthenticationCookies(IRequest request, IResponse response);
 
         /// <summary>
         /// Returns the current signed-in identity based on the provided request.
@@ -167,37 +199,6 @@ namespace WebExpress.WebCore.WebIdentity
         bool CheckAccess(IApplicationContext applicationContext, Type policy, Type permission);
 
         /// <summary>
-        /// Registers an identity provider for use within the application context.
-        /// </summary>
-        /// <param name="identityProvider">
-        /// The identity provider to register. Cannot be null.
-        /// </param>
-        /// <param name="applicationContext">
-        /// The application context in which the identity provider will be used.
-        /// </param>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown if identityProvider or applicationContext is null.
-        /// </exception>
-        void RegisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext);
-
-        /// <summary>
-        /// Unregisters a previously registered identity provider from the given application context.
-        /// </summary>
-        /// <param name="identityProvider">
-        /// The identity provider to unregister. Cannot be null.
-        /// </param>
-        /// <param name="applicationContext">
-        /// The application context from which the identity provider will be removed.
-        /// </param>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown if identityProvider or applicationContext is null.
-        /// </exception>
-        /// <returns>
-        /// True if the provider was successfully removed; false if it was not registered.
-        /// </returns>
-        bool UnregisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext);
-
-        /// <summary>
         /// Retrieves all available identities from the configured identity providers for the specified application
         /// context.
         /// </summary>
@@ -222,5 +223,20 @@ namespace WebExpress.WebCore.WebIdentity
         /// collection is empty if no groups are found.
         /// </returns>
         IEnumerable<IIdentityGroup> GetGroups(IApplicationContext applicationContext);
+
+        /// <summary>
+        /// Reports whether the application can both sign credentials and persist their replay and revocation markers.
+        /// </summary>
+        /// <remarks>
+        /// The rules for the <c>WebExpress:Authentication</c> section live only here, so a health
+        /// check or a setup page asks this instead of restating them and drifting from them. A
+        /// section that exists but would issue weak or inconsistent credentials answers false like
+        /// a missing one; the reason is written to the server log, never the key. A missing token
+        /// store directory is created, as the first sign-in would, so a directory that cannot be
+        /// created surfaces here as an exception.
+        /// </remarks>
+        /// <param name="applicationContext">The application whose authentication endpoints are being served.</param>
+        /// <returns>True when a signing authority and a token store are available; otherwise, false.</returns>
+        bool IsAuthenticationConfigured(IApplicationContext applicationContext);
     }
 }

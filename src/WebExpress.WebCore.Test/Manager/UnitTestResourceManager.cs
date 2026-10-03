@@ -62,7 +62,7 @@ namespace WebExpress.WebCore.Test.Manager
             // arrange
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
             var application = componentHub.ApplicationManager.GetApplications(applicationType)?.FirstOrDefault();
-            var resource = componentHub.ResourceManager.GetResorces(resourceType, application)?.FirstOrDefault();
+            var resource = componentHub.ResourceManager.GetResources(resourceType, application)?.FirstOrDefault();
 
             // act
             Assert.Equal(id, resource?.EndpointId.ToString());
@@ -90,7 +90,7 @@ namespace WebExpress.WebCore.Test.Manager
             // arrange
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
             var application = componentHub.ApplicationManager.GetApplications(applicationType)?.FirstOrDefault();
-            var resource = componentHub.ResourceManager.GetResorces(resourceType, application)?.FirstOrDefault();
+            var resource = componentHub.ResourceManager.GetResources(resourceType, application)?.FirstOrDefault();
 
             // act
             Assert.Equal(path, resource.Route.ToString());

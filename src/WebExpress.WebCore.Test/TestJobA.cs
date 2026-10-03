@@ -10,6 +10,12 @@ namespace WebExpress.WebCore.Test
     public sealed class TestJobA : IJob
     {
         /// <summary>
+        /// Determines whether the job has been released, so a test can tell that removing
+        /// the job disposes this very instance.
+        /// </summary>
+        public bool IsDisposed { get; private set; }
+
+        /// <summary>
         /// Initialization of the job.
         /// </summary>
         /// <param name="jobContext">The job context, for testing the injection.</param>
@@ -34,6 +40,7 @@ namespace WebExpress.WebCore.Test
         /// </summary>
         public void Dispose()
         {
+            IsDisposed = true;
         }
     }
 }

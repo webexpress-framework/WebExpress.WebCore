@@ -1,7 +1,7 @@
 ![WebExpress-Framework](https://raw.githubusercontent.com/webexpress-framework/.github/main/docs/assets/img/banner.png)
 
 # WebExpress
-`WebExpress` is a lightweight web server optimized for use in low-performance environments (e.g. Raspberry PI). By providing a powerful plugin system and a comprehensive API, web applications can be easily and quickly integrated into a .net language (e.g. C#). Some advantages of `WebExpress` are:
+`WebExpress` is a lightweight web server optimized for use in low-performance environments (e.g. Raspberry Pi). By providing a powerful plugin system and a comprehensive API, web applications can be easily and quickly integrated into a .NET language (e.g. C#). Some advantages of `WebExpress` are:
 
 - It is easy to use.
 - It offers a variety of features and tools that can help you build and manage your website.
@@ -25,20 +25,24 @@ The current binaries are available for download [here](https://github.com/webexp
 # Start
 If you're looking to get started with `WebExpress`, we would recommend using the following documentation. It can help you understand the platform.
 
-- [Installation Guide](https://github.com/webexpress-framework/WebExpress/blob/main/doc/installation_guide.md) 
-- [Development Guide](https://github.com/webexpress-framework/WebExpress/blob/main/doc/development_guide.md)
+- [Installation Guide](https://github.com/webexpress-framework/WebExpress/blob/main/docs/installation_guide.md) 
+- [Development Guide](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md)
 - [WebExpress.WebCore API Documentation](https://webexpress-framework.github.io/WebExpress.WebCore/) 
 - [WebExpress.WebUI API Documentation](https://webexpress-framework.github.io/WebExpress.WebUI/) 
 - [WebExpress.WebApp API Documentation](https://webexpress-framework.github.io/WebExpress.WebApp/) 
 - [WebExpress.WebIndex API Documentation](https://webexpress-framework.github.io/WebExpress.WebIndex/) 
 
 # Learning
-The following tutorials illustrate the essential techniques of `WebExpress`. These tutorials are designed to assist you, as a developer, in understanding the various aspects of `WebExpress`. Each tutorial provides a detailed, step-by-step guide that you can work through using an example. If you re interested in beginning the development of `WebExpress` components, we would recommend you to complete some of these tutorials.
+The following tutorials illustrate the essential techniques of `WebExpress`. These tutorials are designed to assist you, as a developer, in understanding the various aspects of `WebExpress`. Each tutorial provides a detailed, step-by-step guide that you can work through using an example. If you're interested in beginning the development of `WebExpress` components, we would recommend you to complete some of these tutorials.
 
 - [HelloWorld](https://github.com/webexpress-framework/WebExpress.Tutorial.HelloWorld#readme)
 - [WebUI](https://github.com/webexpress-framework/WebExpress.Tutorial.WebUI#readme)
 - [WebApp](https://github.com/webexpress-framework/WebExpress.Tutorial.WebApp#readme)
 - [WebIndex](https://github.com/webexpress-framework/WebExpress.Tutorial.WebIndex#readme)
+
+## AI transparency notice
+
+Parts of this software, its documentation, and its assets were created with the assistance of AI-based tools, including large language models. AI-assisted contributions are reviewed by the project maintainer before they are included.
 
 # Tags
 #WebCore #WebExpress #DotNet #NETCore

@@ -1,4 +1,4 @@
-![WebExpress](https://raw.githubusercontent.com/webexpress-framework/WebExpress/main/assets/banner.png)
+![WebExpress](https://raw.githubusercontent.com/webexpress-framework/.github/main/docs/assets/img/banner.png)
 
 # Tutorials
 Welcome to the `WebExpress` Tutorials! Here, you'll find step-by-step guides and helpful resources to get the most out 

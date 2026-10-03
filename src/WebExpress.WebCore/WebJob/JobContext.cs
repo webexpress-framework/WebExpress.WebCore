@@ -5,7 +5,8 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebJob
 {
     /// <summary>
-    /// Represents the job context.
+    /// Default implementation of <see cref="IJobContext"/>: the read-only descriptor that identifies
+    /// a scheduled job and the application and plugin it belongs to.
     /// </summary>
     public class JobContext : IJobContext
     {
@@ -20,9 +21,19 @@ namespace WebExpress.WebCore.WebJob
         public IApplicationContext ApplicationContext { get; internal set; }
 
         /// <summary>
-        /// Gets the job id. 
+        /// Gets the job id.
         /// </summary>
         public IComponentId JobId { get; internal set; }
+
+        /// <summary>
+        /// Gets the name of the job, which may be an internationalization key.
+        /// </summary>
+        public string JobName { get; internal set; }
+
+        /// <summary>
+        /// Gets the description of the job, which may be an internationalization key.
+        /// </summary>
+        public string Description { get; internal set; }
 
         /// <summary>
         /// Gets the cron-object.

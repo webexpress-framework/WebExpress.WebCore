@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http.Features;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -14,12 +15,18 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// See RFC 2616, The Request class encapsulates and extends the 
-    /// original request of the HttpListener call.
+    /// Common base class for incoming requests (see RFC 2616). It extracts and exposes the
+    /// information shared by every request type — HTTP method, URI, header fields, client and
+    /// server endpoints, session, culture, and the query and session parameters. Concrete
+    /// requests such as <see cref="Request"/> and <see cref="RequestWebSocket"/> build on it.
     /// </summary>
     public abstract class RequestBase : IRequest
     {
         private readonly ParameterDictionary _param = [];
+        private Session _session;
+
+        internal Session ExistingSession { get => _session; set => _session = value; }
+        internal string QueryString { get; private set; }
 
         /// <summary>
         /// Gets the context of the web server.
@@ -47,14 +54,14 @@ namespace WebExpress.WebCore.WebMessage
         public UriEndpoint Uri { get; set; }
 
         /// <summary>
-        /// Gets the session.
+        /// Creates optional application state only when a caller needs it; authentication never depends on it.
         /// </summary>
-        public Session Session { get; private set; }
+        public Session Session => _session ??= WebEx.ComponentHub?.SessionManager?.GetSession(this);
 
         /// <summary>
         /// Gets the http version.
         /// </summary>
-        public string Protocoll { get; private set; }
+        public string Protocol { get; private set; }
 
         /// <summary>
         /// Gets the options from the header.
@@ -128,7 +135,7 @@ namespace WebExpress.WebCore.WebMessage
 
             HttpServerContext = httpServerContext;
             RequestTraceIdentifier = requestIdentifierFeature.TraceIdentifier;
-            Protocoll = requestFeature.Protocol;
+            Protocol = requestFeature.Protocol;
 
             Scheme = requestFeature.Scheme.ToLower() switch
             {
@@ -156,20 +163,22 @@ namespace WebExpress.WebCore.WebMessage
 
             LocalEndPoint = new IPEndPoint(connectionFeature.LocalIpAddress, connectionFeature.LocalPort);
             RemoteEndPoint = new IPEndPoint(connectionFeature.RemoteIpAddress, connectionFeature.RemotePort);
+            var requestHost = new HostString(Header.Host);
 
             Uri = new UriEndpoint
             (
                 Scheme,
                 new UriAuthority()
                 {
-                    Host = Header.Host,
-                    Port = connectionFeature.LocalPort
+                    Host = requestHost.Host,
+                    Port = requestHost.Port ?? connectionFeature.LocalPort
                 },
                 requestFeature.RawTarget
             );
 
-            ParseQueryParams(requestFeature.QueryString);
-            ParseSessionParams();
+            QueryString = requestFeature.QueryString;
+            ParseQueryParams(QueryString);
+            if (Header.Cookies.Any(x => x.Name == "session")) { ParseSessionParams(); }
         }
 
         /// <summary>
@@ -207,8 +216,6 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         private void ParseSessionParams()
         {
-            Session = WebEx.ComponentHub?.SessionManager?.GetSession(this);
-
             var property = Session?.GetProperty<SessionPropertyParameter>();
             if (property is not null && property.Params is not null)
             {

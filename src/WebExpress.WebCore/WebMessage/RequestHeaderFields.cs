@@ -73,11 +73,40 @@ namespace WebExpress.WebCore.WebMessage
         public IEnumerable<Cookie> Cookies { get; } = [];
 
         /// <summary>
-        /// Gets the referer. The referer header echoes the absolute or partial address from 
-        /// which a resource was requested. The Referer header allows a server to identify referring 
+        /// Gets the referer. The referer header echoes the absolute or partial address from
+        /// which a resource was requested. The Referer header allows a server to identify referring
         /// pages from which people visit or where requested resources are used.
         /// </summary>
         public string Referer { get; private set; }
+
+        /// <summary>
+        /// Allows cookie-authenticated mutations to reject cross-origin browser requests.
+        /// </summary>
+        public string Origin { get; private set; }
+
+        /// <summary>
+        /// Requires a browser preflight before another origin can invoke authentication mutations.
+        /// </summary>
+        public string AuthenticationRequest { get; private set; }
+
+        /// <summary>
+        /// Gets the Sec-Fetch-Site header. Browsers set it themselves and scripts cannot forge it,
+        /// so it tells reliably whether a request was triggered by another site.
+        /// </summary>
+        public string SecFetchSite { get; private set; }
+
+        /// <summary>
+        /// Gets the If-None-Match header value. It carries the entity tag (ETag) the client already
+        /// holds and is used for conditional requests so unchanged resources can be answered with 304.
+        /// </summary>
+        public string IfNoneMatch { get; private set; }
+
+        /// <summary>
+        /// Gets the X-Forwarded-For header, the chain of addresses a request passed through on its
+        /// way to the server. Anyone can send it, so it is only meaningful on a request that comes
+        /// from a trusted proxy (see <see cref="ForwardedClientResolver"/>).
+        /// </summary>
+        public string XForwardedFor { get; private set; }
 
         /// <summary>
         /// Gets the upgrade header (e.g. "websocket" for WebSocket upgrades).
@@ -118,6 +147,11 @@ namespace WebExpress.WebCore.WebMessage
             AcceptLanguage = requestFeature.Headers.AcceptLanguage.SelectMany(x => x.Split(';', StringSplitOptions.RemoveEmptyEntries));
             UserAgent = requestFeature.Headers.UserAgent;
             Referer = requestFeature.Headers.Referer;
+            Origin = requestFeature.Headers.Origin;
+            AuthenticationRequest = requestFeature.Headers["X-WebExpress-Auth"];
+            SecFetchSite = requestFeature.Headers["Sec-Fetch-Site"];
+            IfNoneMatch = requestFeature.Headers.IfNoneMatch;
+            XForwardedFor = requestFeature.Headers["X-Forwarded-For"];
             Upgrade = requestFeature.Headers.Upgrade;
             SecWebSocketKey = requestFeature.Headers.SecWebSocketKey;
             SecWebSocketProtocol = requestFeature.Headers.SecWebSocketProtocol;

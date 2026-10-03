@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -16,6 +17,13 @@ namespace WebExpress.WebCore.WebResource
         /// Gets the protection against concurrency.
         /// </summary>
         private object Gard { get; set; }
+
+        /// <summary>
+        /// The entity tags of the delivered files, keyed by resource file name. Embedded resources
+        /// are immutable for the lifetime of the process, so each content hash is computed once
+        /// instead of on every request.
+        /// </summary>
+        private readonly Dictionary<string, string> _eTags = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Gets the root directory.
@@ -43,8 +51,7 @@ namespace WebExpress.WebCore.WebResource
             lock (Gard)
             {
                 var assembly = ResourceContext.PluginContext.Assembly;
-                var buf = assembly.GetManifestResourceNames().ToList();
-                var resources = assembly.GetManifestResourceNames().Where(x => x.StartsWith(AssetDirectory, System.StringComparison.OrdinalIgnoreCase));
+                var resources = assembly.GetManifestResourceNames().Where(x => x.StartsWith(AssetDirectory, StringComparison.OrdinalIgnoreCase));
                 var url = request.Uri.ToString();
                 var fileName = Path.GetFileName(url);
                 var file = string.Join('.', AssetDirectory.Trim('.'), "assets", url.Replace("/", ".").Trim('.'));
@@ -56,65 +63,27 @@ namespace WebExpress.WebCore.WebResource
                     return new ResponseNotFound();
                 }
 
+                // conditional request: serve 304 when the client already holds the current version
+                if (!_eTags.TryGetValue(file, out var eTag))
+                {
+                    eTag = ComputeETag(Data);
+                    _eTags[file] = eTag;
+                }
+
+                if (IsNotModified(request, eTag))
+                {
+                    return CreateNotModifiedResponse(eTag);
+                }
+
                 var response = base.Process(request);
                 response.Header.CacheControl = "public, max-age=31536000";
 
-                var extension = Path.GetExtension(fileName);
-                extension = !string.IsNullOrWhiteSpace(extension) ? extension.ToLower() : "";
+                // content type and download handling are resolved through the shared logic
+                ApplyContentType(response, fileName);
 
-                switch (extension)
+                if (!string.IsNullOrEmpty(eTag))
                 {
-                    case ".pdf":
-                        response.Header.ContentType = "application/pdf";
-                        break;
-                    case ".txt":
-                        response.Header.ContentType = "text/plain";
-                        break;
-                    case ".css":
-                        response.Header.ContentType = "text/css";
-                        break;
-                    case ".xml":
-                        response.Header.ContentType = "text/xml";
-                        break;
-                    case ".html":
-                    case ".htm":
-                        response.Header.ContentType = "text/html";
-                        break;
-                    case ".exe":
-                        response.Header.ContentDisposition = "attatchment; filename=" + fileName + "; size=" + Data.LongLength;
-                        response.Header.ContentType = "application/octet-stream";
-                        break;
-                    case ".zip":
-                        response.Header.ContentDisposition = "attatchment; filename=" + fileName + "; size=" + Data.LongLength;
-                        response.Header.ContentType = "application/zip";
-                        break;
-                    case ".doc":
-                    case ".docx":
-                        response.Header.ContentType = "application/msword";
-                        break;
-                    case ".xls":
-                    case ".xlx":
-                        response.Header.ContentType = "application/vnd.ms-excel";
-                        break;
-                    case ".ppt":
-                        response.Header.ContentType = "application/vnd.ms-powerpoint";
-                        break;
-                    case ".gif":
-                        response.Header.ContentType = "image/gif";
-                        break;
-                    case ".png":
-                        response.Header.ContentType = "image/png";
-                        break;
-                    case ".svg":
-                        response.Header.ContentType = "image/svg+xml";
-                        break;
-                    case ".jpeg":
-                    case ".jpg":
-                        response.Header.ContentType = "image/jpg";
-                        break;
-                    case ".ico":
-                        response.Header.ContentType = "image/x-icon";
-                        break;
+                    response.Header.AddCustomHeader("ETag", eTag);
                 }
 
                 request.HttpServerContext.Log?.Debug(I18N.Translate
@@ -136,7 +105,7 @@ namespace WebExpress.WebCore.WebResource
         /// <returns>A byte array containing the resource data, or null if the resource is not found.</returns>
         private static byte[] GetData(string file, Assembly assembly, IEnumerable<string> resources)
         {
-            var item = resources.Where(x => x.Equals(file, System.StringComparison.OrdinalIgnoreCase)).FirstOrDefault();
+            var item = resources.Where(x => x.Equals(file, StringComparison.OrdinalIgnoreCase)).FirstOrDefault();
             if (item is null)
             {
                 return null;

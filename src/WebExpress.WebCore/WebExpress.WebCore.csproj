@@ -3,8 +3,8 @@
 	<PropertyGroup>
 		<OutputType>Library</OutputType>
 		<Title>WebExpress.WebCore</Title>
-		<Version>0.0.11.0</Version>
-		<AssemblyVersion>0.0.11.0</AssemblyVersion>
+		<Version>2.0.0.0</Version>
+		<AssemblyVersion>2.0.0.0</AssemblyVersion>
 		<TargetFramework>net10.0</TargetFramework>
 		<RuntimeIdentifiers>any</RuntimeIdentifiers>
 		<RepositoryUrl>https://github.com/webexpress-framework/WebExpress.git</RepositoryUrl>
@@ -14,7 +14,7 @@
 		<EnableDynamicLoading>true</EnableDynamicLoading>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<Description>Core library of the WebExpress web server.</Description>
-		<PackageVersion>0.0.11-alpha</PackageVersion>
+		<PackageVersion>2.0.0-alpha</PackageVersion>
 		<PackageProjectUrl>https://github.com/webexpress-framework/WebExpress</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -26,6 +26,11 @@
 		<Configurations>Debug;Release;DebugLocal</Configurations>
 		<DisableImplicitStaticWebAssets>true</DisableImplicitStaticWebAssets>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
+		<PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<EmbeddedResource Include="Internationalization\de" />

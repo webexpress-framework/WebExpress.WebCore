@@ -7,7 +7,9 @@ using WebExpress.WebCore.WebTheme;
 namespace WebExpress.WebCore.WebApplication
 {
     /// <summary>
-    /// Represents the context of an application.
+    /// Default implementation of <see cref="IApplicationContext"/>: the read-only descriptor of a
+    /// registered application (id, name, paths, route, owning plugin, default theme) that the
+    /// framework shares with the application's components.
     /// </summary>
     public class ApplicationContext : IApplicationContext
     {
@@ -40,6 +42,11 @@ namespace WebExpress.WebCore.WebApplication
         /// Gets the data directory. This is mounted in the data directory of the server.
         /// </summary>
         public string DataPath { get; internal set; }
+
+        /// <summary>
+        /// Gets the context path. This is mounted in the route of the server.
+        /// </summary>
+        public string ContextPath { get; internal set; }
 
         /// <summary>
         /// Gets the context path. This is mounted in the route of the server.

@@ -9,7 +9,10 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebEndpoint
 {
     /// <summary>
-    /// Represents the context of a endpoint.
+    /// Read-only descriptor of a registered endpoint (a page, resource, REST API, …). It tells the
+    /// framework and other components what they need to know about the endpoint — its id, the
+    /// application and plugin it belongs to, and its routing details — without referencing the
+    /// endpoint instance itself.
     /// </summary>
     public interface IEndpointContext : IContext
     {

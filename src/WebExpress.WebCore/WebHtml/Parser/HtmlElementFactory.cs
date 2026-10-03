@@ -28,7 +28,8 @@ namespace WebExpress.WebCore.WebHtml.Parser
                 ["title"] = () => new HtmlElementMetadataTitle(),
 
                 // Scripting
-                ["script"] = () => new HtmlElementScriptingScript(),
+                // parsed markup may stem from user input; a nonce would let a stored script run
+                ["script"] = () => new HtmlElementScriptingScript() { Trusted = false },
                 ["noscript"] = () => new HtmlElementScriptingNoscript(),
                 ["canvas"] = () => new HtmlElementScriptingCanvas(),
 
@@ -77,13 +78,10 @@ namespace WebExpress.WebCore.WebHtml.Parser
                 ["dfn"] = () => new HtmlElementTextSemanticsDfn(),
                 ["em"] = () => new HtmlElementTextSemanticsEm(),
                 ["i"] = () => new HtmlElementTextSemanticsI(),
-                // The standard HTML element is <kbd>, but the existing class uses "kdb" as
-                // its element name.  Both spellings are mapped so that the parser handles
-                // real-world HTML (<kbd>) as well as the project's own renderer output (<kdb>).
-                ["kbd"] = () => new HtmlElementTextSemanticsKdb(),
-                ["kdb"] = () => new HtmlElementTextSemanticsKdb(),
-                // 'kbd' is the correct HTML tag name; 'kdb' mirrors the existing class typo.
-                ["kbd"] = () => new HtmlElementTextSemanticsKdb(),
+                // earlier versions of the renderer wrote the misspelled <kdb>, which may
+                // still be stored in persisted markup
+                ["kbd"] = () => new HtmlElementTextSemanticsKbd(),
+                ["kdb"] = () => new HtmlElementTextSemanticsKbd(),
                 ["mark"] = () => new HtmlElementTextSemanticsMark(),
                 ["q"] = () => new HtmlElementTextSemanticsQ(),
                 ["rp"] = () => new HtmlElementTextSemanticsRp(),

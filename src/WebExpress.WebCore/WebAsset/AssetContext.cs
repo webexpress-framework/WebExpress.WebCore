@@ -10,7 +10,8 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebAsset
 {
     /// <summary>
-    /// Represents the context of a asset.
+    /// Read-only descriptor of a registered asset endpoint, handed to components so they can learn
+    /// about the asset and the application and plugin it belongs to without referencing the asset itself.
     /// </summary>
     public class AssetContext : IAssetContext
     {
