@@ -4,8 +4,9 @@ namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
     /// A node that holds ready-made HTML markup and writes it to the output verbatim, without any
-    /// escaping. Only use it with trusted markup; for untrusted text use <see cref="HtmlText"/> so
-    /// special characters cannot be interpreted as markup.
+    /// escaping. Only use it with trusted markup. <see cref="HtmlText"/> does not escape either, so
+    /// untrusted text must be encoded (for example with <see cref="System.Net.WebUtility.HtmlEncode(string)"/>)
+    /// before it is added to the page, regardless of the node type that carries it.
     /// </summary>
     public class HtmlRaw : IHtmlNode
     {
@@ -31,9 +32,9 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// In String konvertieren
+        /// Returns the markup unchanged.
         /// </summary>
-        /// <returns>Das Objekt als String</returns>
+        /// <returns>The markup as written to the output.</returns>
         public override string ToString()
         {
             return Html;

@@ -6,7 +6,7 @@ using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebAttribute;
 using WebExpress.WebCore.WebComponent;
 
-namespace WebExpress.WebCore.WebHealt.Model
+namespace WebExpress.WebCore.WebHealth.Model
 {
     /// <summary>
     /// Owns one application binding and shares unfinished checks to bound work when cancellation is ignored.

@@ -8,7 +8,7 @@ namespace WebExpress.WebCore.WebFragment
     /// <summary>
     /// Provides extension methods for checking conditions.
     /// </summary>
-    public static class FragmentConditionExtentsion
+    public static class FragmentConditionExtension
     {
         /// <summary>
         /// Checks if all conditions in the collection are fulfilled for the given request.

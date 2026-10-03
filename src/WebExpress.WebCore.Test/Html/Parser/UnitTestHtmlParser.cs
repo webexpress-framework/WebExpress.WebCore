@@ -486,13 +486,13 @@ namespace WebExpress.WebCore.Test.Html.Parser
         }
 
         /// <summary>
-        /// The kbd tag (standard HTML) maps to HtmlElementTextSemanticsKdb.
+        /// The kbd tag (standard HTML) maps to HtmlElementTextSemanticsKbd.
         /// </summary>
         [Fact]
-        public void KbdTag_MapsToKdbElement()
+        public void KbdTag_MapsToKbdElement()
         {
             var nodes = Parser.Parse("<kbd>Ctrl+C</kbd>");
-            var kbd = nodes.OfType<HtmlElementTextSemanticsKdb>().Single();
+            var kbd = nodes.OfType<HtmlElementTextSemanticsKbd>().Single();
 
             Assert.NotNull(kbd);
         }

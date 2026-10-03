@@ -61,7 +61,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <summary>
         /// Gets the http version.
         /// </summary>
-        public string Protocoll { get; private set; }
+        public string Protocol { get; private set; }
 
         /// <summary>
         /// Gets the options from the header.
@@ -135,7 +135,7 @@ namespace WebExpress.WebCore.WebMessage
 
             HttpServerContext = httpServerContext;
             RequestTraceIdentifier = requestIdentifierFeature.TraceIdentifier;
-            Protocoll = requestFeature.Protocol;
+            Protocol = requestFeature.Protocol;
 
             Scheme = requestFeature.Scheme.ToLower() switch
             {

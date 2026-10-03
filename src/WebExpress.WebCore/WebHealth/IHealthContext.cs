@@ -3,7 +3,7 @@ using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebPlugin;
 
-namespace WebExpress.WebCore.WebHealt
+namespace WebExpress.WebCore.WebHealth
 {
     /// <summary>
     /// Identifies a discovered check and the application and plugin responsible for its lifetime.

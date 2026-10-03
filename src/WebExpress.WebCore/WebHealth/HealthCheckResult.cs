@@ -1,4 +1,4 @@
-namespace WebExpress.WebCore.WebHealt
+namespace WebExpress.WebCore.WebHealth
 {
     /// <summary>
     /// Separates a dependency's health decision from diagnostics reserved for the server log.

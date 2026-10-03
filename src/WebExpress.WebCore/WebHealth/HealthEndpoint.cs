@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
 
-namespace WebExpress.WebCore.WebHealt
+namespace WebExpress.WebCore.WebHealth
 {
     /// <summary>
     /// Provides a global probe contract independent of authentication, application routing, and status pages.

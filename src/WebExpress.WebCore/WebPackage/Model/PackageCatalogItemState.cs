@@ -4,7 +4,7 @@
     /// Lifecycle state of a package listed in the catalog: present but not yet loaded
     /// (<c>Available</c>), loaded and usable (<c>Active</c>), or switched off (<c>Disable</c>).
     /// </summary>
-    public enum PackageCatalogeItemState
+    public enum PackageCatalogItemState
     {
         /// <summary>
         /// The package is available but has not yet been loaded by WebExpress.

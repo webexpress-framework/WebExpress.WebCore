@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
 
-namespace WebExpress.WebCore.WebHealt
+namespace WebExpress.WebCore.WebHealth
 {
     /// <summary>
     /// Aggregates framework availability and application dependencies for the global health endpoint.

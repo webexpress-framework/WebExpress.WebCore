@@ -14,6 +14,7 @@ namespace WebExpress.WebCore.WebMessage
         /// Initializes a new instance of the class.
         /// </summary>
         public ResponseMovedTemporarily()
+            : this(null)
         {
         }
 
@@ -27,7 +28,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="location">The URI of the new temporary location for the requested resource.</param>
         public ResponseMovedTemporarily(IUri location)
         {
-            Reason = "temporarily moved";
+            Reason = "Found";
             Header.Location = location?.ToString();
         }
     }

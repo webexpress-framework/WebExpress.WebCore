@@ -27,7 +27,7 @@ namespace WebExpress.WebCore.WebPackage.Model
         /// Gets or sets the state.
         /// </summary>
         [XmlAttribute("state")]
-        public PackageCatalogeItemState State { get; set; }
+        public PackageCatalogItemState State { get; set; }
 
         /// <summary>
         /// Gets a value indicating whether the entry stands for a plugin that ships with the

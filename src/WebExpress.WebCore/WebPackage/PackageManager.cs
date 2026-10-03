@@ -102,9 +102,9 @@ namespace WebExpress.WebCore.WebPackage
                     I18N.Translate("webexpress.webcore:packagemanager.existing", package.File)
                 );
 
-                if (package.State != PackageCatalogeItemState.Disable)
+                if (package.State != PackageCatalogItemState.Disable)
                 {
-                    package.State = PackageCatalogeItemState.Active;
+                    package.State = PackageCatalogItemState.Active;
                     ExtractPackage(package);
                     RegisterPackage(package);
                     BootPackage(package);
@@ -193,7 +193,7 @@ namespace WebExpress.WebCore.WebPackage
                         continue;
                     }
 
-                    packagesFromFile.State = PackageCatalogeItemState.Active;
+                    packagesFromFile.State = PackageCatalogItemState.Active;
 
                     ExtractPackage(packagesFromFile);
                     RegisterPackage(packagesFromFile);
@@ -229,7 +229,7 @@ namespace WebExpress.WebCore.WebPackage
                     }
 
                     // respect disabled state; only update metadata without activating
-                    if (existing.State == PackageCatalogeItemState.Disable)
+                    if (existing.State == PackageCatalogItemState.Disable)
                     {
                         existing.Metadata = fromFile.Metadata;
                         _httpServerContext?.Log?.Debug($"package '{package}' metadata updated while disabled");
@@ -244,7 +244,7 @@ namespace WebExpress.WebCore.WebPackage
                         // update metadata and identification
                         existing.Id = fromFile.Id;
                         existing.Metadata = fromFile.Metadata;
-                        existing.State = PackageCatalogeItemState.Active;
+                        existing.State = PackageCatalogItemState.Active;
 
                         // extract, register and boot new content
                         ExtractPackage(existing);
@@ -391,7 +391,7 @@ namespace WebExpress.WebCore.WebPackage
                 // every path built from it fails to resolve, which is the second line of defence
                 // behind the guards on the operations
                 File = string.Empty,
-                State = PackageCatalogeItemState.Active,
+                State = PackageCatalogItemState.Active,
                 BuiltIn = true,
                 Plugins = [plugin],
                 Metadata = new PackageItem()
@@ -649,7 +649,7 @@ namespace WebExpress.WebCore.WebPackage
 
                 if (!activate)
                 {
-                    existing.State = PackageCatalogeItemState.Disable;
+                    existing.State = PackageCatalogItemState.Disable;
                     SaveCatalog();
                     _componentHub?.SitemapManager.Refresh();
                     return PackageOperationResult.Ok($"Package '{existing.Id}' installed (disabled).", existing);
@@ -683,7 +683,7 @@ namespace WebExpress.WebCore.WebPackage
                     return builtIn;
                 }
 
-                if (package.State == PackageCatalogeItemState.Active)
+                if (package.State == PackageCatalogItemState.Active)
                 {
                     return PackageOperationResult.Ok($"Package '{packageId}' is already active.", package);
                 }
@@ -691,7 +691,7 @@ namespace WebExpress.WebCore.WebPackage
                 var missingDependencies = GetUnfulfilledPackageDependencies(package).ToList();
                 if (missingDependencies.Count > 0)
                 {
-                    package.State = PackageCatalogeItemState.Disable;
+                    package.State = PackageCatalogItemState.Disable;
                     SaveCatalog();
                     return PackageOperationResult.Failed($"Package '{packageId}' has missing dependencies: {string.Join(", ", missingDependencies)}", package);
                 }
@@ -702,7 +702,7 @@ namespace WebExpress.WebCore.WebPackage
                 ExtractPackage(package);
                 RegisterPackage(package);
                 BootPackage(package);
-                package.State = PackageCatalogeItemState.Active;
+                package.State = PackageCatalogItemState.Active;
 
                 SaveCatalog();
                 _componentHub?.SitemapManager.Refresh();
@@ -734,7 +734,7 @@ namespace WebExpress.WebCore.WebPackage
 
                 DeactivateAndUnregisterPackage(package);
                 RemoveExtractedDirectory(package);
-                package.State = PackageCatalogeItemState.Disable;
+                package.State = PackageCatalogItemState.Disable;
 
                 SaveCatalog();
                 _componentHub?.SitemapManager.Refresh();
@@ -1290,7 +1290,7 @@ namespace WebExpress.WebCore.WebPackage
             }
 
             package.Plugins.Clear();
-            package.State = PackageCatalogeItemState.Available;
+            package.State = PackageCatalogItemState.Available;
         }
 
         /// <summary>
@@ -1349,7 +1349,7 @@ namespace WebExpress.WebCore.WebPackage
             {
                 Id = spec.Id,
                 File = Path.GetFileName(file),
-                State = PackageCatalogeItemState.Available,
+                State = PackageCatalogItemState.Available,
                 Metadata = new PackageItem()
                 {
                     FileName = Path.GetFileName(file),
@@ -1427,7 +1427,7 @@ namespace WebExpress.WebCore.WebPackage
                 // referenced statically and therefore never appears in the catalog
                 var dependencyPackage = GetPackage(id);
 
-                if (dependencyPackage is null || dependencyPackage.State == PackageCatalogeItemState.Disable)
+                if (dependencyPackage is null || dependencyPackage.State == PackageCatalogItemState.Disable)
                 {
                     missing.Add(dependency);
                     continue;

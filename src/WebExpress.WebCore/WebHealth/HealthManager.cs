@@ -7,10 +7,10 @@ using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
-using WebExpress.WebCore.WebHealt.Model;
+using WebExpress.WebCore.WebHealth.Model;
 using WebExpress.WebCore.WebPlugin;
 
-namespace WebExpress.WebCore.WebHealt
+namespace WebExpress.WebCore.WebHealth
 {
     /// <summary>
     /// Discovers health components through plugin and application events and aggregates their availability.

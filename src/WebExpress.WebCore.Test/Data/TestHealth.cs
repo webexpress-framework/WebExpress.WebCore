@@ -2,7 +2,7 @@ using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
 using WebExpress.WebCore.WebComponent;
-using WebExpress.WebCore.WebHealt;
+using WebExpress.WebCore.WebHealth;
 
 namespace WebExpress.WebCore.Test.Data
 {

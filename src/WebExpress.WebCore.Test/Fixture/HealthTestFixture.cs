@@ -3,7 +3,7 @@ using System.Reflection.Emit;
 using WebExpress.WebCore.Test.Data;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
-using WebExpress.WebCore.WebHealt;
+using WebExpress.WebCore.WebHealth;
 using WebExpress.WebCore.WebPlugin;
 
 namespace WebExpress.WebCore.Test.Fixture

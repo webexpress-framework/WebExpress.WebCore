@@ -16,6 +16,7 @@ namespace WebExpress.WebCore.WebMessage
         /// Initializes a new instance of the class.
         /// </summary>
         public ResponseMovedPermanently()
+            : this((IUri)null)
         {
         }
 
@@ -26,7 +27,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="location">The URI to which the resource has been moved permanently. This value cannot be <see langword="null"/>.</param>
         public ResponseMovedPermanently(IUri location)
         {
-            Reason = "moved permanently";
+            Reason = "Moved Permanently";
             Header.Location = location?.ToString();
         }
 
@@ -36,8 +37,8 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseMovedPermanently(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>404</title></head><body>301 - Moved Permanently</body></html>";
-            Reason = "moved permanently";
+            var content = message?.Message ?? "<html><head><title>301</title></head><body>301 - Moved Permanently</body></html>";
+            Reason = "Moved Permanently";
 
             Header.ContentType = "text/html";
             Header.ContentLength = content.Length;

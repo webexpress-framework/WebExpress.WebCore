@@ -6,7 +6,7 @@ namespace WebExpress.WebCore.WebHtml
     /// Represents a user input, often, but not necessarily, on the keyboard. Can also stand 
     /// for other inputs, such as transcribed voice commands.
     /// </summary>
-    public class HtmlElementTextSemanticsKdb : HtmlElement, IHtmlElementTextSemantics
+    public class HtmlElementTextSemanticsKbd : HtmlElement, IHtmlElementTextSemantics
     {
         /// <summary>
         /// Gets the elements.
@@ -16,7 +16,7 @@ namespace WebExpress.WebCore.WebHtml
         /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
-        public HtmlElementTextSemanticsKdb()
+        public HtmlElementTextSemanticsKbd()
             : base("kbd")
         {
         }
@@ -25,7 +25,7 @@ namespace WebExpress.WebCore.WebHtml
         /// Initializes a new instance of the class.
         /// </summary>
         /// <param name="nodes">The content of the html element.</param>
-        public HtmlElementTextSemanticsKdb(params IHtmlNode[] nodes)
+        public HtmlElementTextSemanticsKbd(params IHtmlNode[] nodes)
             : this()
         {
             Add(nodes);

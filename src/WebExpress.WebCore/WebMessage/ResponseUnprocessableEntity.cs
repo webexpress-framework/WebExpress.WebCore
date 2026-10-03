@@ -27,7 +27,7 @@ namespace WebExpress.WebCore.WebMessage
         public ResponseUnprocessableEntity(StatusMessage message)
         {
             var content = message?.Message ?? "<html><head><title>422</title></head><body>422 - Unprocessable Entity</body></html>";
-            Reason = "unprocessable entity";
+            Reason = "Unprocessable Entity";
 
             Header.ContentType = "text/html";
             Header.ContentLength = content.Length;

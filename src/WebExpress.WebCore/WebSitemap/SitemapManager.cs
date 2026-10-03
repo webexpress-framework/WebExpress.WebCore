@@ -194,7 +194,7 @@ namespace WebExpress.WebCore.WebSitemap
         /// Returns the URI for this type based on the sitemap configuration, taking into account 
         /// the specific context in which the URI is valid.
         /// </summary>
-        /// <typeparam name="TEnpoint">
+        /// <typeparam name="TEndpoint">
         /// The class from which the URI is to be determined. URI route must not have any dynamic 
         /// components (such as '/a/guid/b').
         /// </typeparam>
@@ -204,10 +204,10 @@ namespace WebExpress.WebCore.WebSitemap
         /// <returns>
         /// Returns the URI taking into account the context, or null if no valid URI is found.
         /// </returns>
-        public IUri GetUri<TEnpoint>(IEndpointContext endpointContext)
-            where TEnpoint : IEndpoint
+        public IUri GetUri<TEndpoint>(IEndpointContext endpointContext)
+            where TEndpoint : IEndpoint
         {
-            var endpointContexts = _componentHub?.EndpointManager.GetEndpoints(typeof(TEnpoint), endpointContext.ApplicationContext)
+            var endpointContexts = _componentHub?.EndpointManager.GetEndpoints(typeof(TEndpoint), endpointContext.ApplicationContext)
                 .Where(x => x.EndpointId.Equals(endpointContext.EndpointId));
 
             var node = ResolveNode(endpointContexts);
@@ -215,7 +215,7 @@ namespace WebExpress.WebCore.WebSitemap
             if (node is null)
             {
                 // fallback to the search by application context
-                return GetUri<TEnpoint>(endpointContext.ApplicationContext);
+                return GetUri<TEndpoint>(endpointContext.ApplicationContext);
             }
 
             return new UriEndpoint(_serverUri, node?.EndpointContext?.Route.PathSegments, null);

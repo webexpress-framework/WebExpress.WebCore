@@ -461,7 +461,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationContext">The context of the application.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        public IResourceContext GetResorce(IApplicationContext applicationContext, string resourceId)
+        public IResourceContext GetResource(IApplicationContext applicationContext, string resourceId)
         {
             lock (_guard)
             {
@@ -481,7 +481,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationId">The application id.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        public IResourceContext GetResorce(string applicationId, string resourceId)
+        public IResourceContext GetResource(string applicationId, string resourceId)
         {
             lock (_guard)
             {

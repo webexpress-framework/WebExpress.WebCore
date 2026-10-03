@@ -80,8 +80,8 @@ namespace WebExpress.WebCore.WebHtml.Parser
                 ["i"] = () => new HtmlElementTextSemanticsI(),
                 // earlier versions of the renderer wrote the misspelled <kdb>, which may
                 // still be stored in persisted markup
-                ["kbd"] = () => new HtmlElementTextSemanticsKdb(),
-                ["kdb"] = () => new HtmlElementTextSemanticsKdb(),
+                ["kbd"] = () => new HtmlElementTextSemanticsKbd(),
+                ["kdb"] = () => new HtmlElementTextSemanticsKbd(),
                 ["mark"] = () => new HtmlElementTextSemanticsMark(),
                 ["q"] = () => new HtmlElementTextSemanticsQ(),
                 ["rp"] = () => new HtmlElementTextSemanticsRp(),

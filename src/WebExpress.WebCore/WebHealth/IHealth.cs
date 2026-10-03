@@ -2,7 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using WebExpress.WebCore.WebComponent;
 
-namespace WebExpress.WebCore.WebHealt
+namespace WebExpress.WebCore.WebHealth
 {
     /// <summary>
     /// Contributes a critical dependency check discovered and bound to applications through plugin lifecycle events.

@@ -30,7 +30,7 @@ namespace WebExpress.WebCore.Test.Message
             var response = new ResponseNoContent();
 
             // validation
-            Assert.Equal("NoContent", response.Reason);
+            Assert.Equal("No Content", response.Reason);
         }
     }
 }

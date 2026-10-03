@@ -69,7 +69,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationContext">The context of the application.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        IResourceContext GetResorce(IApplicationContext applicationContext, string resourceId);
+        IResourceContext GetResource(IApplicationContext applicationContext, string resourceId);
 
         /// <summary>
         /// Returns the resource context.
@@ -77,6 +77,6 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationId">The application id.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        IResourceContext GetResorce(string applicationId, string resourceId);
+        IResourceContext GetResource(string applicationId, string resourceId);
     }
 }

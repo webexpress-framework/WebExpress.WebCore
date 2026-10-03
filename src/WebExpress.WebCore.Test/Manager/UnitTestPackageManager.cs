@@ -72,7 +72,7 @@ namespace WebExpress.WebCore.Test.Manager
             packageManager.AddPackage += (sender, item) => { eventFired = true; };
 
             // create dummy package
-            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogeItemState.Active };
+            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogItemState.Active };
 
             // act
             var method = typeof(PackageManager).GetMethod("OnAddPackage", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -95,7 +95,7 @@ namespace WebExpress.WebCore.Test.Manager
             packageManager.RemovePackage += (sender, item) => { eventFired = true; };
 
             // create dummy package
-            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogeItemState.Active };
+            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogItemState.Active };
 
             // act
             var method = typeof(PackageManager).GetMethod("OnRemovePackage", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -311,17 +311,17 @@ namespace WebExpress.WebCore.Test.Manager
                 // act + validation (install active)
                 var install = packageManager.InstallPackage(packageFile, true);
                 Assert.True(install.Success);
-                Assert.Equal(PackageCatalogeItemState.Active, packageManager.GetPackage("lifecycle")?.State);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("lifecycle")?.State);
 
                 // act + validation (deactivate)
                 var deactivate = packageManager.DeactivatePackage("lifecycle");
                 Assert.True(deactivate.Success);
-                Assert.Equal(PackageCatalogeItemState.Disable, packageManager.GetPackage("lifecycle")?.State);
+                Assert.Equal(PackageCatalogItemState.Disable, packageManager.GetPackage("lifecycle")?.State);
 
                 // act + validation (activate)
                 var activate = packageManager.ActivatePackage("lifecycle");
                 Assert.True(activate.Success);
-                Assert.Equal(PackageCatalogeItemState.Active, packageManager.GetPackage("lifecycle")?.State);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("lifecycle")?.State);
 
                 // act + validation (uninstall)
                 var uninstall = packageManager.UninstallPackage("lifecycle");
@@ -437,7 +437,7 @@ namespace WebExpress.WebCore.Test.Manager
 
                 Assert.True(package.BuiltIn);
                 Assert.Equal(string.Empty, package.File);
-                Assert.Equal(PackageCatalogeItemState.Active, package.State);
+                Assert.Equal(PackageCatalogItemState.Active, package.State);
                 Assert.Contains(package.Plugins, x => x.PluginId.ToString() == pluginId);
                 Assert.Equal(pluginId, package.Metadata?.Id);
             }
@@ -597,7 +597,7 @@ namespace WebExpress.WebCore.Test.Manager
 
             // the refusal has to leave the plugin exactly as it was
             Assert.Contains(componentHub.PluginManager.Plugins, x => x.PluginId.ToString() == pluginId);
-            Assert.Equal(PackageCatalogeItemState.Active, packageManager.GetPackage(pluginId)?.State);
+            Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage(pluginId)?.State);
         }
 
         /// <summary>

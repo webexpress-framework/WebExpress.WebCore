@@ -8,7 +8,7 @@ using System.Text;
 using static WebExpress.WebCore.Test.Fixture.HealthTestFixture;
 using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebApplication;
-using WebExpress.WebCore.WebHealt;
+using WebExpress.WebCore.WebHealth;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebSetting;
 

@@ -24,7 +24,7 @@ using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
-using WebExpress.WebCore.WebHealt;
+using WebExpress.WebCore.WebHealth;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
@@ -572,7 +572,7 @@ namespace WebExpress.WebCore
                 "webexpress.webcore:httpserver.request",
                 context.RemoteEndPoint,
                 ++RequestNumber,
-                $"{request?.Method} {request?.Uri} {request?.Protocoll}"
+                $"{request?.Method} {request?.Uri} {request?.Protocol}"
             ));
 
             var resourceUri = new UriEndpoint(request.Uri, searchResult.Uri.PathSegments)
@@ -619,7 +619,7 @@ namespace WebExpress.WebCore
             }
             catch (RedirectException ex)
             {
-                if (ex.Permanet)
+                if (ex.Permanent)
                 {
                     response = new ResponseMovedPermanently(ex.Uri);
                 }
@@ -641,7 +641,7 @@ namespace WebExpress.WebCore
             {
                 if (ex is TargetInvocationException tie && tie.InnerException is RedirectException rex)
                 {
-                    response = rex.Permanet
+                    response = rex.Permanent
                         ? new ResponseMovedPermanently(rex.Uri)
                         : new ResponseMovedTemporarily(rex.Uri);
                 }
