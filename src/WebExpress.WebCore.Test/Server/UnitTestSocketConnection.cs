@@ -25,10 +25,10 @@ namespace WebExpress.WebCore.Test.Server
             using var connection = new SocketConnection(stream, socketContext);
 
             // act
-            var first = connection.SendTextAsync("first");
-            var second = connection.SendTextAsync("second");
+            var first = connection.SendTextAsync("first", TestContext.Current.CancellationToken);
+            var second = connection.SendTextAsync("second", TestContext.Current.CancellationToken);
             stream.Open();
-            await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
             // validation
             Assert.Equal(1, stream.MaxConcurrentWrites);
