@@ -6,6 +6,7 @@ using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
 using WebExpress.WebCore.WebCertificate;
+using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebComponent.Model;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
@@ -38,6 +39,7 @@ namespace WebExpress.WebCore.WebComponent
     {
         private readonly IHttpServerContext _httpServerContext;
         private readonly ComponentDictionary _dictionary = [];
+        private readonly ClusterManager _clusterManager;
         private readonly LogManager _logManager;
         private readonly PackageManager _packageManager;
         private readonly InternationalizationManager _internationalizationManager;
@@ -87,6 +89,7 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         public IEnumerable<IComponentManager> Managers => new IComponentManager[]
             {
+                _clusterManager,
                 _logManager,
                 _packageManager,
                 _pluginManager,
@@ -246,6 +249,11 @@ namespace WebExpress.WebCore.WebComponent
         public ISessionManager SessionManager => _sessionManager;
 
         /// <summary>
+        /// Gets the cluster manager that hands every subsystem the shared state and the message bus.
+        /// </summary>
+        public IClusterManager ClusterManager => _clusterManager;
+
+        /// <summary>
         /// Gets the socket manager.
         /// </summary>
         /// <returns>The instance of the socket manager.</returns>
@@ -275,7 +283,10 @@ namespace WebExpress.WebCore.WebComponent
         {
             _httpServerContext = httpServerContext;
 
-            // order is relevant
+            // order is relevant; the cluster comes first since sessions, jobs and packages ask it
+            // whether they run alone
+            _clusterManager = CreateInstance(typeof(ClusterManager)) as ClusterManager
+                ?? throw new InvalidOperationException("Failed to create ClusterManager.");
             _pluginManager = CreateInstance(typeof(PluginManager)) as PluginManager
                 ?? throw new InvalidOperationException("Failed to create PluginManager.");
             _packageManager = CreateInstance(typeof(PackageManager)) as PackageManager

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
+using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebJob.Model;
 using WebExpress.WebCore.WebPlugin;
@@ -23,6 +24,15 @@ namespace WebExpress.WebCore.WebJob
     /// </remarks>
     public sealed class JobManager : IJobManager, ISystemComponent, IExecutableElements
     {
+        /// <summary>
+        /// The scope job claims are kept under in the cluster store.
+        /// </summary>
+        internal const string ClaimScope = "job";
+
+        // a claim must outlive the clock skew between instances; an hour is far beyond any skew
+        // a cluster would tolerate and still keeps the claims few
+        private static readonly TimeSpan ClaimLifetime = TimeSpan.FromHours(1);
+
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly ScheduleDictionary _staticScheduleDictionary = [];
@@ -132,6 +142,7 @@ namespace WebExpress.WebCore.WebJob
                 var weekday = "*";
                 var name = default(string);
                 var description = default(string);
+                var scope = JobScope.Cluster;
 
                 foreach (var customAttribute in job.CustomAttributes
                     .Where(x => x.AttributeType.GetInterfaces().Contains(typeof(IJobAttribute))))
@@ -152,6 +163,11 @@ namespace WebExpress.WebCore.WebJob
                     {
                         description = customAttribute.ConstructorArguments.FirstOrDefault().Value?.ToString();
                     }
+                    else if (customAttribute.AttributeType == typeof(JobScopeAttribute)
+                        && customAttribute.ConstructorArguments.FirstOrDefault().Value is int value)
+                    {
+                        scope = (JobScope)value;
+                    }
                 }
 
                 // assign the job to existing applications
@@ -165,6 +181,7 @@ namespace WebExpress.WebCore.WebJob
                         PluginContext = pluginContext,
                         ApplicationContext = applicationContext,
                         Cron = new Cron(_httpServerContext, minute, hour, day, month, weekday),
+                        Scope = scope
                     };
 
                     if (job != default)
@@ -400,7 +417,7 @@ namespace WebExpress.WebCore.WebJob
                     .SelectMany(x => x.Value)
                     .Union(_dynamicScheduleList.Select(x => x)))
                 {
-                    if (scheduleItemValue.JobContext.Cron.Matching(_clock))
+                    if (scheduleItemValue.JobContext.Cron.Matching(_clock) && Claim(scheduleItemValue.JobContext, _clock))
                     {
                         _httpServerContext?.Log?.Debug
                         (
@@ -424,6 +441,50 @@ namespace WebExpress.WebCore.WebJob
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Claims a due run of a job for this instance. Every instance evaluates the same cron
+        /// expression at the same minute; the atomic add in the shared store lets exactly one of
+        /// them win, so a cluster runs the job once instead of once per instance.
+        /// </summary>
+        /// <param name="jobContext">The job that is due.</param>
+        /// <param name="clock">The minute the job is due at.</param>
+        /// <returns>True when this instance runs the job.</returns>
+        internal bool Claim(IJobContext jobContext, Clock clock)
+        {
+            var cluster = _componentHub?.ClusterManager;
+
+            if (jobContext.Scope == JobScope.Node || cluster?.Store is not { IsShared: true } store)
+            {
+                return true;
+            }
+
+            // utc, so instances whose containers run in different time zones name the same run alike
+            var key = string.Join("|", jobContext.ApplicationContext?.ApplicationId, jobContext.JobId,
+                clock.Moment.ToUniversalTime().ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture));
+
+            try
+            {
+                if (store.TryAdd(ClaimScope, key, System.Text.Encoding.UTF8.GetBytes(cluster.NodeId), ClaimLifetime))
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                // without the store no instance can claim; skipping one run beats running it everywhere
+                _httpServerContext?.Log?.Exception(ex);
+
+                return false;
+            }
+
+            _httpServerContext?.Log?.Debug
+            (
+                I18N.Translate("webexpress.webcore:jobmanager.job.claimed", jobContext.JobId)
+            );
+
+            return false;
         }
 
         /// <summary>

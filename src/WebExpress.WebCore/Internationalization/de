@@ -65,6 +65,8 @@ packagemanager.settings.existing=Die Einstellungsdatei '{0}' existiert bereits i
 packagemanager.settings.ignored=Der Paketeintrag '{0}' ist keine Einstellungsdatei und wurde ignoriert.
 packagemanager.settings.invalid=Die Einstellungsdatei '{0}' des Pakets ist kein gültiges JSON und wurde nicht übernommen.
 packagemanager.settings.outofscope=Die Einstellungsdatei '{0}' des Pakets setzt den Schlüssel '{1}' außerhalb von '{2}' und wurde nicht übernommen.
+packagemanager.settings.unwritable=Die Einstellungsdatei '{0}' konnte nicht in das Einstellungsverzeichnis geschrieben werden: {1}
+packagemanager.cluster.busy=Eine andere Instanz ändert gerade die Pakete. Bitte in Kürze erneut versuchen.
 
 pluginmanager.initialization=Der Pluginmanager wurde initialisiert.
 pluginmanager.load={0}.dll wird geladen. Version = '{1}'
@@ -134,6 +136,10 @@ sitemapmanager.merge.error=Die beiden Sitemaps '{0}' und '{1}' konnten nicht gem
 
 sessionmanager.initialization=Der Sessionmanager wurde initialisiert.
 sessionmanager.cleanup.removed=Die Sitzung mit der Id '{0}' wurde entfernt.
+sessionmanager.cluster.unserializable=Die Sitzungseigenschaft '{0}' kann nicht serialisiert werden und bleibt auf dieser Instanz: {1}
+sessionmanager.cluster.dropped=Die Sitzungseigenschaft '{0}' der Sitzung '{1}' ist auf dieser Instanz unbekannt und wurde verworfen.
+clustermanager.clockskew=Die Uhr der Clusterinstanz '{0}' weicht um {1} Sekunden von dieser Instanz ab. Die Uhren müssen synchronisiert werden (NTP): gespeicherte Fristen und Nachrichten zwischen Instanzen hängen davon ab.
+clustermanager.initialization=Der Clustermanager wurde initialisiert (Knoten '{0}', im Cluster: {1}).
 
 settingpagemanager.initialization=Der Settingpagemanager wurde initialisiert.
 settingpagemanager.register.category=Die Einstellungskategorie '{0}' wurde der Anwendung '{1}' zugewiesen und im Settingpagemanager registriert.
@@ -159,6 +165,7 @@ jobmanager.duplicate=Der Job '{0}' wurde bereits in der Anwendung '{1}' registri
 jobmanager.jobless=Der Job '{0}' besitzt keine Angaben zu einem Job.
 jobmanager.job=Job: '{0}' für Anwendung '{1}'
 jobmanager.job.process=Der Job '{0}' wird ausgeführt.
+jobmanager.job.claimed=Der Job '{0}' wird von einer anderen Instanz des Clusters ausgeführt.
 jobmanager.cron.parseerror=Syntaxfehler in der Zeitangabe eines Jobs. Der Wert '{0}' kann nicht verarbeitet werden.
 jobmanager.cron.range=Syntaxfehler in der Zeitangabe eines Jobs. Der Wert '{0}' ist außerhalb des gültigen Bereiches.
 

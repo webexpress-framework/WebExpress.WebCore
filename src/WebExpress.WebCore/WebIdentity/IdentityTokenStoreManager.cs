@@ -12,6 +12,8 @@ namespace WebExpress.WebCore.WebIdentity
     /// Binds at most one token store to each application and ties the binding's lifetime to the owning
     /// plugin and application. Applications without a binding share the file store configured through
     /// <c>WebExpress:Authentication:TokenStorePath</c>, which is part of WebCore and needs no plugin.
+    /// Without that path, a cluster store shared by every instance holds the markers, so a cluster needs
+    /// no token directory of its own for its authentication.
     /// </summary>
     public sealed class IdentityTokenStoreManager : IIdentityTokenStoreManager
     {
@@ -19,7 +21,7 @@ namespace WebExpress.WebCore.WebIdentity
         private readonly IHttpServerContext _server;
         private readonly object _gate = new();
         private readonly List<Entry> _entries = [];
-        private FileIdentityTokenStore _defaultStore;
+        private IIdentityTokenStore _defaultStore;
 
         /// <summary>
         /// Associates a store with the application it serves and the plugin responsible for its lifetime.
@@ -109,16 +111,23 @@ namespace WebExpress.WebCore.WebIdentity
         }
 
         /// <summary>
-        /// Opens the shared file store on first use, so a deployment without a configured location stays unauthenticated
-        /// instead of losing revocations in a temporary directory.
+        /// Opens the default store on first use: the file store at the configured location, else the cluster
+        /// store when every instance shares it. A deployment with neither stays unauthenticated instead of
+        /// losing revocations in a temporary directory or in the memory of a single process.
         /// </summary>
-        /// <returns>The shared file store, or null when no location is configured.</returns>
-        private FileIdentityTokenStore DefaultStore()
+        /// <returns>The default store, or null when no durable shared storage is available.</returns>
+        private IIdentityTokenStore DefaultStore()
         {
             if (_defaultStore is not null) { return _defaultStore; }
             var path = _server?.Configuration?["WebExpress:Authentication:TokenStorePath"];
-            if (string.IsNullOrWhiteSpace(path)) { return null; }
-            _defaultStore = new FileIdentityTokenStore(path);
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                _defaultStore = new FileIdentityTokenStore(path);
+            }
+            else if (_hub.ClusterManager is { Store.IsShared: true } cluster)
+            {
+                _defaultStore = new ClusterIdentityTokenStore(cluster);
+            }
             return _defaultStore;
         }
 

@@ -338,6 +338,92 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that two instances sharing the package directory follow each other's changes:
+        /// what one installs, deactivates, activates or uninstalls, the other adopts on its next
+        /// scan - while each extracts into a directory of its own.
+        /// </summary>
+        [Fact]
+        public void ClusterInstancesFollowSharedCatalog()
+        {
+            // arrange
+            var packagePath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var statePath = Path.Combine(Path.GetTempPath(), "wx-cluster-" + Guid.NewGuid().ToString("N"));
+            var a = CreateClusterInstance(packagePath, statePath);
+            var b = CreateClusterInstance(packagePath, statePath);
+            var packageFile = Path.Combine(packagePath, "shared.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "shared", "1.0.0");
+
+                // act + validation (install on a, b follows)
+                Assert.True(a.InstallPackage(packageFile, true).Success);
+                b.Scan();
+                Assert.Equal(PackageCatalogItemState.Active, b.GetPackage("shared")?.State);
+                Assert.False(Directory.Exists(Path.Combine(packagePath, "shared.1.0.0")), "extraction must not touch the shared directory");
+
+                // act + validation (deactivate on a, b follows)
+                Assert.True(a.DeactivatePackage("shared").Success);
+                b.Scan();
+                Assert.Equal(PackageCatalogItemState.Disable, b.GetPackage("shared")?.State);
+
+                // act + validation (activate on b, a follows)
+                Assert.True(b.ActivatePackage("shared").Success);
+                a.Scan();
+                Assert.Equal(PackageCatalogItemState.Active, a.GetPackage("shared")?.State);
+
+                // act + validation (uninstall on a, b follows)
+                Assert.True(a.UninstallPackage("shared").Success);
+                b.Scan();
+                Assert.Null(b.GetPackage("shared"));
+                Assert.Empty(Directory.GetFiles(packagePath, "*.tmp"));
+            }
+            finally
+            {
+                foreach (var directory in new[] { packagePath, statePath })
+                {
+                    if (Directory.Exists(directory))
+                    {
+                        Directory.Delete(directory, true);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates the package manager of one cluster instance over a shared package directory.
+        /// </summary>
+        /// <param name="packagePath">The shared package directory.</param>
+        /// <param name="statePath">The shared cluster state directory.</param>
+        /// <returns>The package manager.</returns>
+        private static PackageManager CreateClusterInstance(string packagePath, string statePath)
+        {
+            var context = new HttpServerContext
+            (
+                new WebExpress.WebCore.WebEndpoint.RouteEndpoint("server"),
+                [],
+                packagePath,
+                Environment.CurrentDirectory,
+                Environment.CurrentDirectory,
+                Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString()),
+                new ConfigurationBuilder().Build(),
+                System.Globalization.CultureInfo.GetCultureInfo("en"),
+                new WebExpress.WebCore.WebLog.Log() { LogMode = WebExpress.WebCore.WebLog.LogMode.Off },
+                null
+            );
+            var hub = UnitTestFixture.CreateComponentHubMock(context);
+
+            ((WebExpress.WebCore.WebCluster.ClusterManager)hub.ClusterManager).Configure(new ClusterSettings
+            {
+                NodeId = "node-" + Guid.NewGuid().ToString("N"),
+                StatePath = statePath
+            });
+
+            return hub.PackageManager as PackageManager;
+        }
+
+        /// <summary>
         /// Tests that update fails when uploaded package id does not match the requested package id.
         /// </summary>
         [Fact]

@@ -4,6 +4,7 @@ using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
 using WebExpress.WebCore.WebCertificate;
+using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
@@ -182,6 +183,12 @@ namespace WebExpress.WebCore.WebComponent
         /// </summary>
         /// <returns>The instance of the session manager.</returns>
         ISessionManager SessionManager { get; }
+
+        /// <summary>
+        /// Gets the cluster manager, which tells whether the server runs as one of several
+        /// instances and provides the state and messages they share.
+        /// </summary>
+        IClusterManager ClusterManager { get; }
 
         /// <summary>
         /// Gets the socket manager.

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
@@ -112,6 +113,13 @@ namespace WebExpress.WebCore.WebMetrics.Model
             collector.Gauge("webexpress_applications", "Registered applications.", _componentHub.ApplicationManager?.Applications.Count() ?? 0);
             collector.Gauge("webexpress_applications_failed", "Declared applications whose creation failed.",
                 _componentHub.ApplicationManager?.FailedApplications.Count() ?? 0);
+
+            foreach (var (node, skew) in _componentHub.ClusterManager?.ClockSkew ?? new Dictionary<string, TimeSpan>())
+            {
+                collector.Gauge("webexpress_cluster_clock_skew_seconds",
+                    "How far the clock of another cluster instance ran ahead of this one on its last message.",
+                    skew.TotalSeconds, new MetricLabel("peer", node));
+            }
 
             CollectProcess(collector);
             CollectRuntime(collector);

@@ -18,7 +18,8 @@ namespace WebExpress.WebCore.WebIdentity
         IEnumerable<IIdentityTokenStore> Stores { get; }
 
         /// <summary>
-        /// Returns the store bound to the application, falling back to the shared file store of the deployment.
+        /// Returns the store bound to the application, falling back to the shared file store of the deployment
+        /// and, without one, to the cluster store when every instance shares it.
         /// </summary>
         /// <param name="applicationContext">The application whose credentials are consumed or revoked.</param>
         /// <returns>The store responsible for the application, or null when no durable storage is configured.</returns>

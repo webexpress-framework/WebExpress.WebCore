@@ -65,7 +65,54 @@ namespace WebExpress.WebCore.WebSetting
             {
                 throw new System.InvalidOperationException("WebExpress:ShutdownTimeoutSeconds must be between 1 and 86400.");
             }
+
+            if (ShutdownDelaySeconds is < 0 or > 3600)
+            {
+                throw new System.InvalidOperationException("WebExpress:ShutdownDelaySeconds must be between 0 and 3600.");
+            }
         }
+
+        /// <summary>
+        /// Gets or sets how long, in seconds, the server keeps serving after it was asked to stop
+        /// while already reporting itself unready. A load balancer only stops routing to an
+        /// instance once its readiness probe failed or the orchestrator removed it from the
+        /// endpoints, which happens concurrently with the termination signal; stopping at once
+        /// would refuse the requests still routed during that window. Zero stops immediately.
+        /// </summary>
+        public int ShutdownDelaySeconds { get; set; }
+
+        /// <summary>
+        /// Rejects an internal cluster listener that would share a port with a public endpoint,
+        /// since the bus could then be reached through every route to that port.
+        /// </summary>
+        internal void ValidateCluster()
+        {
+            var port = Cluster?.GetListenPort();
+
+            if (port is null)
+            {
+                return;
+            }
+
+            if (port == 0)
+            {
+                throw new System.InvalidOperationException("WebExpress:Cluster:Listen requires a fixed port, since the peers have to address it.");
+            }
+
+            foreach (var endpoint in Endpoints ?? [])
+            {
+                if (endpoint.GetBindingAddress().Port == port)
+                {
+                    throw new System.InvalidOperationException("WebExpress:Cluster:Listen must use a port no public endpoint uses.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the settings for running several instances side by side. An omitted
+        /// block keeps all state in the instance, which is correct for a single instance only.
+        /// </summary>
+        public ClusterSettings Cluster { get; set; }
 
         /// <summary>
         /// Gets or sets the shared certificate inventory and expiry warning policy used for production HTTPS.

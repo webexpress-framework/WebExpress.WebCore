@@ -224,7 +224,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="cookie">The cookie to serialise.</param>
         /// <param name="sameSite">The SameSite attribute of the cookie.</param>
         /// <returns>A Set-Cookie header value, or null when the cookie is empty.</returns>
-        private static string SerializeSetCookie(Cookie cookie, SameSiteMode sameSite)
+        internal static string SerializeSetCookie(Cookie cookie, SameSiteMode sameSite)
         {
             if (cookie is null || string.IsNullOrEmpty(cookie.Name))
             {

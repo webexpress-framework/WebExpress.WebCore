@@ -65,6 +65,8 @@ packagemanager.settings.existing=The settings file '{0}' already exists in the s
 packagemanager.settings.ignored=The package entry '{0}' is not a settings file and was ignored.
 packagemanager.settings.invalid=The settings file '{0}' of the package is not valid json and was not deployed.
 packagemanager.settings.outofscope=The settings file '{0}' of the package sets the key '{1}' outside of '{2}' and was not deployed.
+packagemanager.settings.unwritable=The settings file '{0}' could not be written to the settings directory: {1}
+packagemanager.cluster.busy=Another instance is changing the packages. Please try again shortly.
 
 pluginmanager.initialization=The plugin manager has been initialized.
 pluginmanager.load={0}.dll is loading. Version = '{1}'
@@ -134,6 +136,10 @@ sitemapmanager.merge.error=The two sitemaps '{0}' and '{1}' could not be merged.
 
 sessionmanager.initialization=The session manager has been initialized.
 sessionmanager.cleanup.removed=The session with the id '{0}' has been removed.
+sessionmanager.cluster.unserializable=The session property '{0}' cannot be serialized and stays on this instance: {1}
+sessionmanager.cluster.dropped=The session property '{0}' of the session '{1}' is unknown on this instance and was dropped.
+clustermanager.clockskew=The clock of the cluster instance '{0}' differs from this instance's by {1} seconds. Synchronize the clocks (NTP): stored deadlines and messages between instances depend on them.
+clustermanager.initialization=The cluster manager has been initialized (node '{0}', clustered: {1}).
 
 settingpagemanager.initialization=The setting page manager has been initialized.
 settingpagemanager.register.category=The setting category '{0}' has been registered in the application '{1}'.
@@ -159,6 +165,7 @@ jobmanager.duplicate=The job '{0}' has already been registered. Therefore, the a
 jobmanager.jobless=The job '{0}' does not have any information about the job.
 jobmanager.job=Job: '{0}' for plugin '{1}'
 jobmanager.job.process=The job '{0}' is executed.
+jobmanager.job.claimed=The job '{0}' is executed by another instance of the cluster.
 jobmanager.cron.parseerror=Syntax error in the timing of a job. The value '{0}' cannot be processed.
 jobmanager.cron.range=Syntax error in the timing of a job. The value '{0}' is outside the valid range.
 

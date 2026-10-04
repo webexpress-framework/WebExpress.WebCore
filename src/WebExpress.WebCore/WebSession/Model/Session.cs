@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json.Nodes;
 
 namespace WebExpress.WebCore.WebSession.Model
 {
@@ -24,7 +25,7 @@ namespace WebExpress.WebCore.WebSession.Model
         /// <summary>
         /// Gets the creation time.
         /// </summary>
-        public DateTime Created { get; private set; }
+        public DateTime Created { get; internal set; }
 
         /// <summary>
         /// Gets or sets the time of the last access.
@@ -35,6 +36,24 @@ namespace WebExpress.WebCore.WebSession.Model
         /// Gets properties for the session.
         /// </summary>
         public Dictionary<Type, ISessionProperty> Properties { get; private set; }
+
+        /// <summary>
+        /// Gets or sets the fingerprint of the properties last written to the cluster store, so
+        /// a request that only read the session does not rewrite it.
+        /// </summary>
+        internal byte[] PersistedFingerprint { get; set; }
+
+        /// <summary>
+        /// Gets or sets when the session was last written to the cluster store.
+        /// </summary>
+        internal DateTime PersistedAt { get; set; }
+
+        /// <summary>
+        /// Gets or sets the properties as this instance last read or wrote them. It is the common
+        /// base when another instance changed the session in the meantime and both changes have
+        /// to be merged.
+        /// </summary>
+        internal JsonObject LoadedProperties { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the class.

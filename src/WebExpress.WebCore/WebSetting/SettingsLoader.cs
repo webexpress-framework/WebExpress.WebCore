@@ -61,6 +61,7 @@ namespace WebExpress.WebCore.WebSetting
         {
             var settings = configuration.GetSection(HttpServerSettings.Section).Get<HttpServerSettings>() ?? new HttpServerSettings();
             settings.ValidateShutdown();
+            settings.ValidateCluster();
             return settings;
         }
 

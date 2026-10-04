@@ -43,6 +43,10 @@ The equivalent environment variables are `WEBEXPRESS_WebExpress__Metrics__Enable
 
 The container lifecycle is described in the [Graceful shutdown guide](graceful-shutdown.md). It covers `Shutdown: "graceful"`, the shared drain budget, background synchronization, resource ownership, and Docker and Kubernetes termination settings.
 
+## Horizontal scaling
+
+Several instances can serve one deployment behind a load balancer. The [Cluster model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#cluster-model) section of the Development Guide lists what each subsystem shares, the `WebExpress:Cluster` settings (shared state directory, peers, secret), `ShutdownDelaySeconds`, the store and transport extensions in `WebExpress.WebCore.WebCluster`, and Kubernetes and Docker Compose examples.
+
 ## Public server URI
 
 Configure `WebExpress:ExternalUri` when the listener binding is not the URL used by clients, for example when WebExpress runs behind a reverse proxy. The server continues to bind to the addresses in `Endpoints`, while applications and components can obtain the public URL through `IHttpServerContext.ExternalUri`.

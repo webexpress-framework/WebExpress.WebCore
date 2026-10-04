@@ -15,6 +15,7 @@ using System.Xml;
 using System.Xml.Serialization;
 using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
+using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebPackage.Model;
@@ -59,6 +60,25 @@ namespace WebExpress.WebCore.WebPackage
         private readonly Lock _scanLock = new();
 
         /// <summary>
+        /// The topic instances announce a changed package set on, so the others rescan at once
+        /// instead of waiting for their next periodic scan.
+        /// </summary>
+        internal const string ClusterTopic = "webexpress.packages";
+
+        /// <summary>
+        /// The name of the cluster lock that serializes every change of the shared catalog.
+        /// </summary>
+        internal const string ClusterLock = "packages";
+
+        // long enough for the slowest install, short enough that a crashed instance does not
+        // block package changes for long
+        private static readonly TimeSpan ClusterLockLifetime = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan ClusterLockTimeout = TimeSpan.FromSeconds(30);
+
+        private IDisposable _clusterSubscription;
+        private string _extractionRoot;
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         /// <param name="componentHub">The component hub.</param>
@@ -89,6 +109,10 @@ namespace WebExpress.WebCore.WebPackage
             // boot default elements 
             _componentHub?.BootComponent(_pluginManager.Plugins);
 
+            // the cluster lock keeps instances that start together from rewriting the catalog
+            // while another reads it; an instance that does not get it in time still starts
+            using var startup = Cluster?.Lock(ClusterLock, ClusterLockLifetime, ClusterLockTimeout);
+
             LoadCatalog();
 
             foreach (var package in Catalog.Packages)
@@ -112,9 +136,12 @@ namespace WebExpress.WebCore.WebPackage
             }
 
             SaveCatalog();
+            startup?.Dispose();
 
             // build sitemap
             _componentHub?.SitemapManager.Refresh();
+
+            _clusterSubscription = Cluster?.Subscribe(ClusterTopic, _ => _httpServerContext.Lifetime.TryRun(() => Scan()));
 
             _httpServerContext.Lifetime.TryRun(async stopping =>
             {
@@ -145,6 +172,17 @@ namespace WebExpress.WebCore.WebPackage
         {
             lock (_scanLock)
             {
+                var cluster = Cluster;
+
+                // an instance changing the packages right now announces it when done; this round
+                // is skipped rather than reading a catalog that is about to change
+                using var coordination = cluster?.Lock(ClusterLock, ClusterLockLifetime, TimeSpan.Zero);
+
+                if (cluster is not null && coordination is null)
+                {
+                    return;
+                }
+
                 _httpServerContext?.Log?.Debug
                 (
                     I18N.Translate
@@ -153,6 +191,9 @@ namespace WebExpress.WebCore.WebPackage
                         _httpServerContext?.PackagePath
                     )
                 );
+
+                var shared = cluster is not null ? ReadSharedStates() : null;
+                var adopted = shared is not null && AdoptSharedStates(shared);
 
                 // determine all WebExpress packages from the file system
                 var packageFiles = Directory.GetFiles(_httpServerContext?.PackagePath, "*.wxp").Select(x => Path.GetFileName(x)).ToList();
@@ -193,11 +234,19 @@ namespace WebExpress.WebCore.WebPackage
                         continue;
                     }
 
-                    packagesFromFile.State = PackageCatalogItemState.Active;
+                    // a package another instance installed disabled stays disabled here too
+                    if (shared is not null && shared.TryGetValue(package, out var state) && state == PackageCatalogItemState.Disable)
+                    {
+                        packagesFromFile.State = PackageCatalogItemState.Disable;
+                    }
+                    else
+                    {
+                        packagesFromFile.State = PackageCatalogItemState.Active;
 
-                    ExtractPackage(packagesFromFile);
-                    RegisterPackage(packagesFromFile);
-                    BootPackage(packagesFromFile);
+                        ExtractPackage(packagesFromFile);
+                        RegisterPackage(packagesFromFile);
+                        BootPackage(packagesFromFile);
+                    }
 
                     Catalog.Packages.Add(packagesFromFile);
 
@@ -285,7 +334,7 @@ namespace WebExpress.WebCore.WebPackage
                     );
                 }
 
-                if (newPackages.Count != 0 || removePackages.Count != 0 || changedPackages.Count != 0)
+                if (adopted || newPackages.Count != 0 || removePackages.Count != 0 || changedPackages.Count != 0)
                 {
                     // build sitemap
                     _componentHub?.SitemapManager.Refresh();
@@ -564,7 +613,9 @@ namespace WebExpress.WebCore.WebPackage
                 return PackageOperationResult.Failed("The upload file extension must be '.wxp'.");
             }
 
-            var tmpFile = Path.Combine(_httpServerContext?.PackagePath, $"{Guid.NewGuid()}.{safeFileName}");
+            // the temporary name does not end in .wxp, so no scan - on this or another instance -
+            // mistakes a half-written upload for a package
+            var tmpFile = Path.Combine(_httpServerContext?.PackagePath, $".{Guid.NewGuid()}.{safeFileName}.upload");
             Directory.CreateDirectory(_httpServerContext?.PackagePath);
 
             try
@@ -575,7 +626,7 @@ namespace WebExpress.WebCore.WebPackage
                 }
 
                 var targetFile = Path.Combine(_httpServerContext?.PackagePath, safeFileName);
-                File.Copy(tmpFile, targetFile, true);
+                File.Move(tmpFile, targetFile, true);
 
                 return InstallPackage(targetFile, activate, maxPackageBytes, expectedSha256);
             }
@@ -603,7 +654,19 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>The operation result.</returns>
         public PackageOperationResult InstallPackage(string packageFile, bool activate = true, long maxPackageBytes = 0, string expectedSha256 = null)
         {
-            lock (_scanLock)
+            return Coordinate(() => InstallPackageCore(packageFile, activate, maxPackageBytes, expectedSha256));
+        }
+
+        /// <summary>
+        /// Installs a package from a file, with the catalog already coordinated.
+        /// </summary>
+        /// <param name="packageFile">The package file path.</param>
+        /// <param name="activate">True to activate directly after install; false to keep it disabled.</param>
+        /// <param name="maxPackageBytes">Optional max allowed package size in bytes. 0 disables the limit check.</param>
+        /// <param name="expectedSha256">Optional expected SHA-256 hash in hex format.</param>
+        /// <returns>The operation result.</returns>
+        private PackageOperationResult InstallPackageCore(string packageFile, bool activate, long maxPackageBytes, string expectedSha256)
+        {
             {
                 var validation = ValidatePackage(packageFile, maxPackageBytes, expectedSha256);
                 if (!validation.IsValid)
@@ -655,7 +718,7 @@ namespace WebExpress.WebCore.WebPackage
                     return PackageOperationResult.Ok($"Package '{existing.Id}' installed (disabled).", existing);
                 }
 
-                var activateResult = ActivatePackage(existing.Id);
+                var activateResult = ActivatePackageCore(existing.Id);
                 return activateResult.Success
                     ? PackageOperationResult.Ok($"Package '{existing.Id}' installed and activated.", existing)
                     : activateResult;
@@ -669,7 +732,16 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>The operation result.</returns>
         public PackageOperationResult ActivatePackage(string packageId)
         {
-            lock (_scanLock)
+            return Coordinate(() => ActivatePackageCore(packageId));
+        }
+
+        /// <summary>
+        /// Activates a package, with the catalog already coordinated.
+        /// </summary>
+        /// <param name="packageId">The package id.</param>
+        /// <returns>The operation result.</returns>
+        private PackageOperationResult ActivatePackageCore(string packageId)
+        {
             {
                 var package = GetPackage(packageId);
                 if (package is null)
@@ -718,7 +790,16 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>The operation result.</returns>
         public PackageOperationResult DeactivatePackage(string packageId)
         {
-            lock (_scanLock)
+            return Coordinate(() => DeactivatePackageCore(packageId));
+        }
+
+        /// <summary>
+        /// Deactivates a package, with the catalog already coordinated.
+        /// </summary>
+        /// <param name="packageId">The package id.</param>
+        /// <returns>The operation result.</returns>
+        private PackageOperationResult DeactivatePackageCore(string packageId)
+        {
             {
                 var package = GetPackage(packageId);
                 if (package is null)
@@ -781,7 +862,16 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>The operation result.</returns>
         public PackageOperationResult UninstallPackage(string packageId)
         {
-            lock (_scanLock)
+            return Coordinate(() => UninstallPackageCore(packageId));
+        }
+
+        /// <summary>
+        /// Uninstalls and removes a package, with the catalog already coordinated.
+        /// </summary>
+        /// <param name="packageId">The package id.</param>
+        /// <returns>The operation result.</returns>
+        private PackageOperationResult UninstallPackageCore(string packageId)
+        {
             {
                 var package = GetPackage(packageId);
                 if (package is null)
@@ -864,7 +954,9 @@ namespace WebExpress.WebCore.WebPackage
             var catalogeFile = Path.Combine(_httpServerContext?.PackagePath, "catalog.xml");
             if (File.Exists(catalogeFile))
             {
-                using var catalog = new StreamReader(catalogeFile);
+                // shared for deletion, so another instance can replace the catalog meanwhile -
+                // windows refuses to rename over a file opened without it
+                using var catalog = new StreamReader(new FileStream(catalogeFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
 
                 if (catalog.BaseStream.Length == 0)
                 {
@@ -888,13 +980,40 @@ namespace WebExpress.WebCore.WebPackage
         private void SaveCatalog()
         {
             var catalogeFile = Path.Combine(_httpServerContext?.PackagePath, "catalog.xml");
+            var temporary = catalogeFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
 
-            using var fs = new FileStream(catalogeFile, FileMode.Create);
-            using var writer = new XmlTextWriter(fs, Encoding.Unicode);
-            var serializer = new XmlSerializer(typeof(PackageCatalog));
+            using (var fs = new FileStream(temporary, FileMode.CreateNew))
+            using (var writer = new XmlTextWriter(fs, Encoding.Unicode))
+            {
+                var serializer = new XmlSerializer(typeof(PackageCatalog));
 
-            writer.Formatting = Formatting.Indented;
-            serializer.Serialize(writer, Catalog, new XmlSerializerNamespaces([new XmlQualifiedName("", "")]));
+                writer.Formatting = Formatting.Indented;
+                serializer.Serialize(writer, Catalog, new XmlSerializerNamespaces([new XmlQualifiedName("", "")]));
+            }
+
+            try
+            {
+                for (var attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        File.Move(temporary, catalogeFile, true);
+                        break;
+                    }
+                    catch (Exception ex) when (attempt < 5 && ex is IOException or UnauthorizedAccessException)
+                    {
+                        // another instance replacing or reading the catalog holds it for a moment
+                        Thread.Sleep(20 << attempt);
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(temporary))
+                {
+                    File.Delete(temporary);
+                }
+            }
 
             _httpServerContext?.Log?.Debug
             (
@@ -914,7 +1033,7 @@ namespace WebExpress.WebCore.WebPackage
             {
                 using var zip = ZipFile.Open(packageFile, ZipArchiveMode.Read);
 
-                var extractedPath = Path.Combine(_httpServerContext?.PackagePath, Path.GetFileNameWithoutExtension(package?.File));
+                var extractedPath = Path.Combine(ExtractionRoot, Path.GetFileNameWithoutExtension(package?.File));
                 var extractedPathFull = Path.GetFullPath(extractedPath);
 
                 if (!Directory.Exists(extractedPath))
@@ -1061,8 +1180,22 @@ namespace WebExpress.WebCore.WebPackage
                 return false;
             }
 
-            Directory.CreateDirectory(settingsPath);
-            File.WriteAllBytes(targetFilePath, content);
+            try
+            {
+                Directory.CreateDirectory(settingsPath);
+
+                // create-new, so of several instances deploying the same package only one writes
+                using var target = new FileStream(targetFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                target.Write(content);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // a settings directory mounted read-only (a config map) or an instance that wrote
+                // the file first; either way the package boots with what the directory holds
+                _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.settings.unwritable", segments[1], ex.Message));
+
+                return false;
+            }
 
             _httpServerContext?.Log?.Info(I18N.Translate("webexpress.webcore:packagemanager.settings.deployed", segments[1]));
 
@@ -1146,7 +1279,7 @@ namespace WebExpress.WebCore.WebPackage
         {
             return Path.GetFullPath(Path.Combine
             (
-                _httpServerContext?.PackagePath,
+                ExtractionRoot,
                 Path.GetFileNameWithoutExtension(package?.File), plugin, GetTFM(), $"{Path.GetFileName(plugin)}.dll"
             ));
         }
@@ -1299,7 +1432,7 @@ namespace WebExpress.WebCore.WebPackage
         /// <param name="package">The package.</param>
         private void RemoveExtractedDirectory(PackageCatalogItem package)
         {
-            var extractedPath = Path.Combine(_httpServerContext?.PackagePath, Path.GetFileNameWithoutExtension(package?.File));
+            var extractedPath = Path.Combine(ExtractionRoot, Path.GetFileNameWithoutExtension(package?.File));
             try
             {
                 if (Directory.Exists(extractedPath))
@@ -1550,7 +1683,137 @@ namespace WebExpress.WebCore.WebPackage
         /// </summary>
         public void Dispose()
         {
+            _clusterSubscription?.Dispose();
             ShutDown();
+        }
+
+        /// <summary>
+        /// Returns the cluster manager while several instances share the package directory, or
+        /// null for a single instance.
+        /// </summary>
+        private IClusterManager Cluster => _componentHub?.ClusterManager is { IsClustered: true } cluster ? cluster : null;
+
+        /// <summary>
+        /// Returns the directory packages are extracted to. A single instance extracts next to the
+        /// packages. Instances of a cluster share the package directory, so each extracts into a
+        /// directory of its own: several instances extracting into one directory would overwrite
+        /// assemblies another instance has loaded, and removing a package on one instance would
+        /// pull them from under the others. Decided once, before the first package is extracted.
+        /// </summary>
+        private string ExtractionRoot => _extractionRoot ??= Cluster is { } cluster
+            ? Path.Combine(Path.GetTempPath(), "webexpress", "packages", string.Concat(cluster.NodeId.Select(x => char.IsLetterOrDigit(x) || x is '-' or '.' ? x : '_')))
+            : _httpServerContext?.PackagePath;
+
+        /// <summary>
+        /// Runs a change of the package set so that no other instance changes the shared catalog
+        /// at the same time, and announces it to the other instances afterwards.
+        /// </summary>
+        /// <param name="operation">The change.</param>
+        /// <returns>The result of the change.</returns>
+        private PackageOperationResult Coordinate(Func<PackageOperationResult> operation)
+        {
+            lock (_scanLock)
+            {
+                var cluster = Cluster;
+
+                if (cluster is null)
+                {
+                    return operation();
+                }
+
+                using var coordination = cluster.Lock(ClusterLock, ClusterLockLifetime, ClusterLockTimeout);
+
+                if (coordination is null)
+                {
+                    return PackageOperationResult.Failed(I18N.Translate("webexpress.webcore:packagemanager.cluster.busy"));
+                }
+
+                // the change builds on what the other instances decided so far, not on this
+                // instance's possibly older view
+                if (AdoptSharedStates(ReadSharedStates()))
+                {
+                    _componentHub?.SitemapManager.Refresh();
+                }
+
+                var result = operation();
+
+                if (result.Success)
+                {
+                    _ = cluster.PublishAsync(ClusterTopic, []);
+                }
+
+                return result;
+            }
+        }
+
+        /// <summary>
+        /// Reads the package states other instances recorded in the shared catalog.
+        /// </summary>
+        /// <returns>The state of each package file, empty when there is no catalog yet.</returns>
+        private Dictionary<string, PackageCatalogItemState> ReadSharedStates()
+        {
+            var states = new Dictionary<string, PackageCatalogItemState>(StringComparer.OrdinalIgnoreCase);
+            var catalogeFile = Path.Combine(_httpServerContext?.PackagePath, "catalog.xml");
+
+            try
+            {
+                using var stream = new FileStream(catalogeFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+                if (stream.Length == 0)
+                {
+                    return states;
+                }
+
+                var catalog = (PackageCatalog)new XmlSerializer(typeof(PackageCatalog)).Deserialize(stream);
+
+                foreach (var item in catalog?.Packages?.Where(x => x?.File is not null) ?? [])
+                {
+                    states[item.File] = item.State;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                // no catalog yet, or one being replaced; the next scan reads it again
+            }
+
+            return states;
+        }
+
+        /// <summary>
+        /// Brings the packages of this instance in line with the states another instance recorded:
+        /// a package deactivated there is unloaded here, one activated there is loaded here.
+        /// </summary>
+        /// <param name="shared">The recorded states.</param>
+        /// <returns>True when a package changed state.</returns>
+        private bool AdoptSharedStates(Dictionary<string, PackageCatalogItemState> shared)
+        {
+            var changed = false;
+
+            foreach (var package in Catalog.Packages.Where(x => x?.File is not null).ToList())
+            {
+                if (!shared.TryGetValue(package.File, out var state) || state == package.State)
+                {
+                    continue;
+                }
+
+                if (state == PackageCatalogItemState.Disable)
+                {
+                    DeactivateAndUnregisterPackage(package);
+                    RemoveExtractedDirectory(package);
+                    package.State = PackageCatalogItemState.Disable;
+                    changed = true;
+                }
+                else if (state == PackageCatalogItemState.Active && !GetUnfulfilledPackageDependencies(package).Any())
+                {
+                    ExtractPackage(package);
+                    RegisterPackage(package);
+                    BootPackage(package);
+                    package.State = PackageCatalogItemState.Active;
+                    changed = true;
+                }
+            }
+
+            return changed;
         }
     }
 }

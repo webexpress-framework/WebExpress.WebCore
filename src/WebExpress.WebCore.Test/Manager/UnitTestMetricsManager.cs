@@ -326,6 +326,27 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Reports how far the clock of each cluster instance that sent a message runs ahead, so
+        /// an alert can catch clocks drifting apart before deadlines and messages suffer.
+        /// </summary>
+        /// <returns>A task that completes after the scrape has been validated.</returns>
+        [Fact]
+        public async Task CollectAsync_ClusterPeer_ReportsClockSkew()
+        {
+            // arrange
+            var hub = UnitTestFixture.CreateComponentHubMock();
+            using var manager = hub.MetricsManager;
+            ((WebCluster.ClusterManager)hub.ClusterManager).MeasureClock(new WebCluster.ClusterMessage("t", "pod-2", [], DateTimeOffset.UtcNow.AddSeconds(30)));
+
+            // act
+            var scrape = await ScrapeAsync(manager);
+
+            // validation
+            Assert.Contains("# TYPE webexpress_cluster_clock_skew_seconds gauge\n", scrape);
+            Assert.Contains("webexpress_cluster_clock_skew_seconds{peer=\"pod-2\"} 29.", scrape);
+        }
+
+        /// <summary>
         /// Counts identities seen within the window once each and forgets those outside it.
         /// </summary>
         /// <returns>A task that completes after the active user gauge has been validated.</returns>

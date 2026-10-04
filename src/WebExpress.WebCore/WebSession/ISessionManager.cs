@@ -47,6 +47,14 @@ namespace WebExpress.WebCore.WebSession
         Guid RegenerateId(Session session);
 
         /// <summary>
+        /// Writes a session back once the request that used it is answered. A single instance
+        /// keeps sessions in memory and writes nothing; in a cluster the session is stored where
+        /// every instance finds it, so the next request may land on any of them.
+        /// </summary>
+        /// <param name="session">The session.</param>
+        void Commit(Session session);
+
+        /// <summary>
         /// Cleans up expired sessions from the session manager based on the specified session timeout.
         /// </summary>
         /// <remarks>

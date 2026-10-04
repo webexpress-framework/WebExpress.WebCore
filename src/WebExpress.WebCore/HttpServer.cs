@@ -23,6 +23,7 @@ using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebCertificate;
+using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebHealth;
 using WebExpress.WebCore.WebIdentity;
@@ -32,6 +33,7 @@ using WebExpress.WebCore.WebMetrics;
 using WebExpress.WebCore.WebMetrics.Model;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebParameter;
+using WebExpress.WebCore.WebSession.Model;
 using WebExpress.WebCore.WebSetting;
 using WebExpress.WebCore.WebSitemap;
 using WebExpress.WebCore.WebSocket;
@@ -50,6 +52,10 @@ namespace WebExpress.WebCore
         private SecurityHeaders _securityHeaders;
         private volatile bool _isRunning;
         private volatile bool _isStopping;
+
+        // set while the server still serves but already reports itself unready, so the load
+        // balancer stops routing to it before the listener closes
+        private volatile bool _isDraining;
         private readonly Lock _stopLock = new();
         private Task _stopTask;
 
@@ -221,6 +227,7 @@ namespace WebExpress.WebCore
         {
             var settings = Settings ?? new HttpServerSettings { Endpoints = HttpServerContext.Endpoints?.ToList() ?? [] };
             settings.ValidateShutdown();
+            settings.ValidateCluster();
             // a start can be retried, and the list must describe only this attempt's listeners
             _listeningEndpoints.Clear();
             HttpServerContext.CertificateManager.Load(settings);
@@ -312,6 +319,11 @@ namespace WebExpress.WebCore
             foreach (var endpoint in settings.Endpoints ?? [])
             {
                 AddEndpoint(serverOptions, endpoint, protocols);
+            }
+
+            if (settings.Cluster?.GetListenPort() is not null)
+            {
+                AddEndpoint(serverOptions, new EndpointSettings { Uri = settings.Cluster.Listen }, protocols);
             }
 
             Kestrel = _webHost.Services.GetRequiredService<IServer>();
@@ -495,9 +507,24 @@ namespace WebExpress.WebCore
         /// <returns>A task that completes after draining and releasing transport resources.</returns>
         private async Task StopCoreAsync(CancellationToken cancellationToken)
         {
+            var settings = Settings ?? new HttpServerSettings();
+
+            if (settings.ShutdownDelaySeconds > 0)
+            {
+                _isDraining = true;
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(settings.ShutdownDelaySeconds), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // the host wants the server down sooner; the drain budget below still applies
+                }
+            }
+
             _isStopping = true;
             _isRunning = false;
-            var settings = Settings ?? new HttpServerSettings();
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             if (settings.Shutdown == ShutdownMode.Graceful)
             {
@@ -724,12 +751,26 @@ namespace WebExpress.WebCore
                 return;
             }
 
+            if (CreateSessionCookie(request, session) is { } cookie)
+            {
+                cookies.Add(cookie);
+            }
+        }
+
+        /// <summary>
+        /// Builds the session cookie for a request whose cookie does not name its session yet.
+        /// </summary>
+        /// <param name="request">The request.</param>
+        /// <param name="session">The session the request belongs to.</param>
+        /// <returns>The cookie to send, or null when the client already holds the id.</returns>
+        private Cookie CreateSessionCookie(IRequest request, Session session)
+        {
             var sent = request.Header?.Cookies?
                 .FirstOrDefault(x => x.Name.Equals("session", StringComparison.OrdinalIgnoreCase));
 
             if (Guid.TryParse(sent?.Value, out var sentId) && sentId == session.Id)
             {
-                return;
+                return null;
             }
 
             // secure tracks the request scheme by default; a deployment behind a tls proxy that
@@ -752,7 +793,54 @@ namespace WebExpress.WebCore
                 cookie.Expires = DateTime.Now + timeout;
             }
 
-            cookies.Add(cookie);
+            return cookie;
+        }
+
+        /// <summary>
+        /// Binds a websocket handshake to a session the browser keeps.
+        /// </summary>
+        /// <remarks>
+        /// A socket belongs to the session of its handshake, and session-addressed messages - a
+        /// notification for one user - reach exactly the sockets of that session. A page shown to
+        /// a visitor without a session cookie creates no session, so the handshake is the first
+        /// request that needs one; unless its id travels back with the 101 response, the browser
+        /// stays without cookie, its next request opens a second session and nothing addressed to
+        /// that session ever reaches the socket. The socket itself is created only after the
+        /// response has gone out, which is why the session is resolved here, before the upgrade.
+        /// </remarks>
+        /// <param name="httpContext">The handshake.</param>
+        internal void BindSocketSession(IHttpContext httpContext)
+        {
+            if (httpContext.Request is not RequestBase request || request.Session is not { } session)
+            {
+                return;
+            }
+
+            if (CreateSessionCookie(request, session) is { } cookie && httpContext.Features.Get<IHttpResponseFeature>() is { } response)
+            {
+                Microsoft.AspNetCore.Http.HeaderDictionaryExtensions.Append(response.Headers, "Set-Cookie",
+                    ResponseSender.SerializeSetCookie(cookie, SecurityHeaders.CookieSameSite));
+            }
+
+            // in a cluster the next request may reach another instance, which must find the session
+            CommitSession(request);
+        }
+
+        /// <summary>
+        /// Writes the session of a request back to the cluster store once the request is answered.
+        /// </summary>
+        /// <remarks>
+        /// Handlers change session properties in place, so the end of the request is the only
+        /// moment the final state is known. A request that never touched its session has nothing
+        /// to write, and on a single instance the session lives in memory and nothing is written at all.
+        /// </remarks>
+        /// <param name="request">The request that was answered.</param>
+        private static void CommitSession(IRequest request)
+        {
+            if (request is RequestBase concrete && concrete.ExistingSession is { } session)
+            {
+                WebEx.ComponentHub?.SessionManager?.Commit(session);
+            }
         }
 
         /// <summary>
@@ -1085,6 +1173,28 @@ namespace WebExpress.WebCore
                     return;
                 }
 
+                var clusterPort = Settings?.Cluster?.GetListenPort();
+
+                if (clusterPort is not null && httpContext.Features.Get<IHttpConnectionFeature>()?.LocalPort == clusterPort)
+                {
+                    // the internal listener exposes the bus and nothing else, so opening its port to
+                    // the other instances never opens the applications along with it
+                    var response = ClusterBusEndpoint.Matches(httpContext) && WebEx.ComponentHub?.ClusterManager?.Transport is HttpClusterTransport internalTransport
+                        ? ClusterBusEndpoint.Handle(httpContext, internalTransport)
+                        : new ResponseNotFound();
+                    await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
+                    return;
+                }
+
+                if (_isDraining && HealthEndpoint.Matches(httpContext) && !HealthEndpoint.IsLiveness(httpContext))
+                {
+                    // unready, yet alive: a failing liveness probe would get the instance killed
+                    // before the requests still routed to it are answered
+                    var unready = HealthEndpoint.CreateResponse(false, httpContext.Features.Get<IHttpRequestFeature>()?.Method == "HEAD");
+                    await new ResponseSender(SecurityHeaders).SendAsync(httpContext, unready);
+                    return;
+                }
+
                 if (HealthEndpoint.Matches(httpContext))
                 {
                     if (httpContext is HttpExceptionContext healthException)
@@ -1101,6 +1211,13 @@ namespace WebExpress.WebCore
                     var response = await HealthEndpoint.HandleAsync(httpContext.Request, WebEx.ComponentHub?.HealthManager,
                         HttpServerContext.Log, cancellationToken, HealthEndpoint.IsLiveness(httpContext));
                     await new ResponseSender(SecurityHeaders).SendAsync(httpContext, response);
+                    return;
+                }
+
+                // with an internal listener the public endpoints leave the bus path to the applications
+                if (clusterPort is null && ClusterBusEndpoint.Matches(httpContext) && WebEx.ComponentHub?.ClusterManager?.Transport is HttpClusterTransport clusterTransport)
+                {
+                    await new ResponseSender(SecurityHeaders).SendAsync(httpContext, ClusterBusEndpoint.Handle(httpContext, clusterTransport));
                     return;
                 }
 
@@ -1247,6 +1364,7 @@ namespace WebExpress.WebCore
             async Task SendAsync(IHttpContext context, IResponse response)
             {
                 IssueSessionCookie(context?.Request, response);
+                CommitSession(context?.Request);
                 WebEx.ComponentHub.IdentityManager.ApplyAuthenticationCookies(context?.Request, response);
                 stopwatch.Stop();
                 UpdateStatistics(response, stopwatch.ElapsedMilliseconds);
@@ -1384,6 +1502,7 @@ namespace WebExpress.WebCore
 
             try
             {
+                BindSocketSession(httpContext);
                 await socketManager.HandleConnectionAsync(httpContext, socketContext);
             }
             catch (SocketHandshakeException)

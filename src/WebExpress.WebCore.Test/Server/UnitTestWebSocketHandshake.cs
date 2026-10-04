@@ -76,6 +76,42 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
+        /// Verifies that a handshake without session cookie returns the id of the session the socket
+        /// is bound to, so the page's later requests share it and session-scoped notifications reach
+        /// the socket, while a handshake that already carries the id gets no second cookie.
+        /// </summary>
+        [Fact]
+        public void BindSocketSession_WithoutCookie_IssuesTheSocketSession()
+        {
+            // arrange
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock()) { Settings = new HttpServerSettings() };
+            using var hub = UnitTestFixture.CreateAndRegisterComponentHubMock(server.HttpServerContext);
+            var fresh = UnitTestFixture.CreateHttpContextMock("GET /ws HTTP/1.1\r\nCookie: \r\n\r\n");
+            fresh.Features.Set<IHttpResponseFeature>(new HttpResponseFeature());
+
+            // act
+            server.BindSocketSession(fresh);
+
+            // validation
+            var issued = fresh.Features.Get<IHttpResponseFeature>().Headers.SetCookie.ToString();
+            var session = ((RequestBase)fresh.Request).ExistingSession;
+            Assert.NotNull(session);
+            Assert.StartsWith($"session={session.Id};", issued);
+            Assert.Contains("HttpOnly", issued);
+
+            // arrange: the browser now sends the cookie it received
+            var returning = UnitTestFixture.CreateHttpContextMock($"GET /ws HTTP/1.1\r\nCookie: session={session.Id}\r\n\r\n");
+            returning.Features.Set<IHttpResponseFeature>(new HttpResponseFeature());
+
+            // act
+            server.BindSocketSession(returning);
+
+            // validation
+            Assert.Equal(session.Id, ((RequestBase)returning.Request).ExistingSession.Id);
+            Assert.Empty(returning.Features.Get<IHttpResponseFeature>().Headers.SetCookie.ToString());
+        }
+
+        /// <summary>
         /// Verifies a real upgrade with a public Host and Origin while Kestrel listens on another port.
         /// </summary>
         /// <returns>A task that completes after the public URI and WebSocket handshake have been verified.</returns>

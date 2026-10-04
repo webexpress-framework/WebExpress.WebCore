@@ -39,5 +39,10 @@ namespace WebExpress.WebCore.WebJob
         /// Gets the cron-object.
         /// </summary>
         public Cron Cron { get; internal set; }
+
+        /// <summary>
+        /// Gets where the job runs when several instances form a cluster.
+        /// </summary>
+        public JobScope Scope { get; internal set; }
     }
 }

@@ -36,6 +36,11 @@ namespace WebExpress.WebCore.WebJob
         public int Weekday => (int)_dateTime.DayOfWeek;
 
         /// <summary>
+        /// Returns the minute the clock stands at, which names a due time across instances.
+        /// </summary>
+        internal DateTime Moment => _dateTime;
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         public Clock()

@@ -7,6 +7,7 @@ namespace WebExpress.WebCore.Test
     /// A dummy job for testing purposes.
     /// </summary>
     [Job("50", "8", "31", "1-2", "Saturday")]
+    [JobScope(JobScope.Node)]
     public sealed class TestJobA : IJob
     {
         /// <summary>

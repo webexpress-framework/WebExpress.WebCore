@@ -1,9 +1,12 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Text.Json.Nodes;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
+using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebSession.Model;
@@ -23,7 +26,32 @@ namespace WebExpress.WebCore.WebSession
         /// </summary>
         public static readonly TimeSpan DefaultTimeout = TimeSpan.FromDays(30);
 
+        /// <summary>
+        /// The scope sessions are kept under in the cluster store.
+        /// </summary>
+        internal const string StoreScope = "session";
+
+        /// <summary>
+        /// How often a session that is only read gets its idle deadline renewed in the cluster
+        /// store. Renewing on every request would turn every page view into a write to shared
+        /// storage; a minute of drift is nothing against an idle window of hours or days.
+        /// </summary>
+        internal static readonly TimeSpan RenewInterval = TimeSpan.FromMinutes(1);
+
+        // a disabled timeout still needs a bound in a shared store, or abandoned sessions would
+        // accumulate there forever
+        private static readonly TimeSpan UnboundedLifetime = TimeSpan.FromDays(365);
+
+        // a commit holds the lock of its session for a read and a write; the lifetime only matters
+        // for an instance that dies in between, the timeout for one that is slow
+        private static readonly TimeSpan CommitLockLifetime = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan CommitLockTimeout = TimeSpan.FromSeconds(2);
+
+        // every unserializable property type is reported once, not on every request
+        private static readonly ConcurrentDictionary<Type, bool> _unserializable = new();
+
         private readonly IHttpServerContext _httpServerContext;
+        private readonly IComponentHub _componentHub;
         private readonly SessionDictionary _dictionary = [];
 
         // guards every read of and write to _dictionary. A plain Dictionary is not safe for a
@@ -46,6 +74,11 @@ namespace WebExpress.WebCore.WebSession
         {
             get
             {
+                if (SharedStore is { } store)
+                {
+                    return store.Count(StoreScope);
+                }
+
                 lock (_sync)
                 {
                     return _dictionary.Count;
@@ -56,11 +89,13 @@ namespace WebExpress.WebCore.WebSession
         /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
+        /// <param name="componentHub">The component hub providing the cluster store.</param>
         /// <param name="context">The reference to the context of the host.</param>
         [SuppressMessage("CodeQuality", "IDE0051:Remove unused private members", Justification = "Used via Reflection.")]
-        private SessionManager(IHttpServerContext context)
+        private SessionManager(IComponentHub componentHub, IHttpServerContext context)
         {
             _httpServerContext = context;
+            _componentHub = componentHub;
 
             _httpServerContext?.Log?.Debug
             (
@@ -101,6 +136,19 @@ namespace WebExpress.WebCore.WebSession
 
             var hasId = Guid.TryParse(sessionCookie?.Value, out var id);
             var now = DateTime.Now;
+
+            if (SharedStore is { } store)
+            {
+                // the store only knows ids this cluster issued, so fixation stays impossible
+                var shared = (hasId ? Load(store, id) : null) is { } loaded && !IsExpired(loaded, now)
+                    ? loaded
+                    : new Session();
+
+                shared.Updated = now;
+                if (request is RequestBase sharedRequest) { sharedRequest.ExistingSession = shared; }
+
+                return shared;
+            }
 
             lock (_sync)
             {
@@ -157,6 +205,20 @@ namespace WebExpress.WebCore.WebSession
 
             var id = Guid.NewGuid();
 
+            if (SharedStore is { } store)
+            {
+                store.Remove(StoreScope, session.Id.ToString());
+                session.Id = id;
+                session.Updated = DateTime.Now;
+
+                // written right away: the old id is gone, and a parallel request carrying the new
+                // cookie must find the session before this request has finished
+                session.PersistedFingerprint = null;
+                Commit(session);
+
+                return id;
+            }
+
             lock (_sync)
             {
                 _dictionary.Remove(session.Id);
@@ -199,7 +261,8 @@ namespace WebExpress.WebCore.WebSession
             var effectiveMinutes = timeoutMinutes > 0 ? timeoutMinutes : Timeout.TotalMinutes;
 
             // a non-positive effective timeout means "sessions never expire" => nothing to sweep
-            if (effectiveMinutes <= 0)
+            // a shared store expires its entries itself, for every instance at once
+            if (effectiveMinutes <= 0 || SharedStore is not null)
             {
                 return this;
             }
@@ -235,6 +298,120 @@ namespace WebExpress.WebCore.WebSession
             }
 
             return this;
+        }
+
+        /// <summary>
+        /// Writes a session to the cluster store when its properties changed, or when its idle
+        /// deadline is due for renewal.
+        /// </summary>
+        /// <param name="session">The session.</param>
+        public void Commit(Session session)
+        {
+            if (session is null || SharedStore is not { } store)
+            {
+                return;
+            }
+
+            var ours = SessionSerializer.Serialize(session, ReportUnserializable);
+            var now = DateTime.Now;
+
+            if (session.PersistedFingerprint is { } persisted
+                && persisted.AsSpan().SequenceEqual(ours.Fingerprint)
+                && now - session.PersistedAt < RenewInterval)
+            {
+                return;
+            }
+
+            var key = session.Id.ToString();
+
+            try
+            {
+                // read, merge and write must not interleave with another instance committing the
+                // same session; a lock not obtained in time still merges, with a small window left
+                using var guard = _componentHub?.ClusterManager?.Lock(StoreScope + "/" + key, CommitLockLifetime, CommitLockTimeout);
+
+                var properties = ours.Properties;
+
+                // another request of the same session may have written it on another instance
+                // since this one read it; its changes are merged in instead of overwritten
+                if (store.Get(StoreScope, key) is { } stored
+                    && SessionSerializer.ReadProperties(stored) is { } theirs
+                    && !JsonNode.DeepEquals(theirs, session.LoadedProperties))
+                {
+                    properties = SessionMerge.Merge(session.LoadedProperties, ours.Properties, theirs) as JsonObject ?? ours.Properties;
+                }
+
+                store.Set(StoreScope, key, SessionSerializer.Compose(session, properties), Timeout > TimeSpan.Zero ? Timeout : UnboundedLifetime);
+                session.PersistedFingerprint = ours.Fingerprint;
+                session.LoadedProperties = ours.Properties;
+                session.PersistedAt = now;
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                // the response is already decided; the session keeps its previously stored state
+                _httpServerContext?.Log?.Exception(ex);
+            }
+        }
+
+        /// <summary>
+        /// Returns the cluster store when other instances share it, or null while sessions stay
+        /// in this process.
+        /// </summary>
+        private IClusterStore SharedStore => _componentHub?.ClusterManager?.Store is { IsShared: true } store ? store : null;
+
+        /// <summary>
+        /// Reads a session from the cluster store.
+        /// </summary>
+        /// <param name="store">The cluster store.</param>
+        /// <param name="id">The session id from the cookie.</param>
+        /// <returns>The session, or null when the store does not know the id.</returns>
+        private Session Load(IClusterStore store, Guid id)
+        {
+            var content = store.Get(StoreScope, id.ToString());
+
+            if (content is null)
+            {
+                return null;
+            }
+
+            var loaded = SessionSerializer.Deserialize(content, type => _httpServerContext?.Log?.Debug
+            (
+                I18N.Translate("webexpress.webcore:sessionmanager.cluster.dropped", type, id)
+            ));
+
+            // the stored id must be the looked-up one; anything else is not this session
+            if (loaded is not { } result || result.Session.Id != id)
+            {
+                return null;
+            }
+
+            // the base of a later merge is what this instance could recreate: a property dropped
+            // here is absent from base and change alike, so it survives for the instances knowing it
+            var session = result.Session;
+            var own = SessionSerializer.Serialize(session);
+
+            session.PersistedFingerprint = own.Fingerprint;
+            session.LoadedProperties = own.Properties;
+            session.PersistedAt = session.Updated;
+
+            return session;
+        }
+
+        /// <summary>
+        /// Reports a session property that cannot travel to the other instances. It still works
+        /// on this instance, which is why it is a warning and not an error.
+        /// </summary>
+        /// <param name="type">The property type.</param>
+        /// <param name="ex">The cause.</param>
+        private void ReportUnserializable(Type type, Exception ex)
+        {
+            if (_unserializable.TryAdd(type, true))
+            {
+                _httpServerContext?.Log?.Warning
+                (
+                    I18N.Translate("webexpress.webcore:sessionmanager.cluster.unserializable", type.FullName, ex.Message)
+                );
+            }
         }
 
         /// <summary>
