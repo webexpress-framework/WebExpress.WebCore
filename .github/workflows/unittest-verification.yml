@@ -31,7 +31,7 @@ jobs:
       - name: Run xUnit tests
         id: tests
         continue-on-error: true
-        run: dotnet test ./WebExpress.WebCore.Test/WebExpress.WebCore.Test.csproj --no-build --configuration Release -- --report-trx --results-directory ./TestResults
+        run: dotnet test --project ./WebExpress.WebCore.Test/WebExpress.WebCore.Test.csproj --no-build --configuration Release --report-trx --results-directory ./TestResults
 
       - name: Print failing tests on failure
         if: steps.tests.outcome == 'failure'

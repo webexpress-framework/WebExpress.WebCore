@@ -8,7 +8,6 @@
 		<IsPackable>false</IsPackable>
 		<IsTestProject>true</IsTestProject>
 		<OutputType>Exe</OutputType>
-		<TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
 		<Configurations>Debug;Release;DebugLocal</Configurations>
 	</PropertyGroup>
 
