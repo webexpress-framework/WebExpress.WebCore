@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -12,8 +13,8 @@ namespace WebExpress.WebCore.WebCluster
     /// <summary>
     /// Keeps the cluster state in a directory every instance mounts, so a cluster needs no service
     /// beyond the shared volume it often has anyway. The file system has to support atomic
-    /// renames and a rename that refuses to replace an existing file, which local disks, NFS,
-    /// SMB and the usual ReadWriteMany volumes do.
+    /// renames and, on unix, hard links for the claims that must not replace an existing file,
+    /// which local disks, NFS and the usual ReadWriteMany volumes do.
     /// </summary>
     /// <remarks>
     /// Every entry is one file named after the hash of its key, so a key can never reach outside
@@ -35,6 +36,9 @@ namespace WebExpress.WebCore.WebCluster
 
         // a temporary file this old belongs to a writer that died between write and rename
         private static readonly TimeSpan OrphanAge = TimeSpan.FromHours(1);
+
+        // errno of link() for a taken name; the same value on linux, macos and the bsds
+        private const int EEXIST = 17;
 
         private readonly string _directory;
         private readonly TimeProvider _clock;
@@ -134,19 +138,16 @@ namespace WebExpress.WebCore.WebCluster
                 // a handful of rounds covers an expired entry being swept or stolen concurrently
                 for (var attempt = 0; attempt < 4; attempt++)
                 {
-                    try
+                    if (TryPublish(temp, path))
                     {
-                        File.Move(temp, path, false);
                         ScheduleSweep();
 
                         return true;
                     }
-                    catch (IOException) when (File.Exists(path))
+
+                    if (!TryEvictExpired(path))
                     {
-                        if (!TryEvictExpired(path))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
 
@@ -312,7 +313,10 @@ namespace WebExpress.WebCore.WebCluster
                 // the rename caught a fresh entry published after the check; hand it back
                 try
                 {
-                    File.Move(stale, path, false);
+                    if (!TryPublish(stale, path))
+                    {
+                        TryDelete(stale);
+                    }
                 }
                 catch (IOException)
                 {
@@ -325,6 +329,50 @@ namespace WebExpress.WebCore.WebCluster
             TryDelete(stale);
 
             return true;
+        }
+
+        /// <summary>
+        /// Moves a finished file to its final name unless that name is taken, as one atomic step
+        /// - the primitive every claim of the store rests on.
+        /// </summary>
+        /// <remarks>
+        /// On unix .NET implements a move without replace as an existence check followed by a
+        /// rename, and the rename silently replaces a file another instance published in between.
+        /// A hard link fails atomically on an existing name instead, the classic exclusive create
+        /// that also holds on NFS. Windows refuses the replace within the move itself.
+        /// </remarks>
+        /// <param name="source">The finished file.</param>
+        /// <param name="target">The name to publish it under.</param>
+        /// <returns>True when the file was published; false when the name is taken.</returns>
+        private static bool TryPublish(string source, string target)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                if (Link(source, target) == 0)
+                {
+                    TryDelete(source);
+
+                    return true;
+                }
+
+                if (Marshal.GetLastPInvokeError() == EEXIST)
+                {
+                    return false;
+                }
+
+                // a volume without hard links (some smb mounts) only offers the racy move below
+            }
+
+            try
+            {
+                File.Move(source, target, false);
+
+                return true;
+            }
+            catch (IOException) when (File.Exists(target))
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -518,5 +566,14 @@ namespace WebExpress.WebCore.WebCluster
         /// </summary>
         [GeneratedRegex("^[a-z0-9][a-z0-9.-]{0,63}$")]
         private static partial Regex ScopePattern();
+
+        /// <summary>
+        /// Creates a hard link, failing when the new name already exists.
+        /// </summary>
+        /// <param name="existing">The file to link to.</param>
+        /// <param name="name">The new name.</param>
+        /// <returns>Zero on success; otherwise -1 with the error in errno.</returns>
+        [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+        private static extern int Link(string existing, string name);
     }
 }
