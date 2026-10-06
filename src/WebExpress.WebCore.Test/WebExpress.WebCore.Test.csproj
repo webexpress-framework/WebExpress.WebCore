@@ -8,7 +8,6 @@
 		<IsPackable>false</IsPackable>
 		<IsTestProject>true</IsTestProject>
 		<OutputType>Exe</OutputType>
-		<TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
 		<Configurations>Debug;Release;DebugLocal</Configurations>
 	</PropertyGroup>
 
@@ -38,9 +37,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
-		<PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="1.9.1" />
-		<PackageReference Include="xunit.v3" Version="3.2.2" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+		<PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1" />
+		<PackageReference Include="xunit.v3" Version="4.0.1" />
 	</ItemGroup>
 
 	<ItemGroup>

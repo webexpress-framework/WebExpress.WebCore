@@ -4,7 +4,7 @@
     /// Represents an attribute to schedule jobs based on specified time intervals.
     /// </summary>
     [System.AttributeUsage(System.AttributeTargets.Class)]
-    public class JobAttribute : System.Attribute
+    public class JobAttribute : System.Attribute, IJobAttribute
     {
         /// <summary>
         /// Initializes a new instance of the class.

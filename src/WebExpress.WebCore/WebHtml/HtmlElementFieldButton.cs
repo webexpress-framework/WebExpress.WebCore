@@ -5,7 +5,8 @@ using System.Text;
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a button element.
+    /// Renders an HTML <c>&lt;button&gt;</c> element — a clickable control used to submit a form or
+    /// trigger an action in the page.
     /// </summary>
     public class HtmlElementFieldButton : HtmlElement, IHtmlElementFormItem
     {

@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication.Model;
 using WebExpress.WebCore.WebAttribute;
@@ -24,6 +24,8 @@ namespace WebExpress.WebCore.WebApplication
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly ApplicationDictionary _dictionary = new();
+        private readonly Lock _failuresSync = new();
+        private readonly List<ApplicationFailure> _failures = [];
 
         /// <summary>
         /// An event that fires when an application is added.
@@ -36,9 +38,29 @@ namespace WebExpress.WebCore.WebApplication
         public event EventHandler<IApplicationContext> RemoveApplication;
 
         /// <summary>
+        /// An event that fires when the name or the icon of a registered application changed.
+        /// </summary>
+        public event EventHandler<IApplicationContext> UpdateApplication;
+
+        /// <summary>
         /// Gets the stored applications.
         /// </summary>
         public IEnumerable<IApplicationContext> Applications => _dictionary.All;
+
+        /// <summary>
+        /// Gets the declared applications whose constructor threw, for as long as their plugin is loaded.
+        /// </summary>
+        public IEnumerable<ApplicationFailure> FailedApplications
+        {
+            get
+            {
+                // health probes read this on request threads while plugins may be loading
+                lock (_failuresSync)
+                {
+                    return _failures.ToArray();
+                }
+            }
+        }
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -74,6 +96,9 @@ namespace WebExpress.WebCore.WebApplication
             }
 
             var assembly = pluginContext.Assembly;
+
+            // a plugin whose applications all failed is not in the dictionary and is evaluated afresh
+            DiscardFailures(pluginContext);
 
             foreach (var type in assembly.GetExportedTypes().Where
                 (
@@ -135,6 +160,7 @@ namespace WebExpress.WebCore.WebApplication
                     ApplicationId = id,
                     ApplicationName = name,
                     Description = description,
+                    ContextPath = contextPath,
                     AssetPath = Path.Combine(_httpServerContext?.AssetPath, assetPath),
                     DataPath = Path.Combine(_httpServerContext?.DataPath, dataPath),
                     Icon = RouteEndpoint.Combine(_httpServerContext?.Route, contextPath, icon),
@@ -142,20 +168,50 @@ namespace WebExpress.WebCore.WebApplication
                     DefaultThemeType = defaultThemeType
                 };
 
-                // create application
-                var applicationInstance = ComponentActivator.CreateInstance<IApplication, IApplicationContext>
-                (
-                    type,
-                    applicationContext,
-                    _httpServerContext,
-                    _componentHub
-                );
+                IApplication applicationInstance;
+
+                try
+                {
+                    applicationInstance = ComponentActivator.CreateInstance<IApplication, IApplicationContext>
+                    (
+                        type,
+                        applicationContext,
+                        _httpServerContext,
+                        _componentHub
+                    );
+                }
+                catch (Exception ex)
+                {
+                    // an escaping exception would also abort the plugin's remaining applications
+                    // and every later subscriber of the AddPlugin event, health discovery included
+                    var cause = ex is TargetInvocationException { InnerException: not null } ? ex.InnerException : ex;
+
+                    lock (_failuresSync)
+                    {
+                        _failures.Add(new ApplicationFailure
+                        {
+                            ApplicationId = id,
+                            PluginContext = pluginContext,
+                            Exception = cause
+                        });
+                    }
+
+                    _httpServerContext?.Log?.Error
+                    (
+                        I18N.Translate("webexpress.webcore:applicationmanager.application.failed", id)
+                    );
+                    _httpServerContext?.Log?.Exception(cause);
+
+                    continue;
+                }
 
                 if (_dictionary.AddApplication(pluginContext, new ApplicationItem()
                 {
                     ApplicationClass = type,
                     ApplicationContext = applicationContext,
-                    Application = applicationInstance
+                    Application = applicationInstance,
+                    DeclaredApplicationName = name,
+                    DeclaredIcon = icon
                 }))
                 {
                     _httpServerContext?.Log?.Debug
@@ -189,12 +245,56 @@ namespace WebExpress.WebCore.WebApplication
                 return;
             }
 
-            foreach (var applicationContext in _dictionary.RemoveApplications(pluginContext))
+            DiscardFailures(pluginContext);
+
+            foreach (var applicationItem in _dictionary.RemoveApplications(pluginContext))
             {
-                OnRemoveApplication(applicationContext);
+                // a still running Run() sees the cancellation before the instance goes away
+                applicationItem.CancellationTokenSource.Cancel();
+
+                // listeners such as the job manager release what they bound to the application
+                // while it is still intact
+                OnRemoveApplication(applicationItem.ApplicationContext);
+
+                Release(applicationItem);
             }
 
             Log();
+        }
+
+        /// <summary>
+        /// Disposes a removed application. It runs while its plugin is removed, before the plugin's
+        /// load context is unloaded, so an application cannot outlive its code with open handles or
+        /// background work. A failing application must not keep the remaining ones from being released.
+        /// </summary>
+        /// <param name="applicationItem">The entry of the removed application.</param>
+        private void Release(ApplicationItem applicationItem)
+        {
+            try
+            {
+                applicationItem.CancellationTokenSource.Cancel();
+                applicationItem.Application?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _httpServerContext?.Log?.Exception(ex);
+            }
+            finally
+            {
+                applicationItem.CancellationTokenSource.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Forgets the failed applications of a plugin, whose code is either gone or about to be evaluated again.
+        /// </summary>
+        /// <param name="pluginContext">The plugin that declares the failed applications.</param>
+        private void DiscardFailures(IPluginContext pluginContext)
+        {
+            lock (_failuresSync)
+            {
+                _failures.RemoveAll(x => x.PluginContext == pluginContext);
+            }
         }
 
         /// <summary>
@@ -270,6 +370,79 @@ namespace WebExpress.WebCore.WebApplication
         }
 
         /// <summary>
+        /// Replaces the display name of a registered application.
+        /// </summary>
+        /// <param name="applicationContext">The context of the application to rename.</param>
+        /// <param name="applicationName">The new name. A blank value restores the declared one.</param>
+        public void SetApplicationName(IApplicationContext applicationContext, string applicationName)
+        {
+            var item = _dictionary.GetApplicationItem(applicationContext);
+
+            if (item?.ApplicationContext is not ApplicationContext context)
+            {
+                return;
+            }
+
+            var name = string.IsNullOrWhiteSpace(applicationName)
+                ? item.DeclaredApplicationName
+                : applicationName;
+
+            if (context.ApplicationName == name)
+            {
+                return;
+            }
+
+            context.ApplicationName = name;
+
+            OnUpdateApplication(context);
+        }
+
+        /// <summary>
+        /// Replaces the icon of a registered application.
+        /// </summary>
+        /// <param name="applicationContext">The context of the application.</param>
+        /// <param name="icon">The new icon path, relative to the application. A blank value
+        /// restores the declared one.</param>
+        public void SetApplicationIcon(IApplicationContext applicationContext, string icon)
+        {
+            var item = _dictionary.GetApplicationItem(applicationContext);
+
+            if (item?.ApplicationContext is not ApplicationContext context)
+            {
+                return;
+            }
+
+            var path = string.IsNullOrWhiteSpace(icon) ? item.DeclaredIcon : icon;
+
+            // combined exactly as at registration, so a caller hands over the same relative path
+            // the [Icon] attribute would have carried and never has to assemble a route
+            var route = RouteEndpoint.Combine(_httpServerContext?.Route, context.ContextPath, path);
+
+            if (context.Icon?.ToString() == route?.ToString())
+            {
+                return;
+            }
+
+            context.Icon = route;
+
+            OnUpdateApplication(context);
+        }
+
+        /// <summary>
+        /// Raises the update event and logs the change.
+        /// </summary>
+        /// <param name="applicationContext">The context that changed.</param>
+        private void OnUpdateApplication(IApplicationContext applicationContext)
+        {
+            UpdateApplication?.Invoke(this, applicationContext);
+
+            _httpServerContext?.Log?.Debug
+            (
+                I18N.Translate("webexpress.webcore:applicationmanager.update", applicationContext.ApplicationId)
+            );
+        }
+
+        /// <summary>
         /// Boots the applications.
         /// </summary>
         /// <param name="pluginContext">The context of the plugin that contains the applications.</param>
@@ -301,9 +474,13 @@ namespace WebExpress.WebCore.WebApplication
             {
                 var token = applicationItem.CancellationTokenSource.Token;
 
-                // Run the application concurrently
-                Task.Run(() =>
+                _httpServerContext.Lifetime.TryRun(() =>
                 {
+                    if (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
                     _httpServerContext?.Log?.Debug
                     (
                         I18N.Translate
@@ -323,8 +500,7 @@ namespace WebExpress.WebCore.WebApplication
                         )
                     );
 
-                    token.ThrowIfCancellationRequested();
-                }, token);
+                });
             }
         }
 
@@ -413,6 +589,11 @@ namespace WebExpress.WebCore.WebApplication
         {
             _componentHub?.PluginManager?.AddPlugin -= OnAddPlugin;
             _componentHub?.PluginManager?.RemovePlugin -= OnRemovePlugin;
+
+            foreach (var context in _dictionary.All.ToArray())
+            {
+                Release(_dictionary.GetApplicationItem(context));
+            }
         }
     }
 }

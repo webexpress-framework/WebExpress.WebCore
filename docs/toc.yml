@@ -4,5 +4,7 @@
   href: api/
 - name: User Guide
   href: user-guide.md
+- name: Health Checks
+  href: https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#health-model
 - name: Tutorials
   href: tutorials.md

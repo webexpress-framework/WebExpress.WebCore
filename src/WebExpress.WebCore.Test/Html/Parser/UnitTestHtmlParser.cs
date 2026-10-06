@@ -486,15 +486,66 @@ namespace WebExpress.WebCore.Test.Html.Parser
         }
 
         /// <summary>
-        /// The kbd tag (standard HTML) maps to HtmlElementTextSemanticsKdb.
+        /// The kbd tag (standard HTML) maps to HtmlElementTextSemanticsKbd.
         /// </summary>
         [Fact]
-        public void KbdTag_MapsToKdbElement()
+        public void KbdTag_MapsToKbdElement()
         {
             var nodes = Parser.Parse("<kbd>Ctrl+C</kbd>");
-            var kbd = nodes.OfType<HtmlElementTextSemanticsKdb>().Single();
+            var kbd = nodes.OfType<HtmlElementTextSemanticsKbd>().Single();
 
             Assert.NotNull(kbd);
+        }
+
+        /// <summary>
+        /// Elements with content models keep their children instead of ending the parse at
+        /// their closing tag.
+        /// </summary>
+        [Theory]
+        [InlineData("<fieldset><legend>Address</legend></fieldset>")]
+        [InlineData("<audio><source src=\"a.ogg\"></audio>")]
+        [InlineData("<video><source src=\"a.mp4\"></video>")]
+        [InlineData("<canvas><p>fallback</p></canvas>")]
+        [InlineData("<map name=\"m\"><area href=\"/a\"></map>")]
+        [InlineData("<noscript><p>enable scripting</p></noscript>")]
+        public void ContainerElement_KeepsChildrenAndFollowingSibling(string markup)
+        {
+            var nodes = Parser.Parse(markup + "<p>after</p>");
+            var container = nodes.OfType<HtmlElement>().First();
+
+            Assert.Equal(2, nodes.Count());
+            Assert.Single(container.Elements);
+            Assert.IsType<HtmlElementTextContentP>(nodes.Last());
+        }
+
+        /// <summary>
+        /// Void elements are written back without a closing tag and leave their
+        /// following sibling outside.
+        /// </summary>
+        [Theory]
+        [InlineData("<embed src=\"a.swf\">", typeof(HtmlElementEmbeddedEmbed))]
+        [InlineData("<keygen name=\"k\">", typeof(HtmlElementFormKeygen))]
+        public void VoidElement_RoundTripsWithoutClosingTag(string markup, System.Type type)
+        {
+            var nodes = Parser.Parse(markup + "<p>after</p>");
+            var element = nodes.First();
+
+            Assert.IsType(type, element);
+            Assert.Empty(((HtmlElement)element).Elements);
+            Assert.DoesNotContain("</", element.ToString());
+        }
+
+        /// <summary>
+        /// A col inside a colgroup is written back as a void element.
+        /// </summary>
+        [Fact]
+        public void ColInColgroup_RoundTripsWithoutClosingTag()
+        {
+            var nodes = Parser.Parse("<colgroup><col span=\"2\"><col></colgroup>");
+            var colgroup = nodes.OfType<HtmlElementTableColgroup>().Single();
+
+            Assert.Equal(2, colgroup.Elements.OfType<HtmlElementTableCol>().Count());
+            Assert.DoesNotContain("</col>", colgroup.ToString());
         }
     }
 }

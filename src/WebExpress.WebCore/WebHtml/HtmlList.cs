@@ -4,7 +4,9 @@ using System.Text;
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// List of html elements.
+    /// An ordered group of HTML nodes that renders its children one after another without adding any
+    /// wrapping tag of its own (similar to a document fragment). Use it to return or pass around
+    /// several sibling nodes as a single unit.
     /// </summary>
     public class HtmlList : IHtmlNode
     {

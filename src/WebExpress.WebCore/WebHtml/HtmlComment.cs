@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents an HTML comment node.
+    /// A node that renders as an HTML comment (<c>&lt;!-- ... --&gt;</c>). Comments are written into
+    /// the page markup but are not displayed by the browser; useful for notes or markers in the output.
     /// </summary>
     public class HtmlComment : IHtmlNode
     {

@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a quote.
+    /// Renders an HTML <c>&lt;blockquote&gt;</c> element, used to mark a block of text that is quoted
+    /// from another source; browsers usually indent it to set it apart.
     /// </summary>
     public class HtmlElementTextContentBlockquote : HtmlElement, IHtmlElementTextContent
     {

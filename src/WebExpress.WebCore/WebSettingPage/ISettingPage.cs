@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebPage;
 namespace WebExpress.WebCore.WebSettingPage
 {
     /// <summary>
-    /// Defines the contract for a setting page resource.
+    /// An endpoint that renders a page in the application's settings area. Implement it to add a
+    /// configuration page; the framework places it within the settings navigation and renders it.
     /// </summary>
     public interface ISettingPage : ISettingPage<VisualTree>
     {

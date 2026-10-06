@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a list of commands.
+    /// Renders an HTML <c>&lt;menu&gt;</c> element, a list of commands or options presented to the user
+    /// (semantically a toolbar- or menu-style grouping of interactive items).
     /// </summary>
     public class HtmlElementInteractiveMenu : HtmlElement, IHtmlElementInteractive
     {

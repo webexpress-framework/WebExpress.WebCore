@@ -25,7 +25,7 @@ namespace WebExpress.WebCore.WebTheme.Model
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContext">The application context.</param>
         /// <param name="themeItem">The theme item.</param>
-        /// <returns>True if the theme item was added successfully, false if an element with the same status code already exists.</returns>
+        /// <returns>True if the theme item was added successfully, false if an element with the same key already exists.</returns>
         public bool AddThemeItem(IPluginContext pluginContext, IApplicationContext applicationContext, ThemeItem themeItem)
         {
             var type = themeItem.ThemeClass;

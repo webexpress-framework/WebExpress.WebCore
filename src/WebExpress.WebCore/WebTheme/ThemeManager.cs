@@ -7,7 +7,6 @@ using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
-using WebExpress.WebCore.WebIcon;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebPlugin;
 using WebExpress.WebCore.WebTheme.Model;
@@ -157,7 +156,6 @@ namespace WebExpress.WebCore.WebTheme
                 var description = default(string);
                 var mode = ThemeMode.Light;
                 var style = default(string);
-                var iconTheme = TypeIconTheme.Default;
 
                 foreach (var customAttribute in themeType.CustomAttributes
                     .Where(x => x.AttributeType.GetInterfaces().Contains(typeof(IThemeAttribute))))
@@ -189,17 +187,6 @@ namespace WebExpress.WebCore.WebTheme
                     {
                         style ??= customAttribute.ConstructorArguments.FirstOrDefault().Value?.ToString();
                     }
-                    else if (customAttribute.AttributeType == typeof(IconThemeAttribute))
-                    {
-                        try
-                        {
-                            iconTheme = Enum.Parse<TypeIconTheme>(customAttribute.ConstructorArguments.FirstOrDefault().Value?.ToString());
-                        }
-                        catch
-                        {
-                            iconTheme = TypeIconTheme.Default;
-                        }
-                    }
                 }
 
                 // assign the theme to existing applications
@@ -215,7 +202,6 @@ namespace WebExpress.WebCore.WebTheme
                         Image = image is not null ? RouteEndpoint.Combine(applicationContext.Route, image) : null,
                         ThemeMode = mode,
                         ThemeStyle = style is not null ? RouteEndpoint.Combine(applicationContext.Route, style) : null,
-                        IconTheme = iconTheme,
                     };
 
                     var themeItem = new ThemeItem()

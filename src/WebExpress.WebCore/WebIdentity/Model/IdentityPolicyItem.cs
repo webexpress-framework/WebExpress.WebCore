@@ -7,7 +7,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebIdentity.Model
 {
     /// <summary>
-    /// Represents an item in the identity policy.
+    /// Internal record the identity system keeps for one registered policy. It links the policy
+    /// class and its created instance to the plugin and application it belongs to, and lists the
+    /// permissions the policy requires.
     /// </summary>
     public class IdentityPolicyItem
     {

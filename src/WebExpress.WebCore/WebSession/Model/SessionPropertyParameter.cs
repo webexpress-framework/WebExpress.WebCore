@@ -4,7 +4,9 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebSession.Model
 {
     /// <summary>
-    /// Represents a session property with parameters.
+    /// A session property that remembers request parameters for the user's session. Parameters
+    /// stored here are re-applied to later requests (as session-scoped parameters), so values can
+    /// persist across page calls without being resent each time.
     /// </summary>
     public class SessionPropertyParameter : SessionProperty
     {

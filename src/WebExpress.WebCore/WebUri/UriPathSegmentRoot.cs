@@ -5,7 +5,8 @@ using WebExpress.WebCore.WebPage;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// Represents the root segment of a URI path.
+    /// The starting segment of every URI path — the leading <c>/</c> from which all other segments
+    /// branch. It is the entry point (id <c>ROOT</c>) of the path tree used for routing.
     /// </summary>
     public class UriPathSegmentRoot : IUriPathSegment
     {

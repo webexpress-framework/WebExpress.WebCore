@@ -136,6 +136,25 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Uses the configured public URI instead of the listener binding for absolute sitemap links.
+        /// </summary>
+        [Fact]
+        public void GetUriUsesExternalUri()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(externalUri: "https://www.example.com/");
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock(httpServerContext);
+            var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).FirstOrDefault();
+            componentHub.SitemapManager.Refresh();
+
+            // act
+            var uri = componentHub.SitemapManager.GetUri(typeof(TestResourceA), application);
+
+            // validation
+            Assert.Equal("https://www.example.com/server/appa/resources/testresourcea", uri?.ToString());
+        }
+
+        /// <summary>
         /// Test the get endpoint function of the sitemap.
         /// </summary>
         [Theory]

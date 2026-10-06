@@ -35,7 +35,8 @@ namespace WebExpress.WebCore.WebIdentity
         /// </param>
         /// <returns>
         /// An object that represents the response to the login dialog, including authentication results and any
-        /// relevant status information.
+        /// relevant status information. A provider that cannot handle the scenario returns <c>null</c>; the
+        /// identity manager then asks the next provider, and the server falls back to the status page.
         /// </returns>
         IResponse CreateAuthenticationPrompt(IRequest request, IPageContext initiator, IIdentity identity);
 
@@ -55,8 +56,9 @@ namespace WebExpress.WebCore.WebIdentity
         /// </param>
         /// <returns>
         /// A response representing the forbidden page if this provider can handle the forbidden
-        /// scenario; otherwise, <c>null</c>.
+        /// scenario; otherwise, <c>null</c>. When every provider returns <c>null</c>, the identity
+        /// manager reports no response and the server falls back to the status page.
         /// </returns>
-        IResponse CreateForbiddenPage(IRequest request, IPageContext initiator, IIdentity identity);
+        IResponse CreateForbiddenResponse(IRequest request, IPageContext initiator, IIdentity identity);
     }
 }

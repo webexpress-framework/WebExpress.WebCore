@@ -5,7 +5,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebJob
 {
     /// <summary>
-    /// Represents the context of a job.
+    /// Read-only descriptor of a registered job (a scheduled, recurring task), exposing the
+    /// application and plugin it belongs to, so the job manager can manage it without referencing
+    /// the job instance.
     /// </summary>
     public interface IJobContext : IContext
     {
@@ -20,13 +22,30 @@ namespace WebExpress.WebCore.WebJob
         IApplicationContext ApplicationContext { get; }
 
         /// <summary>
-        /// Gets the job id. 
+        /// Gets the job id.
         /// </summary>
         IComponentId JobId { get; }
+
+        /// <summary>
+        /// Gets the name of the job, which may be an internationalization key. Null when the
+        /// job declares none, in which case only the id identifies it.
+        /// </summary>
+        string JobName { get; }
+
+        /// <summary>
+        /// Gets the description of the job, which may be an internationalization key. It states
+        /// what the job does, because a schedule alone does not say why it runs.
+        /// </summary>
+        string Description { get; }
 
         /// <summary>
         /// Gets the cron-object.
         /// </summary>
         Cron Cron { get; }
+
+        /// <summary>
+        /// Gets where the job runs when several instances form a cluster.
+        /// </summary>
+        JobScope Scope { get; }
     }
 }

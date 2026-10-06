@@ -5,7 +5,9 @@ using WebExpress.WebCore.WebMessage;
 namespace WebExpress.WebCore.Internationalization
 {
     /// <summary>
-    /// The interface of the internationalization manager.
+    /// Contract for the translation registry. It looks up the text for a given key in a chosen (or
+    /// the default) language, so callers can display localized strings without knowing where the
+    /// translations come from.
     /// </summary>
     public interface IInternationalizationManager : IComponentManager
     {

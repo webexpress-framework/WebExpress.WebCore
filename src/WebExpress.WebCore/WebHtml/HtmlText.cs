@@ -3,7 +3,12 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a text.
+    /// A node that holds a piece of plain text placed between or inside HTML elements (a text node).
+    /// Use it to add textual content to the page; for ready-made markup use <see cref="HtmlRaw"/> instead.
+    /// The value is written verbatim, not HTML-encoded: the parser stores text with its entity references
+    /// intact so a document round-trips unchanged, and callers that already encode would otherwise see
+    /// their text double-encoded. Untrusted input must therefore be encoded by the caller (for example
+    /// with <see cref="System.Net.WebUtility.HtmlEncode(string)"/>), otherwise it can inject markup.
     /// </summary>
     public class HtmlText : IHtmlNode
     {

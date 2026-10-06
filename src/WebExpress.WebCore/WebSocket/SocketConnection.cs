@@ -15,8 +15,10 @@ namespace WebExpress.WebCore.WebSocket
     {
         private readonly System.Net.WebSockets.WebSocket _socket;
         private readonly CancellationTokenSource _cts = new();
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
         private readonly int _bufferSize;
         private bool _disconnectRaised;
+        private static readonly TimeSpan _shutdownCloseTimeout = TimeSpan.FromSeconds(1);
 
         /// <summary>
         /// Raised when a text message is received.
@@ -50,7 +52,11 @@ namespace WebExpress.WebCore.WebSocket
             var options = new WebSocketCreationOptions()
             {
                 IsServer = true,
-                SubProtocol = socketContext.SupportedSubProtocol
+                // a socket without a declared subprotocol carries an empty string, which the
+                // options reject; the handshake negotiated none in that case
+                SubProtocol = string.IsNullOrWhiteSpace(socketContext.SupportedSubProtocol)
+                    ? null
+                    : socketContext.SupportedSubProtocol
             };
 
             _socket = System.Net.WebSockets.WebSocket.CreateFromStream(networkStream, options)
@@ -67,10 +73,9 @@ namespace WebExpress.WebCore.WebSocket
         /// <returns>
         /// A task that represents the asynchronous send operation.
         /// </returns>
-        public async Task SendTextAsync(string message, CancellationToken cancellation = default)
+        public Task SendTextAsync(string message, CancellationToken cancellation = default)
         {
-            var buffer = Encoding.UTF8.GetBytes(message);
-            await _socket.SendAsync(buffer, WebSocketMessageType.Text, true, cancellation);
+            return SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, cancellation);
         }
 
         /// <summary>
@@ -81,21 +86,50 @@ namespace WebExpress.WebCore.WebSocket
         /// <returns>
         /// A task that represents the asynchronous send operation.
         /// </returns>
-        public async Task SendBinaryAsync(byte[] data, CancellationToken cancellation = default)
+        public Task SendBinaryAsync(byte[] data, CancellationToken cancellation = default)
         {
-            await _socket.SendAsync(data, WebSocketMessageType.Binary, true, cancellation);
+            return SendAsync(data, WebSocketMessageType.Binary, cancellation);
+        }
+
+        /// <summary>
+        /// Writes one complete message to the socket. The <see cref="System.Net.WebSockets.WebSocket"/>
+        /// contract allows only one outstanding send at a time; the managed implementation happens
+        /// to queue a second one, but nothing guarantees that. Concurrent senders - a timer pushing
+        /// metrics while a handler answers a request on the same connection - are therefore queued
+        /// here, so a violated contract can never surface as a send failure that drops a healthy
+        /// connection as broken.
+        /// </summary>
+        /// <param name="data">The payload.</param>
+        /// <param name="messageType">The kind of message.</param>
+        /// <param name="cancellation">A token used to cancel the send operation, also while it waits for its turn.</param>
+        /// <returns>A task that represents the asynchronous send operation.</returns>
+        private async Task SendAsync(byte[] data, WebSocketMessageType messageType, CancellationToken cancellation)
+        {
+            await _sendLock.WaitAsync(cancellation).ConfigureAwait(false);
+
+            try
+            {
+                await _socket.SendAsync(data, messageType, true, cancellation).ConfigureAwait(false);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
         }
 
         /// <summary>
         /// Internal loop for receiving messages. Invokes the appropriate events for each message.
         /// </summary>
+        /// <param name="stopping">The host signal that closes idle connections during shutdown.</param>
         /// <returns>
         /// A task that represents the asynchronous receive loop.
         /// </returns>
-        internal async Task ReceiveLoopAsync()
+        internal async Task ReceiveLoopAsync(CancellationToken stopping = default)
         {
             var buffer = new byte[_bufferSize];
             using var builder = new MemoryStream();
+            var shutdown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = stopping.Register(() => shutdown.TrySetResult());
 
             while (_socket.State == WebSocketState.Open && !_cts.IsCancellationRequested)
             {
@@ -103,7 +137,23 @@ namespace WebExpress.WebCore.WebSocket
 
                 try
                 {
-                    result = await _socket.ReceiveAsync(buffer, _cts.Token);
+                    var receive = _socket.ReceiveAsync(buffer, _cts.Token);
+                    if (await Task.WhenAny(receive, shutdown.Task) == shutdown.Task || stopping.IsCancellationRequested)
+                    {
+                        using var deadline = new CancellationTokenSource(_shutdownCloseTimeout);
+                        await CloseAsync("server shutdown", deadline.Token);
+                        try
+                        {
+                            await receive;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // the close frame is sent before canceling the outstanding receive
+                        }
+                        break;
+                    }
+
+                    result = await receive;
                 }
                 catch
                 {
@@ -151,13 +201,21 @@ namespace WebExpress.WebCore.WebSocket
         /// </returns>
         public async Task CloseAsync(string reason = "closed", CancellationToken cancellation = default)
         {
-            _cts.Cancel();
-
             if (_socket.State == WebSocketState.Open || _socket.State == WebSocketState.CloseReceived)
             {
                 try
                 {
-                    await _socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, reason, cancellation);
+                    // the close frame is a send as well and must not interleave with a message
+                    await _sendLock.WaitAsync(cancellation).ConfigureAwait(false);
+
+                    try
+                    {
+                        await _socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, reason, cancellation);
+                    }
+                    finally
+                    {
+                        _sendLock.Release();
+                    }
                 }
                 catch
                 {
@@ -165,6 +223,7 @@ namespace WebExpress.WebCore.WebSocket
                 }
             }
 
+            _cts.Cancel();
             RaiseDisconnected(WebSocketCloseStatus.NormalClosure, reason);
         }
 
@@ -204,14 +263,15 @@ namespace WebExpress.WebCore.WebSocket
                 // ignore
             }
 
-            RaiseDisconnected(WebSocketCloseStatus.NormalClosure, "disposed");
-
-            if (_socket is IDisposable d)
+            try
             {
-                d.Dispose();
+                RaiseDisconnected(WebSocketCloseStatus.NormalClosure, "disposed");
             }
-
-            _cts.Dispose();
+            finally
+            {
+                _socket.Dispose();
+                _cts.Dispose();
+            }
         }
     }
 }

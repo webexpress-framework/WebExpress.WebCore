@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset.Model;
@@ -18,6 +19,11 @@ namespace WebExpress.WebCore.WebAsset
     /// </summary>
     public sealed class AssetManager : IAssetManager, ISystemComponent
     {
+        // synchronization root protecting _itemDictionary and related mutable state.
+        // the dictionary itself is not thread-safe, so every read (including the
+        // per-request resolution) and write must be performed under this lock.
+        private readonly Lock _guard = new();
+
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly AssetItemDictionary _itemDictionary = new();
@@ -35,7 +41,17 @@ namespace WebExpress.WebCore.WebAsset
         /// <summary>
         /// Gets all asset contexts.
         /// </summary>
-        public IEnumerable<IAssetContext> Assets => _itemDictionary.All.Select(x => x.AssetContext);
+        public IEnumerable<IAssetContext> Assets
+        {
+            get
+            {
+                // return a snapshot to avoid enumeration during concurrent modifications
+                lock (_guard)
+                {
+                    return _itemDictionary.All.Select(x => x.AssetContext).ToList();
+                }
+            }
+        }
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -59,18 +75,22 @@ namespace WebExpress.WebCore.WebAsset
                 HandleRequest = (request, endpointContext) =>
                 {
                     var assetContext = endpointContext as IAssetContext;
-                    var asset = _itemDictionary.All
-                        .FirstOrDefault
-                        (
-                            x =>
-                            request.Uri
-                                .ToString()
-                                .ToLower()
-                                .Replace("/", ".")
-                                .EndsWith(x.AssetContext.Route.ToString().Replace("/", "."))
-                        );
+                    AssetItem asset;
 
-                    if (asset is not null)
+                    // resolve the asset under the lock so the lookup never enumerates
+                    // the dictionary while it is being mutated by a (de)registration.
+                    // prefer the endpoint already resolved by the sitemap; only fall
+                    // back to a route match if it is not an asset context.
+                    lock (_guard)
+                    {
+                        asset = _itemDictionary.GetByContext(assetContext)
+                             ?? _itemDictionary.FindByRoute(request.Uri?.ToString());
+                    }
+
+                    // process outside the lock: Asset.Process only reads its immutable
+                    // payload and builds a fresh response, so it must not block other
+                    // asset requests.
+                    if (asset?.Instance is not null)
                     {
                         return asset.Instance.Process(request);
                     }
@@ -98,9 +118,12 @@ namespace WebExpress.WebCore.WebAsset
         /// <param name="pluginContext">The context of the plugin whose resources are to be associated.</param>
         private void Register(IPluginContext pluginContext)
         {
-            if (_itemDictionary.ContainsPlugin(pluginContext))
+            lock (_guard)
             {
-                return;
+                if (_itemDictionary.ContainsPlugin(pluginContext))
+                {
+                    return;
+                }
             }
 
             Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
@@ -114,7 +137,14 @@ namespace WebExpress.WebCore.WebAsset
         {
             foreach (var pluginContext in _componentHub?.PluginManager?.GetPlugins(applicationContext))
             {
-                if (_itemDictionary.ContainsApplication(pluginContext, applicationContext))
+                bool alreadyRegistered;
+
+                lock (_guard)
+                {
+                    alreadyRegistered = _itemDictionary.ContainsApplication(pluginContext, applicationContext);
+                }
+
+                if (alreadyRegistered)
                 {
                     continue;
                 }
@@ -130,6 +160,8 @@ namespace WebExpress.WebCore.WebAsset
         /// <param name="applicationContexts">The application context (optional).</param>
         private void Register(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts)
         {
+            // assembly and reflection operations are per-plugin and read-only; only the
+            // mutation of _itemDictionary is synchronized.
             var assembly = pluginContext?.Assembly;
             var assemblName = assembly.GetName().Name;
             var embeddedResources = assembly.GetManifestResourceNames();
@@ -143,12 +175,7 @@ namespace WebExpress.WebCore.WebAsset
                     // assign the asset to existing applications
                     foreach (var applicationContext in applicationContexts)
                     {
-                        var pluginPath = applicationContext.PluginContext != pluginContext
-                            ? pluginContext.PluginId.ToString()
-                            : null;
-
-                        var prefix = applicationContext.Route
-                            .Concat(pluginPath)
+                        var prefix = GetPluginRoute(applicationContext, pluginContext)
                             .Concat(new UriPathSegmentConstant("assets"));
 
                         var assetContext = new AssetContext()
@@ -174,7 +201,14 @@ namespace WebExpress.WebCore.WebAsset
                             )
                         };
 
-                        if (_itemDictionary.AddAssetItem(pluginContext, applicationContext, assetItem))
+                        bool added;
+
+                        lock (_guard)
+                        {
+                            added = _itemDictionary.AddAssetItem(pluginContext, applicationContext, assetItem);
+                        }
+
+                        if (added)
                         {
                             OnAddAsset(assetContext);
                             _httpServerContext?.Log?.Debug(
@@ -191,12 +225,60 @@ namespace WebExpress.WebCore.WebAsset
         }
 
         /// <summary>
+        /// Returns the route a plugin's endpoints are addressed under within an application.
+        /// A plugin that owns the application serves straight from the application route,
+        /// while every other plugin contributing to that application is given a segment of
+        /// its own so two plugins cannot collide on the same file name.
+        /// </summary>
+        /// <param name="applicationContext">The context of the application.</param>
+        /// <param name="pluginContext">The context of the plugin.</param>
+        /// <returns>The route the plugin's assets are mounted under.</returns>
+        private static IRoute GetPluginRoute(IApplicationContext applicationContext, IPluginContext pluginContext)
+        {
+            return applicationContext.Route.Concat
+            (
+                applicationContext.PluginContext != pluginContext
+                    ? pluginContext.PluginId.ToString()
+                    : null
+            );
+        }
+
+        /// <summary>
+        /// Returns the route the given embedded file of a plugin is served from within an
+        /// application. Consumers that have to link an embedded file - an include rendering a
+        /// link or script element - resolve it here instead of composing the route themselves,
+        /// because a route composed independently drifts from the mount without anything
+        /// noticing: the browser answers the resulting 404 with the html error page and accepts
+        /// it as a stylesheet with no rules.
+        /// </summary>
+        /// <param name="applicationContext">The context of the application the file is addressed in.</param>
+        /// <param name="pluginContext">The context of the plugin the file belongs to.</param>
+        /// <param name="file">The file path relative to the plugin's mount, as declared on the asset attribute.</param>
+        /// <returns>The route of the file, or null when the arguments do not describe one.</returns>
+        public IRoute GetAssetRoute(IApplicationContext applicationContext, IPluginContext pluginContext, string file)
+        {
+            if (applicationContext is null || pluginContext is null || string.IsNullOrWhiteSpace(file))
+            {
+                return null;
+            }
+
+            return GetPluginRoute(applicationContext, pluginContext).Concat(file);
+        }
+
+        /// <summary>
         /// Removes all resources associated with the specified plugin context.
         /// </summary>
         /// <param name="pluginContext">The context of the plugin that contains the resources to remove.</param>
         internal void Remove(IPluginContext pluginContext)
         {
-            foreach (var assetContext in _itemDictionary.Remove(pluginContext))
+            List<IAssetContext> removed;
+
+            lock (_guard)
+            {
+                removed = _itemDictionary.Remove(pluginContext).ToList();
+            }
+
+            foreach (var assetContext in removed)
             {
                 OnRemoveAsset(assetContext);
             }
@@ -208,7 +290,14 @@ namespace WebExpress.WebCore.WebAsset
         /// <param name="applicationContext">The context of the application that contains the resources to remove.</param>
         internal void Remove(IApplicationContext applicationContext)
         {
-            foreach (var assetContext in _itemDictionary.Remove(applicationContext))
+            List<IAssetContext> removed;
+
+            lock (_guard)
+            {
+                removed = _itemDictionary.Remove(applicationContext).ToList();
+            }
+
+            foreach (var assetContext in removed)
             {
                 OnRemoveAsset(assetContext);
             }
@@ -221,7 +310,10 @@ namespace WebExpress.WebCore.WebAsset
         /// <returns>An enumeration of asset contexts.</returns>
         public IEnumerable<IAssetContext> GetAssets(IPluginContext pluginContext)
         {
-            return _itemDictionary.GetAssets(pluginContext);
+            lock (_guard)
+            {
+                return _itemDictionary.GetAssets(pluginContext).ToList();
+            }
         }
 
         /// <summary>
@@ -231,7 +323,10 @@ namespace WebExpress.WebCore.WebAsset
         /// <returns>An enumeration of asset contextes.</returns>
         public IEnumerable<IAssetContext> GetAssets(IApplicationContext applicationContext)
         {
-            return _itemDictionary.GetAssets(applicationContext);
+            lock (_guard)
+            {
+                return _itemDictionary.GetAssets(applicationContext).ToList();
+            }
         }
 
         /// <summary>
@@ -262,11 +357,11 @@ namespace WebExpress.WebCore.WebAsset
             Register(e);
         }
 
-        /// <summary>  
-        /// Raises the event when a plugin is removed.  
-        /// </summary>  
-        /// <param name="sender">The source of the event.</param>  
-        /// <param name="e">The context of the plugin being removed.</param>  
+        /// <summary>
+        /// Raises the event when a plugin is removed.
+        /// </summary>
+        /// <param name="sender">The source of the event.</param>
+        /// <param name="e">The context of the plugin being removed.</param>
         private void OnRemovePlugin(object sender, IPluginContext e)
         {
             Remove(e);

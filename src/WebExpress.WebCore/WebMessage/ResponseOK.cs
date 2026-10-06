@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// Represents a successful response according to RFC 2616 Section 6.
+    /// HTTP 200 (OK): the standard answer telling the client the request succeeded and the
+    /// result is contained in the response body (see RFC 2616 Section 6).
     /// </summary>
     [StatusCode(200)]
     public class ResponseOK : Response

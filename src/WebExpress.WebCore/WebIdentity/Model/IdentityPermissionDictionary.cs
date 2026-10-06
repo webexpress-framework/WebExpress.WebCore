@@ -7,7 +7,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebIdentity.Model
 {
     /// <summary>
-    /// The identity permission directory.
+    /// Internal lookup that stores the registered identity permissions grouped first by plugin and
+    /// then by application, so the manager can quickly find, add, or remove the permissions that
+    /// apply to a given application.
     /// </summary>
     internal class IdentityPermissionDictionary : Dictionary<IPluginContext, Dictionary<IApplicationContext, IList<IdentityPermissionItem>>>
     {

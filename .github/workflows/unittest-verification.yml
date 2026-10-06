@@ -15,23 +15,23 @@ jobs:
         working-directory: src
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.x
 
       - name: Restore dependencies
-        run: dotnet restore ./WebExpress.WebCore.sln
+        run: dotnet restore ./WebExpress.WebCore.slnx
 
       - name: Build project
-        run: dotnet build ./WebExpress.WebCore.sln --no-restore --configuration Release
+        run: dotnet build ./WebExpress.WebCore.slnx --no-restore --configuration Release
 
       - name: Run xUnit tests
         id: tests
         continue-on-error: true
-        run: dotnet test ./WebExpress.WebCore.Test/WebExpress.WebCore.Test.csproj --no-build --configuration Release -- --report-trx --results-directory ./TestResults
+        run: dotnet test --project ./WebExpress.WebCore.Test/WebExpress.WebCore.Test.csproj --no-build --configuration Release --report-trx --results-directory ./TestResults
 
       - name: Print failing tests on failure
         if: steps.tests.outcome == 'failure'
@@ -91,7 +91,7 @@ jobs:
 
       - name: Upload TRX report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trx-results
           path: src/TestResults/**/*.trx

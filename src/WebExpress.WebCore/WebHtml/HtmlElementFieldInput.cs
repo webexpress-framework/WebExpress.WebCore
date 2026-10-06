@@ -32,7 +32,7 @@ namespace WebExpress.WebCore.WebHtml
         public string Value
         {
             get => GetAttribute("value");
-            set => SetAttribute("value", value?.Replace("'", "&#39;")?.Replace("\"", "&#34;"));
+            set => SetAttribute("value", value);
         }
 
         /// <summary>

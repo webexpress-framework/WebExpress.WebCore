@@ -1,0 +1,238 @@
+﻿using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Runtime.CompilerServices;
+using WebExpress.WebCore.WebApplication;
+using WebExpress.WebCore.WebMessage;
+using WebExpress.WebCore.WebMetrics;
+using WebExpress.WebCore.WebMetrics.Model;
+
+namespace WebExpress.WebCore.WebIdentity
+{
+    /// <summary>
+    /// Connects credential issuance and request verification without retaining an identity in session state.
+    /// </summary>
+    public partial class IdentityManager
+    {
+        /// <summary>
+        /// Prevents insecure origins and sibling domains from planting an authentication cookie.
+        /// </summary>
+        public const string AccessCookieName = "__Host-wx-access";
+
+        /// <summary>
+        /// Allows a narrow cookie path while retaining the browser's Secure-prefix protection.
+        /// </summary>
+        public const string RefreshCookieName = "__Secure-wx-refresh";
+        internal const string DevelopmentAccessCookieName = "wx-access";
+        internal const string DevelopmentRefreshCookieName = "wx-refresh";
+
+        /// <summary>
+        /// Keeps secure transport mandatory unless the deployment explicitly opts into development HTTP.
+        /// </summary>
+        internal bool RequiresHttps => _httpServerContext.Configuration.GetValue("WebExpress:Authentication:RequireHttps", true);
+
+        /// <summary>
+        /// Separates development cookies from the browser-enforced production cookie namespace.
+        /// </summary>
+        private string AccessCookie => RequiresHttps ? AccessCookieName : DevelopmentAccessCookieName;
+
+        /// <summary>
+        /// Keeps development renewal credentials outside the protected production cookie namespace.
+        /// </summary>
+        private string RefreshCookie => RequiresHttps ? RefreshCookieName : DevelopmentRefreshCookieName;
+        /// <summary>
+        /// Keeps refresh credentials out of ordinary application requests.
+        /// </summary>
+        public const string RefreshPath = "/api/auth/refresh";
+
+        private readonly ConditionalWeakTable<IRequest, AuthenticationState> _authenticationStates = new();
+
+        /// <summary>
+        /// Gets the framework series for logins and active users, resolved on use because the
+        /// metrics manager is created after this manager.
+        /// </summary>
+        internal FrameworkMetrics Metrics => (_componentHub?.MetricsManager as MetricsManager)?.Framework;
+
+        /// <summary>
+        /// Keeps pending authentication changes local to one HTTP request.
+        /// </summary>
+        private sealed class AuthenticationState
+        {
+            internal IIdentity Identity;
+            internal IdentityTokenPair Pair;
+            internal bool Changed;
+        }
+
+        /// <summary>
+        /// Converts a verified identity into a credential-free snapshot and queues protected token cookies.
+        /// </summary>
+        /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The issued token pair, or null when no identity was authenticated.</returns>
+        public IdentityTokenPair Login(IIdentity identity, IRequest request)
+        {
+            if (identity is null) { return null; }
+            ArgumentNullException.ThrowIfNull(request);
+            var snapshot = Snapshot(identity, request.ApplicationContext);
+            var pair = Issue(snapshot, request.ApplicationContext);
+            var state = _authenticationStates.GetOrCreateValue(request);
+            state.Identity = snapshot;
+            state.Pair = pair;
+            state.Changed = true;
+            Metrics?.Logins.Increment("success");
+            Metrics?.RecordActiveUser(snapshot.Id);
+            return pair;
+        }
+
+        /// <summary>
+        /// Rotates the refresh credential without extending the original grant or creating a session.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The rotated token pair, or null when validation or replay protection rejects renewal.</returns>
+        public IdentityTokenPair Refresh(IRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            var pair = Refresh(CookieValue(request, RefreshCookie), request.ApplicationContext);
+            if (pair is null) { return null; }
+            var state = _authenticationStates.GetOrCreateValue(request);
+            state.Identity = ValidateAccessToken(pair.AccessToken, request.ApplicationContext);
+            state.Pair = pair;
+            state.Changed = true;
+            return pair;
+        }
+
+        /// <summary>
+        /// Clears browser credentials and revokes future renewal while issued access tokens expire naturally.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        public void Logout(IRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            RevokeGrant(CookieValue(request, AccessCookie), request.ApplicationContext);
+            RevokeRefreshGrant(CookieValue(request, RefreshCookie), request.ApplicationContext);
+            var state = _authenticationStates.GetOrCreateValue(request);
+            state.Identity = null;
+            state.Pair = null;
+            state.Changed = true;
+            Metrics?.Logouts.Increment();
+        }
+
+        /// <summary>
+        /// Authenticates each request from a signed cookie or an explicitly supplied personal bearer credential.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The verified request identity, or null when no accepted credential authenticates it.</returns>
+        public IIdentity GetCurrentIdentity(IRequest request)
+        {
+            if (request?.ApplicationContext is null) { return null; }
+            if (_authenticationStates.TryGetValue(request, out var state)) { return state.Identity; }
+            var identity = AuthenticateRequest(request);
+            if (identity is not null)
+            {
+                Metrics?.RecordActiveUser(identity.Id);
+            }
+            // kept for the rest of the request: a page checks policies once per protected fragment, and
+            // each check would otherwise verify the signature again. unchanged state queues no cookies
+            _authenticationStates.GetOrCreateValue(request).Identity = identity;
+            return identity;
+        }
+
+        /// <summary>
+        /// Verifies the credential a request carries, preferring an explicit authorization header over the browser cookie.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <returns>The verified request identity, or null when no accepted credential authenticates it.</returns>
+        private IIdentity AuthenticateRequest(IRequest request)
+        {
+            var authorization = request.Header.Authorization;
+            // an explicit, invalid authorization header must never fall back to browser credentials
+            if (authorization is not null)
+            {
+                return string.Equals(authorization.Type, "Bearer", StringComparison.OrdinalIgnoreCase)
+                    ? ValidatePersonalAccessToken(authorization.Token, request.ApplicationContext) : null;
+            }
+            var cookie = CookieValue(request, AccessCookie);
+            return cookie is null ? null : ValidateAccessToken(cookie, request.ApplicationContext);
+        }
+
+        /// <summary>
+        /// Creates an explicitly bounded credential whose permissions cannot exceed the owning identity.
+        /// </summary>
+        /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
+        /// <param name="applicationContext">The application context that owns the requested operation.</param>
+        /// <param name="lifetime">The explicit validity period requested for the personal credential.</param>
+        /// <param name="permissions">The requested permission identifiers, limited to the owner's grants.</param>
+        /// <returns>The signed personal credential with the requested authorized permissions.</returns>
+        public string CreatePersonalAccessToken(IIdentity identity, IApplicationContext applicationContext,
+            TimeSpan lifetime, IEnumerable<string> permissions)
+        {
+            return SignPersonalAccessToken(Snapshot(identity, applicationContext), applicationContext, lifetime, permissions);
+        }
+
+        /// <summary>
+        /// Applies queued credential changes to the outgoing response while keeping tokens out of its body.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <param name="response">The outgoing response governed by the authentication transport contract.</param>
+        public void ApplyAuthenticationCookies(IRequest request, IResponse response)
+        {
+            if (request is null || response is null || !_authenticationStates.TryGetValue(request, out var state) || !state.Changed) { return; }
+            response.Header.CacheControl = "no-store";
+            // an expired access credential still identifies the grant for logout; validation always enforces its signed expiry
+            response.Header.Cookies.Add(CreateCookie(AccessCookie, state.Pair?.AccessToken, "/", state.Pair?.RefreshTokenExpiresAt, RequiresHttps));
+            response.Header.Cookies.Add(CreateCookie(RefreshCookie, state.Pair?.RefreshToken, RefreshPath, state.Pair?.RefreshTokenExpiresAt, RequiresHttps));
+            // only the own scripts ever renew the grant, so no cross-site request needs the refresh token
+            response.Header.CookieSameSite[RefreshCookie] = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
+        }
+
+        /// <summary>
+        /// Applies protected cookie attributes and an expired deadline when removing a credential.
+        /// </summary>
+        /// <param name="name">The exact cookie or claim name to inspect.</param>
+        /// <param name="value">The value being validated or placed in the protected response.</param>
+        /// <param name="path">The route or cookie path that constrains credential use.</param>
+        /// <param name="expiration">The cookie deadline, or null when the cookie must be deleted.</param>
+        /// <param name="secure">Whether the browser must restrict the cookie to HTTPS transport.</param>
+        /// <returns>The protected authentication cookie or its deletion counterpart.</returns>
+        internal static Cookie CreateCookie(string name, string value, string path, DateTimeOffset? expiration, bool secure = true)
+        {
+            return new Cookie(name, value ?? "", path)
+            {
+                Secure = secure,
+                HttpOnly = true,
+                Expires = expiration?.UtcDateTime ?? DateTime.UnixEpoch
+            };
+        }
+
+        /// <summary>
+        /// Rejects duplicate credentials so browser cookie ordering cannot determine the authenticated identity.
+        /// </summary>
+        /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <param name="name">The exact cookie or claim name to inspect.</param>
+        /// <returns>The matching cookie value, or null when absent or ambiguous.</returns>
+        internal static string CookieValue(IRequest request, string name)
+        {
+            var cookies = request.Header.Cookies.Where(x => x.Name == name).ToArray();
+            return cookies.Length == 1 ? cookies[0].Value : null;
+        }
+
+        /// <summary>
+        /// Captures effective authorization before mutable provider state crosses the token boundary.
+        /// </summary>
+        /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
+        /// <param name="application">The application whose provider bindings or authorization definitions apply.</param>
+        /// <returns>The immutable identity containing the effective authorization claims.</returns>
+        private Identity Snapshot(IIdentity identity, IApplicationContext application)
+        {
+            ArgumentNullException.ThrowIfNull(identity);
+            ArgumentNullException.ThrowIfNull(application);
+            var permissions = identity.Permissions.Concat(Permissions.Where(x => x.ApplicationContext == application &&
+                (CheckAccess(application, identity, x.Permission) ||
+                 identity.PolicyNames.Any(policy => CheckAccess(application, policy, x.Permission))))
+                .Select(x => x.Permission.FullName));
+            return new Identity(identity.Id, identity.Name, identity.Email, identity.Roles, permissions, identity.PolicyNames);
+        }
+    }
+}

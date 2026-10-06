@@ -1,17 +1,19 @@
-﻿using WebExpress.WebCore.Internationalization;
+using System.IO;
+using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebMessage;
 
 namespace WebExpress.WebCore.WebResource
 {
     /// <summary>
-    /// A file resource.
+    /// A binary resource that serves a file read from disk, delivering its bytes to the client.
+    /// Access is guarded so concurrent requests can read the same file safely.
     /// </summary>
     public class ResourceFile : ResourceBinary
     {
         /// <summary>
         /// Gets the protection in case of concurrency.
         /// </summary>
-        private object Gard { get; set; }
+        private object Guard { get; set; }
 
         /// <summary>
         /// Gets the root directory.
@@ -25,7 +27,7 @@ namespace WebExpress.WebCore.WebResource
         public ResourceFile(IResourceContext resourceContext)
             : base(resourceContext)
         {
-            Gard = new object();
+            Guard = new object();
         }
 
         /// <summary>
@@ -35,78 +37,49 @@ namespace WebExpress.WebCore.WebResource
         /// <returns>The response.</returns>
         public override IResponse Process(IRequest request)
         {
-            lock (Gard)
+            lock (Guard)
             {
-                var url = request.Uri.ToString()[ResourceContext.Route.ToString().Length..];
+                var requestUri = request.Uri.ToString();
+                var routePrefix = ResourceContext.Route.ToString();
 
-                var path = System.IO.Path.GetFullPath(RootDirectory + url);
-
-                if (!System.IO.File.Exists(path))
+                if (string.IsNullOrEmpty(requestUri) ||
+                    routePrefix is null ||
+                    !requestUri.StartsWith(routePrefix) ||
+                    requestUri.Length < routePrefix.Length)
                 {
                     return new ResponseNotFound();
                 }
 
-                Data = System.IO.File.ReadAllBytes(path);
+                var url = requestUri.Length == routePrefix.Length
+                    ? string.Empty
+                    : requestUri[routePrefix.Length..];
+
+                var path = Path.GetFullPath(RootDirectory + url);
+
+                if (!File.Exists(path))
+                {
+                    return new ResponseNotFound();
+                }
+
+                // derive the ETag from file metadata so an unchanged file can be answered with 304
+                // without reading its content from disk.
+                var eTag = ComputeETag(new FileInfo(path));
+                if (IsNotModified(request, eTag))
+                {
+                    return CreateNotModifiedResponse(eTag);
+                }
+
+                Data = File.ReadAllBytes(path);
 
                 var response = base.Process(request);
                 response.Header.CacheControl = "public, max-age=31536000";
 
-                var extension = System.IO.Path.GetExtension(path);
-                extension = !string.IsNullOrWhiteSpace(extension) ? extension.ToLower() : "";
+                // content type and download handling are resolved through the shared logic
+                ApplyContentType(response, path);
 
-                switch (extension)
+                if (!string.IsNullOrEmpty(eTag))
                 {
-                    case ".pdf":
-                        response.Header.ContentType = "application/pdf";
-                        break;
-                    case ".txt":
-                        response.Header.ContentType = "text/plain";
-                        break;
-                    case ".css":
-                        response.Header.ContentType = "text/css";
-                        break;
-                    case ".xml":
-                        response.Header.ContentType = "text/xml";
-                        break;
-                    case ".html":
-                    case ".htm":
-                        response.Header.ContentType = "text/html";
-                        break;
-                    case ".exe":
-                        response.Header.ContentDisposition = "attatchment; filename=" + System.IO.Path.GetFileName(path) + "; size=" + Data.LongLength;
-                        response.Header.ContentType = "application/octet-stream";
-                        break;
-                    case ".zip":
-                        response.Header.ContentDisposition = "attatchment; filename=" + System.IO.Path.GetFileName(path) + "; size=" + Data.LongLength;
-                        response.Header.ContentType = "application/zip";
-                        break;
-                    case ".doc":
-                    case ".docx":
-                        response.Header.ContentType = "application/msword";
-                        break;
-                    case ".xls":
-                    case ".xlx":
-                        response.Header.ContentType = "application/vnd.ms-excel";
-                        break;
-                    case ".ppt":
-                        response.Header.ContentType = "application/vnd.ms-powerpoint";
-                        break;
-                    case ".gif":
-                        response.Header.ContentType = "image/gif";
-                        break;
-                    case ".png":
-                        response.Header.ContentType = "image/png";
-                        break;
-                    case ".svg":
-                        response.Header.ContentType = "image/svg+xml";
-                        break;
-                    case ".jpeg":
-                    case ".jpg":
-                        response.Header.ContentType = "image/jpg";
-                        break;
-                    case ".ico":
-                        response.Header.ContentType = "image/x-icon";
-                        break;
+                    response.Header.AddCustomHeader("ETag", eTag);
                 }
 
                 request.HttpServerContext.Log?.Debug(I18N.Translate("webexpress.webcore:resource.file", request.RemoteEndPoint, request.Uri));

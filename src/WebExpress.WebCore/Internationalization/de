@@ -7,8 +7,8 @@ app.workingdirectory=Arbeitsverzeichnis: {0}
 app.packagebase=Paketverzeichnis: {0}
 app.assetbase=Assetverzeichnis: {0}
 app.database=Datenverzeichnis: {0}
-app.configurationdirectory=Konfigurationsverzeichnis: {0}
-app.configuration=Konfiguration: {0}
+app.settingsdirectory=Einstellungsverzeichnis: {0}
+app.settings=Einstellungen: {0}
 app.logdirectory=Logverzeichnis: {0}
 app.log=Log: {0}
 app.uri=Uri: {0}
@@ -28,6 +28,9 @@ httpserver.connectionlimit=Das Limit für gleichzeitige Anfragen wurde überschr
 httpserver.endpoint=Endpunkt '{0}' wird registriert.
 httpserver.listen=Der Webserver lauscht auf den Endpunkt {0}.
 httpserver.listen.exeption=Fehler beim Einrichten eines Endpunktes für die Uri {0}.
+httpserver.listen.inuse=Der Endpunkt ist bereits durch einen anderen Prozess belegt, etwa eine weitere WebExpress-Instanz. Der HttpServer wird nicht gestartet und die Anwendung beendet. ({0})
+httpserver.http3=HTTP/3 (QUIC) ist auf dem Endpunkt {0} aktiv; der UDP-Port muss in der Firewall freigegeben sein.
+httpserver.http3.unsupported=HTTP/3 ist nicht verfügbar, da das Betriebssystem kein QUIC bereitstellt (unter Linux das Paket libmsquic installieren). Der Endpunkt {0} bedient HTTP/1.1 und HTTP/2.
 httpserver.listener.try=Falls Ihnen Zugriffsrechte fehlen, führen Sie unter Windows folgende Anweisung als Administrator aus:
 httpserver.listener.windows=netsh http add urlacl url={0} user=Jeder listen=yes
 
@@ -57,6 +60,13 @@ packagemanager.save=Der Katalog wird gespeichert.
 packagemanager.packagenotfound=Das Paket '{0}' wurde nicht im Dateisystem gefunden.
 packagemanager.boot.notfound=Das Plugin '{0}' ist nicht bekannt.
 packagemanager.package=Package: '{0}'
+packagemanager.settings.deployed=Die Einstellungsdatei '{0}' wurde in das Einstellungsverzeichnis übernommen.
+packagemanager.settings.existing=Die Einstellungsdatei '{0}' existiert bereits im Einstellungsverzeichnis und wurde beibehalten.
+packagemanager.settings.ignored=Der Paketeintrag '{0}' ist keine Einstellungsdatei und wurde ignoriert.
+packagemanager.settings.invalid=Die Einstellungsdatei '{0}' des Pakets ist kein gültiges JSON und wurde nicht übernommen.
+packagemanager.settings.outofscope=Die Einstellungsdatei '{0}' des Pakets setzt den Schlüssel '{1}' außerhalb von '{2}' und wurde nicht übernommen.
+packagemanager.settings.unwritable=Die Einstellungsdatei '{0}' konnte nicht in das Einstellungsverzeichnis geschrieben werden: {1}
+packagemanager.cluster.busy=Eine andere Instanz ändert gerade die Pakete. Bitte in Kürze erneut versuchen.
 
 pluginmanager.initialization=Der Pluginmanager wurde initialisiert.
 pluginmanager.load={0}.dll wird geladen. Version = '{1}'
@@ -78,12 +88,14 @@ pluginmanager.applicationless=Das Plugin '{0}' besitzt keine Angaben zur Anwendu
 applicationmanager.titel=Anwendungsmanager:
 applicationmanager.initialization=Der Anwendungsmanager wurde initialisiert.
 applicationmanager.register=Die Anwendung '{0}' wurde erstellt und im Anwendungsmanager registriert.
+applicationmanager.update=Der Name oder das Icon der Anwendung '{0}' wurde zur Laufzeit geändert.
 applicationmanager.duplicate=Die Anwendung '{0}' wurde bereits im Anwendungsmanager registriert.
 applicationmanager.application=Anwendung: '{0}'
 applicationmanager.application.initialization=Die Anwendung '{0}' wurde initialisiert.
 applicationmanager.application.processing.start=Die Anwendung '{0}' wird ausgeführt.
 applicationmanager.application.processing.end=Die Ausführung der Anwendung '{0}' wurde beendet.
 applicationmanager.application.boot.notfound=Das Plugin '{0}' ist nicht bekannt.
+applicationmanager.application.failed=Die Anwendung '{0}' konnte nicht erzeugt werden und ist nicht verfügbar.
 
 resourcemanager.initialization=Der Ressourcenmanager wurde initialisiert.
 resourcemanager.register={0} Ressource(n) wurden der Anwendung '{1}' zugewiesen.
@@ -124,6 +136,10 @@ sitemapmanager.merge.error=Die beiden Sitemaps '{0}' und '{1}' konnten nicht gem
 
 sessionmanager.initialization=Der Sessionmanager wurde initialisiert.
 sessionmanager.cleanup.removed=Die Sitzung mit der Id '{0}' wurde entfernt.
+sessionmanager.cluster.unserializable=Die Sitzungseigenschaft '{0}' kann nicht serialisiert werden und bleibt auf dieser Instanz: {1}
+sessionmanager.cluster.dropped=Die Sitzungseigenschaft '{0}' der Sitzung '{1}' ist auf dieser Instanz unbekannt und wurde verworfen.
+clustermanager.clockskew=Die Uhr der Clusterinstanz '{0}' weicht um {1} Sekunden von dieser Instanz ab. Die Uhren müssen synchronisiert werden (NTP): gespeicherte Fristen und Nachrichten zwischen Instanzen hängen davon ab.
+clustermanager.initialization=Der Clustermanager wurde initialisiert (Knoten '{0}', im Cluster: {1}).
 
 settingpagemanager.initialization=Der Settingpagemanager wurde initialisiert.
 settingpagemanager.register.category=Die Einstellungskategorie '{0}' wurde der Anwendung '{1}' zugewiesen und im Settingpagemanager registriert.
@@ -149,6 +165,7 @@ jobmanager.duplicate=Der Job '{0}' wurde bereits in der Anwendung '{1}' registri
 jobmanager.jobless=Der Job '{0}' besitzt keine Angaben zu einem Job.
 jobmanager.job=Job: '{0}' für Anwendung '{1}'
 jobmanager.job.process=Der Job '{0}' wird ausgeführt.
+jobmanager.job.claimed=Der Job '{0}' wird von einer anderen Instanz des Clusters ausgeführt.
 jobmanager.cron.parseerror=Syntaxfehler in der Zeitangabe eines Jobs. Der Wert '{0}' kann nicht verarbeitet werden.
 jobmanager.cron.range=Syntaxfehler in der Zeitangabe eines Jobs. Der Wert '{0}' ist außerhalb des gültigen Bereiches.
 
@@ -161,6 +178,7 @@ fragmentmanager.titel=Fragmente:
 fragmentmanager.fragment=Fragment: '{0}' für die Anwendung '{1}'.
 
 identitymanager.initialization=Der Identitymanager wurde initialisiert.
+identitymanager.authentication.invalid=Mit dem Abschnitt WebExpress:Authentication können keine Tokens ausgestellt werden: {0}
 identitymanager.registerpermission=Die Berechtigung '{0}' wurde der Anwendung '{1}' zugewiesen und im Identitymanager registriert.
 identitymanager.duplicatepermission=Die Berechtigung '{0}' wurde bereits in der Anwendung '{1}' registriert.
 identitymanager.registerpolicy=Die Policy '{0}' wurde der Anwendung '{1}' zugewiesen und im Identitymanager registriert.
@@ -175,6 +193,7 @@ identitymanager.policy.systemaccess.description=Policy für Operationen auf Syst
 includemanager.initialization=Der Includemanager wurde initialisiert.
 includemanager.addinclude=Die Client-Ressource '{0}' wurde in der Anwendung '{1}' registiert.
 includemanager.removeinclude=Die Client-Ressource '{0}' wurde aus der Anwendung '{1}' entfernt.
+includemanager.unresolvedfile=Die Datei '{1}' der Client-Ressource '{0}' verweist auf die Route '{2}', unter der in der Anwendung '{3}' kein Asset bereitgestellt wird.
 
 socketmanager.initialization=Der Socketmanager wurde initialisiert.
 socketmanager.addsocket=Der WebSocket '{0}' wurde in der Anwendung '{1}' registiert.
@@ -203,3 +222,20 @@ validation.missing_fragment={0} muss '{1}' enthalten.
 validation.suffix_mismatch={0} muss mit '{1}' enden.
 validation.invalid_enum={0} muss ein gültiger {1}-Wert sein.
 validation.invalid_date={0} muss ein gültiges Datum sein.
+certificate.invalid=Das Zertifikat {0} kann nicht für HTTPS verwendet werden: {1}.
+certificate.expiring=Das Zertifikat {0} läuft am {1} ab; seine verbleibende Gültigkeit hat die Warnschwelle von {2} Tagen erreicht.
+certificate.load_failed=Das Zertifikat {0} konnte nicht aus dem Speicher {1} geladen werden. Referenz, Zugriffsrechte, PFX-Inhalt und Zugangsdaten prüfen.
+
+root.title=Anwendungen
+root.introduction=Wählen Sie eine Anwendung aus, um fortzufahren.
+root.empty=Es sind keine Anwendungen verfügbar.
+
+health.host_unavailable=Der HTTP-Host wird gestartet oder beendet.
+health.component_unavailable=Ein Komponentenmanager konnte nicht initialisiert werden.
+health.application_unavailable=Die Anwendung '{0}' des Plugins '{1}' konnte nicht erzeugt werden: {2}
+health.failed=Healthcheck {0}/{1} fehlgeschlagen: {2}
+health.timeout=Healthcheck {0}/{1} hat sein Zeitlimit von {2} überschritten.
+
+metrics.failed=Metrik-Collector {0}/{1} fehlgeschlagen: {2}
+metrics.timeout=Metrik-Collector {0}/{1} hat sein Zeitlimit von {2} überschritten.
+metrics.conflict=Metrikwerte von {0} wurden verworfen: {1}

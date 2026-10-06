@@ -6,20 +6,20 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
-using WebExpress.WebCore.Setting;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebLog
 {
     /// <summary>
     /// Class for logging events to your log file
-    /// 
-    /// The program writes a variety of information to an event log file. The log 
-    /// is stored in the log directory. The name consists of the date and the ending ".log". 
+    ///
+    /// The program writes a variety of information to an event log file. The log
+    /// is stored in the log directory. The name consists of the date and the ending ".log".
     /// The structure is designed in such a way that the log file can be read and analyzed with a text editor.
-    /// Error messages and notes are made available persistently in the log, so the event log files 
-    /// are suitable for error analysis and for checking the correct functioning of the program. The minutes 
-    /// are organized in tabular form. In the first column, the primeval time is indicated. The second 
-    /// column defines the level of the log entry. The third column lists the function that produced the entry. 
+    /// Error messages and notes are made available persistently in the log, so the event log files
+    /// are suitable for error analysis and for checking the correct functioning of the program. The minutes
+    /// are organized in tabular form. In the first column, the primeval time is indicated. The second
+    /// column defines the level of the log entry. The third column lists the function that produced the entry.
     /// The last column indicates a note or error description.
     /// </summary>
     /// <code>
@@ -34,11 +34,23 @@ namespace WebExpress.WebCore.WebLog
     public class Log : ILog
     {
         private readonly Queue<LogItem> _queue = new();
+        private readonly Queue<LogEntry> _recent = new();
         private string _path;
         private Thread _workerThread;
         private const int _separatorWidth = 260;
-        private bool _done = false;
+        private volatile bool _done = false;
         private readonly int _width = 250;
+
+        // dedicated lock objects; the previous implementation locked on the _path string, which is
+        // an interned, shared instance and is null until Begin has run - both are unsafe.
+        private readonly Lock _fileLock = new();
+        private readonly Lock _recentLock = new();
+        private static readonly Lock _consoleLock = new();
+
+        // counters are touched from arbitrary caller threads, so they are updated atomically.
+        private int _errorCount;
+        private int _warningCount;
+        private int _exceptionCount;
 
         /// <summary>
         /// Gets or sets the encoding.
@@ -58,17 +70,17 @@ namespace WebExpress.WebCore.WebLog
         /// <summary>
         /// Gets the number of exceptions.
         /// </summary>
-        public int ExceptionCount { get; protected set; }
+        public int ExceptionCount => _exceptionCount;
 
         /// <summary>
         /// Gets the number of errors (errors + exceptions).
         /// </summary>
-        public int ErrorCount { get; protected set; }
+        public int ErrorCount => _errorCount;
 
         /// <summary>
         /// Gets the number of warnings.
         /// </summary>
-        public int WarningCount { get; protected set; }
+        public int WarningCount => _warningCount;
 
         /// <summary>
         /// Checks if the log has been opened for writing.
@@ -94,6 +106,19 @@ namespace WebExpress.WebCore.WebLog
         /// Gets or sets the time patternsspecifying log entries.
         /// </summary>
         public string TimePattern { set; get; }
+
+        /// <summary>
+        /// Gets or sets the maximum number of recent log entries retained in memory for live
+        /// inspection. The retained entries are independent of whether a log file is written.
+        /// </summary>
+        public int RecentCapacity { get; set; } = 1000;
+
+        /// <summary>
+        /// Occurs immediately after a log entry has been recorded. Handlers run on the calling
+        /// (logging) thread and must therefore be fast and must not throw; a faulty handler is
+        /// isolated so it cannot break logging.
+        /// </summary>
+        public event EventHandler<LogEntry> EntryLogged;
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -135,15 +160,21 @@ namespace WebExpress.WebCore.WebLog
                 }
             }
 
-            // create thread
-            _workerThread = new Thread(new ThreadStart(ThreadProc))
+            // reset the stop flag so logging can be restarted after a previous Close
+            _done = false;
+
+            // only a single worker thread is started; calling Begin again just reconfigures the target
+            if (_workerThread is null)
             {
+                _workerThread = new Thread(new ThreadStart(ThreadProc))
+                {
+                    // Background thread
+                    IsBackground = true,
+                    Name = "WebExpress.Log"
+                };
 
-                // Background thread
-                IsBackground = true
-            };
-
-            _workerThread.Start();
+                _workerThread.Start();
+            }
         }
 
         /// <summary>
@@ -159,12 +190,30 @@ namespace WebExpress.WebCore.WebLog
         /// Starts logging
         /// </summary>
         /// <param name="settings">The log settings</param>
-        public void Begin(SettingLogItem settings)
+        public void Begin(LogSettings settings)
         {
-            Filename = settings.Filename;
-            LogMode = Enum.Parse<LogMode>(settings.Modus);
-            Encoding = Encoding.GetEncoding(settings.Encoding);
-            TimePattern = settings.Timepattern;
+            Filename = settings.FileName;
+
+            // a malformed configuration value must not crash startup; fall back to the current value
+            if (Enum.TryParse<LogMode>(settings.Mode, true, out var mode))
+            {
+                LogMode = mode;
+            }
+
+            try
+            {
+                Encoding = Encoding.GetEncoding(settings.Encoding);
+            }
+            catch
+            {
+                Encoding = Encoding.UTF8;
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.TimePattern))
+            {
+                TimePattern = settings.TimePattern;
+            }
+
             DebugMode = settings.Debug;
 
             Begin(settings.Path, Filename);
@@ -182,36 +231,102 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                foreach (var l in message?.Split([Environment.NewLine], StringSplitOptions.RemoveEmptyEntries))
+                // split multi-line messages so every line is rendered as its own tabular entry
+                foreach (var l in (message ?? string.Empty).Split([Environment.NewLine], StringSplitOptions.RemoveEmptyEntries))
                 {
-                    lock (_queue)
+                    var item = new LogItem(level, instance, l, TimePattern);
+
+                    WriteToConsole(level, item.ToString() ?? string.Empty);
+
+                    // only buffer for the file when a log file is actually written; otherwise the
+                    // queue would grow unbounded whenever logging is switched off.
+                    if (LogMode != LogMode.Off)
                     {
-                        var item = new LogItem(level, instance, l, TimePattern);
-                        var text = item.ToString() ?? string.Empty;
-                        switch (level)
+                        lock (_queue)
                         {
-                            case LogLevel.Error:
-                            case LogLevel.FatalError:
-                            case LogLevel.Exception:
-                                Console.ForegroundColor = ConsoleColor.Red;
-                                break;
-                            case LogLevel.Warning:
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-                                break;
-                            default:
-                                break;
+                            _queue.Enqueue(item);
                         }
-
-                        Console.WriteLine(text.Length > _separatorWidth ? string.Concat(text.AsSpan(0, _separatorWidth - 3), "...") : text.PadRight(_width, ' '));
-                        Console.ResetColor();
-
-                        _queue.Enqueue(item);
                     }
+
+                    Record(level, instance, l, item.Timestamp);
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Logging failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Writes a single, color-coded entry to the console. Serialized so concurrent callers
+        /// cannot interleave color changes with each other.
+        /// </summary>
+        /// <param name="level">The level of the entry, which selects the console color.</param>
+        /// <param name="text">The fully formatted entry text.</param>
+        private void WriteToConsole(LogLevel level, string text)
+        {
+            lock (_consoleLock)
+            {
+                switch (level)
+                {
+                    case LogLevel.Error:
+                    case LogLevel.FatalError:
+                    case LogLevel.Exception:
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        break;
+                    case LogLevel.Warning:
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        break;
+                    default:
+                        break;
+                }
+
+                Console.WriteLine(text.Length > _separatorWidth ? string.Concat(text.AsSpan(0, _separatorWidth - 3), "...") : text.PadRight(_width, ' '));
+                Console.ResetColor();
+            }
+        }
+
+        /// <summary>
+        /// Adds an entry to the bounded in-memory ring buffer and notifies subscribers.
+        /// </summary>
+        /// <param name="level">The level of the entry.</param>
+        /// <param name="instance">The originating location.</param>
+        /// <param name="message">The log message.</param>
+        /// <param name="timestamp">The timestamp of the entry.</param>
+        private void Record(LogLevel level, string instance, string message, DateTime timestamp)
+        {
+            var entry = new LogEntry(timestamp, level, instance, message);
+
+            lock (_recentLock)
+            {
+                _recent.Enqueue(entry);
+
+                // honor a capacity that may have been lowered at runtime
+                while (_recent.Count > RecentCapacity && _recent.Count > 0)
+                {
+                    _recent.Dequeue();
+                }
+            }
+
+            try
+            {
+                EntryLogged?.Invoke(this, entry);
+            }
+            catch
+            {
+                // a faulty subscriber must never break logging
+            }
+        }
+
+        /// <summary>
+        /// Returns a snapshot of the most recent log entries currently retained in memory, oldest first.
+        /// </summary>
+        /// <returns>A point-in-time copy that is safe to enumerate without further locking.</returns>
+        public IReadOnlyList<LogEntry> GetRecentEntries()
+        {
+            lock (_recentLock)
+            {
+                return new List<LogEntry>(_recent);
             }
         }
 
@@ -229,7 +344,7 @@ namespace WebExpress.WebCore.WebLog
         /// <param name="sepChar">The separator.</param>
         public void Separator(char sepChar)
         {
-            Add(LogLevel.Seperartor, "".PadRight(_separatorWidth, sepChar));
+            Add(LogLevel.Separator, "".PadRight(_separatorWidth, sepChar));
         }
 
         /// <summary>
@@ -297,7 +412,7 @@ namespace WebExpress.WebCore.WebLog
             {
                 Console.WriteLine($"Debug-Logging failed: {ex.Message}");
             }
-            WarningCount++;
+            Interlocked.Increment(ref _warningCount);
         }
 
         /// <summary>
@@ -321,7 +436,7 @@ namespace WebExpress.WebCore.WebLog
             {
                 Console.WriteLine($"Debug-Logging failed: {ex.Message}");
             }
-            WarningCount++;
+            Interlocked.Increment(ref _warningCount);
         }
 
         /// <summary>
@@ -344,7 +459,7 @@ namespace WebExpress.WebCore.WebLog
             {
                 Console.WriteLine($"Debug-Logging failed: {ex.Message}");
             }
-            ErrorCount++;
+            Interlocked.Increment(ref _errorCount);
         }
 
         /// <summary>
@@ -368,7 +483,7 @@ namespace WebExpress.WebCore.WebLog
             {
                 Console.WriteLine($"Debug-Logging failed: {ex.Message}");
             }
-            ErrorCount++;
+            Interlocked.Increment(ref _errorCount);
         }
 
         /// <summary>
@@ -382,17 +497,16 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace()?.GetFrame(1).GetMethod();
+                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
                 var className = methodInfo?.ReflectedType.Name;
 
                 Add(LogLevel.FatalError, message, $"{className}.{instance}", line, file);
-
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Debug-Logging failed: {ex.Message}");
             }
-            ErrorCount++;
+            Interlocked.Increment(ref _errorCount);
         }
 
         /// <summary>
@@ -411,13 +525,12 @@ namespace WebExpress.WebCore.WebLog
                 var className = methodInfo?.ReflectedType.Name;
 
                 Add(LogLevel.FatalError, string.Format(message, args), $"{className}.{instance}", line, file);
-
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Debug-Logging failed: {ex.Message}");
             }
-            ErrorCount++;
+            Interlocked.Increment(ref _errorCount);
         }
 
         /// <summary>
@@ -434,21 +547,17 @@ namespace WebExpress.WebCore.WebLog
                 var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
                 var className = methodInfo?.ReflectedType.Name;
 
-                lock (_queue)
-                {
-                    Add(LogLevel.Exception, exception?.Message.Trim(), $"{className}.{instance}", line, file);
-                    Add(LogLevel.Exception, exception?.StackTrace is not null
-                        ? exception?.StackTrace.Trim()
-                        : exception?.Message.Trim(), $"{className}.{instance}", line, file);
-
-                }
+                Add(LogLevel.Exception, exception?.Message.Trim(), $"{className}.{instance}", line, file);
+                Add(LogLevel.Exception, exception?.StackTrace is not null
+                    ? exception?.StackTrace.Trim()
+                    : exception?.Message.Trim(), $"{className}.{instance}", line, file);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Debug-Logging failed: {ex.Message}");
             }
-            ExceptionCount++;
-            ErrorCount++;
+            Interlocked.Increment(ref _exceptionCount);
+            Interlocked.Increment(ref _errorCount);
         }
 
         /// <summary>
@@ -460,15 +569,19 @@ namespace WebExpress.WebCore.WebLog
         /// <param name="file">The source file.</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
         {
+            // capturing the call stack to derive the class name is expensive; skip it entirely when
+            // debug output is disabled, which is the common case outside of troubleshooting.
+            if (!DebugMode)
+            {
+                return;
+            }
+
             try
             {
                 var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
                 var className = methodInfo?.ReflectedType.Name;
 
-                if (DebugMode)
-                {
-                    Add(LogLevel.Debug, message, $"{className}.{instance}", line, file);
-                }
+                Add(LogLevel.Debug, message, $"{className}.{instance}", line, file);
             }
             catch (Exception ex)
             {
@@ -486,15 +599,18 @@ namespace WebExpress.WebCore.WebLog
         /// <param name="args">Parameter für die Formatierung der Nachricht</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args)
         {
+            // see the parameterless-args overload: avoid the stack walk unless debug output is on.
+            if (!DebugMode)
+            {
+                return;
+            }
+
             try
             {
                 var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
                 var className = methodInfo?.ReflectedType.Name;
 
-                if (DebugMode)
-                {
-                    Add(LogLevel.Debug, string.Format(message, args), $"{className}.{instance}", line, file);
-                }
+                Add(LogLevel.Debug, string.Format(message, args), $"{className}.{instance}", line, file);
             }
             catch (Exception ex)
             {
@@ -503,17 +619,18 @@ namespace WebExpress.WebCore.WebLog
         }
 
         /// <summary>
-        /// Stops logging.
+        /// Stops logging. Signals the worker thread, waits briefly for it to finish and writes any
+        /// entries that are still pending.
         /// </summary>
         public void Close()
         {
             _done = true;
 
-            // protect file writing from concurrent access
-            lock (_path)
-            {
-                Flush();
-            }
+            var worker = _workerThread;
+            worker?.Join(TimeSpan.FromSeconds(6));
+            _workerThread = null;
+
+            Flush();
         }
 
         /// <summary>
@@ -521,9 +638,9 @@ namespace WebExpress.WebCore.WebLog
         /// </summary>
         public void Clear()
         {
-            ErrorCount = 0;
-            WarningCount = 0;
-            ExceptionCount = 0;
+            Interlocked.Exchange(ref _errorCount, 0);
+            Interlocked.Exchange(ref _warningCount, 0);
+            Interlocked.Exchange(ref _exceptionCount, 0);
         }
 
         /// <summary>
@@ -540,19 +657,28 @@ namespace WebExpress.WebCore.WebLog
                 _queue.Clear();
             }
 
-            // protect file writing from concurrent access
-            if (list.Count > 0 && LogMode != LogMode.Off)
+            if (list.Count == 0 || LogMode == LogMode.Off || string.IsNullOrEmpty(Filename))
             {
-                lock (_path)
+                return;
+            }
+
+            // protect file writing from concurrent access; a transient IO failure must not take down
+            // the background worker thread.
+            try
+            {
+                lock (_fileLock)
                 {
                     using var fs = new FileStream(Filename, FileMode.Append);
                     using var w = new StreamWriter(fs, Encoding);
                     foreach (var item in list)
                     {
-                        var str = item.ToString();
-                        w.WriteLine(str);
+                        w.WriteLine(item.ToString());
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Writing the log file failed: {ex.Message}");
             }
         }
 
@@ -563,16 +689,14 @@ namespace WebExpress.WebCore.WebLog
         {
             while (!_done)
             {
-                Thread.Sleep(5000);
-
-                // protect file writing from concurrent access
-                lock (_path)
+                // poll in small steps so Close responds quickly instead of waiting a full interval
+                for (var i = 0; i < 10 && !_done; i++)
                 {
-                    Flush();
+                    Thread.Sleep(500);
                 }
-            }
 
-            _workerThread = null;
+                Flush();
+            }
         }
 
         /// <summary>

@@ -7,7 +7,9 @@ using WebExpress.WebCore.WebMessage;
 namespace WebExpress.WebCore.WebEndpoint
 {
     /// <summary>
-    /// Represents a endpoint manager.
+    /// Contract for a registry of endpoints. An endpoint manager keeps track of the endpoints
+    /// (pages, resources, REST APIs, …) contributed by plugins and exposes their contexts so the
+    /// rest of the framework can find and route to them.
     /// </summary>
     public interface IEndpointManager : IComponentManager
     {

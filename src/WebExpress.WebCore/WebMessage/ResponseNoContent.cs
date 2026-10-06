@@ -16,7 +16,7 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         public ResponseNoContent()
         {
-            Reason = "NoContent";
+            Reason = "No Content";
         }
     }
 }

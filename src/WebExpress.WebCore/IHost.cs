@@ -3,7 +3,9 @@
 namespace WebExpress.WebCore
 {
     /// <summary>
-    /// The host interface.
+    /// Represents the running web server that hosts WebExpress. It is the top-level entry point
+    /// that owns the server-wide context (<see cref="IHttpServerContext"/>) and signals, via the
+    /// <see cref="Started"/> event, when the server is ready to accept requests.
     /// </summary>
     public interface IHost
     {

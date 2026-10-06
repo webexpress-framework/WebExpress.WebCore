@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebStatusPage;
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// Represents a response for a resource not found (404) according to RFC 2616 Section 6.
+    /// HTTP 404 (Not Found): sent when no resource matches the requested URI, i.e. the server has
+    /// nothing to return for that address (see RFC 2616 Section 6).
     /// </summary>
     [StatusCode(404)]
     public class ResponseNotFound : Response

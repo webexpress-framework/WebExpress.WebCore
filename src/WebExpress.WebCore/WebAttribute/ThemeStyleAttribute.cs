@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebAttribute
 {
     /// <summary>
-    /// Specifies the style for a theme.
+    /// Applied to a theme class to declare the CSS stylesheet that gives the theme its look. The
+    /// constructor takes the URI of the stylesheet that should be loaded for the theme.
     /// </summary>
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
     public class ThemeStyleAttribute : Attribute, IThemeAttribute

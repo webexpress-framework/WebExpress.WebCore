@@ -16,7 +16,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <summary>
         /// Determines whether a permanent redirection should occur.
         /// </summary>
-        public bool Permanet { get; set; }
+        public bool Permanent { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -27,7 +27,7 @@ namespace WebExpress.WebCore.WebMessage
             : base("Redirecting to " + uri)
         {
             Uri = uri;
-            Permanet = permanent;
+            Permanent = permanent;
         }
     }
 }

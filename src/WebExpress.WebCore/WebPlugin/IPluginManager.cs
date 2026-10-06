@@ -7,7 +7,8 @@ using WebExpress.WebCore.WebPlugin.Model;
 namespace WebExpress.WebCore.WebPlugin
 {
     /// <summary>
-    /// The plugin manager manages the WebExpress plugins.
+    /// Contract for the plugin registry. It tracks which plugins are loaded, raises events when a
+    /// plugin is added or removed, and gives the rest of the framework access to the active plugins.
     /// </summary>
     public interface IPluginManager : IComponentManager
     {

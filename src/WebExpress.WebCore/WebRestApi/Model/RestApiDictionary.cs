@@ -18,7 +18,7 @@ namespace WebExpress.WebCore.WebRestApi.Model
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContext">The application context.</param>
         /// <param name="restApiItem">The rest api item.</param>
-        /// <returns>True if the rest api item was added successfully, false if an element with the same status code already exists.</returns>
+        /// <returns>True if the rest api item was added successfully, false if an element with the same key already exists.</returns>
         public bool AddRestApiItem(IPluginContext pluginContext, IApplicationContext applicationContext, RestApiItem restApiItem)
         {
             var type = restApiItem.RestApiClass;

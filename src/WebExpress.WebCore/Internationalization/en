@@ -7,8 +7,8 @@ app.workingdirectory=Working directory: {0}
 app.packagebase=Package directory: {0}
 app.assetbase=Asset directory: {0}
 app.database=Data directory: {0}
-app.configurationdirectory=Configuration directory: {0}
-app.configuration=Configuration: {0}
+app.settingsdirectory=Settings directory: {0}
+app.settings=Settings: {0}
 app.logdirectory=Log directory: {0}
 app.log=Log: {0}
 app.uri=Uri: {0}
@@ -21,13 +21,16 @@ httpserver.notsupported=The operating system on which WebExpress is to be run is
 httpserver.start=The HttpServer was started on {0} at {1} o'clock.
 httpserver.connected={0}: Client has been connected.
 httpserver.rejected={0}: Client rejected.
-httpserver.request={0}: Request '{1}'
-httpserver.unexpected.request={0}: Unexpected request '{1}'
-httpserver.request.done={0}: Request has been processed in {1} ms. Status = {2}
+httpserver.request={0}: Request #{1} '{2}'
+httpserver.request.unexpected={0}: Unexpected request '{1}'
+httpserver.request.done={0}: Request #{1} has been processed in {2} ms. Status = {3}
 httpserver.connectionlimit=The limit for concurrent requests has been exceeded.
 httpserver.endpoint=Endpoint '{0}' is registered.
 httpserver.listen=The web server listens for the endpoint {0}.
 httpserver.listen.exeption=Failed to set up an endpoint for the Uri {0}.
+httpserver.listen.inuse=The endpoint is already in use by another process, such as another WebExpress instance. The HttpServer is not started and the application exits. ({0})
+httpserver.http3=HTTP/3 (QUIC) is active on the endpoint {0}; the UDP port must be open in the firewall.
+httpserver.http3.unsupported=HTTP/3 is unavailable because the operating system provides no QUIC (on Linux install the libmsquic package). The endpoint {0} serves HTTP/1.1 and HTTP/2.
 httpserver.listener.try=If you do not have access rights follow the instruction as an administrator in the console: 
 httpserver.listener.windows=netsh http add urlacl url={0} user=everyone listen=yes
 
@@ -41,8 +44,8 @@ componentmanager.remove=The component '{0}' has been removed.
 componentmanager.component=Components:
 componentmanager.name=Component: '{0}'
 
-logmanager.initialization:The log manager has been initialized.
-logmanager.titel:Log manager
+logmanager.initialization=The log manager has been initialized.
+logmanager.titel=Log manager
 
 internationalizationmanager.initialization=The internationalization manager has been initialized.
 internationalizationmanager.register=The plugin '{0}' is registered in the internationalization manager.
@@ -57,6 +60,13 @@ packagemanager.save=The catalog is saved.
 packagemanager.packagenotfound=The package '{0}' was not found in the file system.
 packagemanager.boot.notfound=The plugin '{0}' is unknown.
 packagemanager.package=Package: '{0}'
+packagemanager.settings.deployed=The settings file '{0}' was deployed to the settings directory.
+packagemanager.settings.existing=The settings file '{0}' already exists in the settings directory and was kept.
+packagemanager.settings.ignored=The package entry '{0}' is not a settings file and was ignored.
+packagemanager.settings.invalid=The settings file '{0}' of the package is not valid json and was not deployed.
+packagemanager.settings.outofscope=The settings file '{0}' of the package sets the key '{1}' outside of '{2}' and was not deployed.
+packagemanager.settings.unwritable=The settings file '{0}' could not be written to the settings directory: {1}
+packagemanager.cluster.busy=Another instance is changing the packages. Please try again shortly.
 
 pluginmanager.initialization=The plugin manager has been initialized.
 pluginmanager.load={0}.dll is loading. Version = '{1}'
@@ -77,13 +87,15 @@ pluginmanager.applicationless=The plugin '{0}' does not have any information abo
 
 applicationmanager.titel=Application manager:
 applicationmanager.initialization=The application manager has been initialized.
-applicationmanager.registerapplication=The application '{0}' has been created and registered in the application manager.
-applicationmanager.duplicateapplication=The application '{0}' has already been registered in the application manager.
+applicationmanager.register=The application '{0}' has been created and registered in the application manager.
+applicationmanager.update=The name or the icon of the application '{0}' was changed at runtime.
+applicationmanager.duplicate=The application '{0}' has already been registered in the application manager.
 applicationmanager.application=Application: '{0}'
 applicationmanager.application.initialization=The application'{0}' has been initialized.
 applicationmanager.application.processing.start=The application '{0}' is running.
 applicationmanager.application.processing.end=The running of the application '{0}' has been stopped.
 applicationmanager.application.boot.notfound=The plugin '{0}' is unknown.
+applicationmanager.application.failed=The application '{0}' could not be created and is not available.
 
 resourcemanager.initialization=The resource manager has been initialized.
 resourcemanager.register={0} resource(s) have been assigned to the application '{1}'.
@@ -124,6 +136,10 @@ sitemapmanager.merge.error=The two sitemaps '{0}' and '{1}' could not be merged.
 
 sessionmanager.initialization=The session manager has been initialized.
 sessionmanager.cleanup.removed=The session with the id '{0}' has been removed.
+sessionmanager.cluster.unserializable=The session property '{0}' cannot be serialized and stays on this instance: {1}
+sessionmanager.cluster.dropped=The session property '{0}' of the session '{1}' is unknown on this instance and was dropped.
+clustermanager.clockskew=The clock of the cluster instance '{0}' differs from this instance's by {1} seconds. Synchronize the clocks (NTP): stored deadlines and messages between instances depend on them.
+clustermanager.initialization=The cluster manager has been initialized (node '{0}', clustered: {1}).
 
 settingpagemanager.initialization=The setting page manager has been initialized.
 settingpagemanager.register.category=The setting category '{0}' has been registered in the application '{1}'.
@@ -149,6 +165,7 @@ jobmanager.duplicate=The job '{0}' has already been registered. Therefore, the a
 jobmanager.jobless=The job '{0}' does not have any information about the job.
 jobmanager.job=Job: '{0}' for plugin '{1}'
 jobmanager.job.process=The job '{0}' is executed.
+jobmanager.job.claimed=The job '{0}' is executed by another instance of the cluster.
 jobmanager.cron.parseerror=Syntax error in the timing of a job. The value '{0}' cannot be processed.
 jobmanager.cron.range=Syntax error in the timing of a job. The value '{0}' is outside the valid range.
 
@@ -161,6 +178,7 @@ fragmentmanager.titel=Fragments:
 fragmentmanager.fragment=Fragment: '{0}' for application '{1}'.
 
 identitymanager.initialization=The identity manager has been initialized.
+identitymanager.authentication.invalid=The section WebExpress:Authentication cannot issue tokens: {0}
 identitymanager.registerpermission=The permission '{0}' has been assigned to the application '{1}' and registered in the identity manager.
 identitymanager.duplicatepermission=The permission '{0}' has already been registered in the application '{1}'.
 identitymanager.registerpolicy=The policy '{0}' has been assigned to the application '{1}' and registered in the identity manager.
@@ -175,6 +193,7 @@ identitymanager.policy.systemaccess.description=Policy for system-level operatio
 includemanager.initialization=The include manager has been initialized.
 includemanager.addinclude=The client resource '{0}' has been registered in the application '{1}'.
 includemanager.removeinclude=The client resource '{0}' has been removed from the application '{1}'.
+includemanager.unresolvedfile=The file '{1}' of the client resource '{0}' points to the route '{2}', where no asset is served in the application '{3}'.
 
 socketmanager.initialization=The WebSocket manager has been initialized.
 socketmanager.addsocket=The WebSocket '{0}' has been registered in the application '{1}'.
@@ -203,4 +222,20 @@ validation.missing_fragment={0} must contain '{1}'.
 validation.suffix_mismatch={0} must end with '{1}'.
 validation.invalid_enum={0} must be a valid {1} value.
 validation.invalid_date={0} must be a valid date.
- 
+certificate.invalid=Certificate {0} cannot be used for HTTPS: {1}.
+certificate.expiring=Certificate {0} expires at {1}; its remaining lifetime reached the warning threshold of {2} days.
+certificate.load_failed=Certificate {0} could not be loaded from store {1}. Check the reference, access permissions, PFX content and credential.
+
+root.title=Applications
+root.introduction=Select an application to continue.
+root.empty=No applications are available.
+
+health.host_unavailable=The HTTP host is starting or stopping.
+health.component_unavailable=A component manager failed to initialize.
+health.application_unavailable=The application '{0}' of the plugin '{1}' could not be created: {2}
+health.failed=Health check {0}/{1} failed: {2}
+health.timeout=Health check {0}/{1} exceeded its time budget of {2}.
+
+metrics.failed=Metric collector {0}/{1} failed: {2}
+metrics.timeout=Metric collector {0}/{1} exceeded its time budget of {2}.
+metrics.conflict=Metric values of {0} were dropped: {1}

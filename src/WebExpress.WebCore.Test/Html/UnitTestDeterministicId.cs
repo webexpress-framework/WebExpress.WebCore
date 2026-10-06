@@ -56,6 +56,25 @@ namespace WebExpress.WebCore.Test.Html
 
 
         /// <summary>
+        /// Tests that repeated calls from the same call site (as happens when controls are created
+        /// in a loop) all yield distinct ids. The previous call-stack based implementation produced
+        /// duplicates here because the stack is identical across iterations.
+        /// </summary>
+        [Fact]
+        public void CreateInLoopAreUnique()
+        {
+            // act
+            var ids = new HashSet<string>();
+            for (var i = 0; i < 1000; i++)
+            {
+                ids.Add(DeterministicId.Create());
+            }
+
+            // validation
+            Assert.Equal(1000, ids.Count);
+        }
+
+        /// <summary>
         /// Generates a deterministic identifier.
         /// <returns>
         /// A string that represents the generated deterministic identifier.

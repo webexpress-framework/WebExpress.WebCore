@@ -38,6 +38,6 @@
         /// <summary>
         /// A separator message. This is used to separate groups of messages in the logging output.
         /// </summary>
-        Seperartor
+        Separator
     }
 }

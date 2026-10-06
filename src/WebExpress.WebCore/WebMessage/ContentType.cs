@@ -66,7 +66,8 @@
         Xls,
 
         /// <summary>
-        /// Microsoft Excel Open XML spreadsheet (.xlx).
+        /// Deprecated misspelling of the Excel Open XML spreadsheet. Use <see cref="Xlsx"/> instead;
+        /// retained so existing ordinal values and the legacy ".xlx" extension keep resolving.
         /// </summary>
         Xlx,
 
@@ -118,7 +119,102 @@
         /// <summary>
         /// MPEG-4 video file (.mp4).
         /// </summary>
-        Mp4
+        Mp4,
+
+        /// <summary>
+        /// JavaScript Object Notation (.json).
+        /// </summary>
+        Json,
+
+        /// <summary>
+        /// Comma-separated values (.csv).
+        /// </summary>
+        Csv,
+
+        /// <summary>
+        /// WebAssembly binary module (.wasm).
+        /// </summary>
+        Wasm,
+
+        /// <summary>
+        /// Web Open Font Format (.woff).
+        /// </summary>
+        Woff,
+
+        /// <summary>
+        /// Web Open Font Format 2 (.woff2).
+        /// </summary>
+        Woff2,
+
+        /// <summary>
+        /// TrueType font (.ttf).
+        /// </summary>
+        Ttf,
+
+        /// <summary>
+        /// OpenType font (.otf).
+        /// </summary>
+        Otf,
+
+        /// <summary>
+        /// Bitmap image (.bmp).
+        /// </summary>
+        Bmp,
+
+        /// <summary>
+        /// AV1 Image File Format (.avif).
+        /// </summary>
+        Avif,
+
+        /// <summary>
+        /// WebM video file (.webm).
+        /// </summary>
+        Webm,
+
+        /// <summary>
+        /// Ogg media container (.ogg).
+        /// </summary>
+        Ogg,
+
+        /// <summary>
+        /// Waveform audio file (.wav).
+        /// </summary>
+        Wav,
+
+        /// <summary>
+        /// Microsoft Excel Open XML spreadsheet (.xlsx).
+        /// </summary>
+        Xlsx,
+
+        /// <summary>
+        /// Microsoft PowerPoint Open XML presentation (.pptx).
+        /// </summary>
+        Pptx,
+
+        /// <summary>
+        /// Gzip-compressed archive (.gz).
+        /// </summary>
+        Gz,
+
+        /// <summary>
+        /// Tape archive (.tar).
+        /// </summary>
+        Tar,
+
+        /// <summary>
+        /// 7-Zip compressed archive (.7z).
+        /// </summary>
+        SevenZip,
+
+        /// <summary>
+        /// Embedded OpenType font (.eot).
+        /// </summary>
+        Eot,
+
+        /// <summary>
+        /// Executable file (.exe). Served as a generic binary download.
+        /// </summary>
+        Exe
     }
 
     /// <summary>
@@ -153,6 +249,8 @@
                 ".txt" => ContentType.Txt,
                 ".css" => ContentType.Css,
                 ".js" => ContentType.Js,
+                ".mjs" => ContentType.Js,
+                ".map" => ContentType.Json,
                 ".xml" => ContentType.Xml,
                 ".html" => ContentType.Html,
                 ".htm" => ContentType.Htm,
@@ -160,8 +258,10 @@
                 ".doc" => ContentType.Doc,
                 ".docx" => ContentType.Docx,
                 ".xls" => ContentType.Xls,
+                ".xlsx" => ContentType.Xlsx,
                 ".xlx" => ContentType.Xlx,
                 ".ppt" => ContentType.Ppt,
+                ".pptx" => ContentType.Pptx,
                 ".gif" => ContentType.Gif,
                 ".png" => ContentType.Png,
                 ".svg" => ContentType.Svg,
@@ -169,8 +269,25 @@
                 ".jpg" => ContentType.Jpg,
                 ".ico" => ContentType.Ico,
                 ".webp" => ContentType.WebP,
+                ".bmp" => ContentType.Bmp,
+                ".avif" => ContentType.Avif,
                 ".mp3" => ContentType.Mp3,
                 ".mp4" => ContentType.Mp4,
+                ".webm" => ContentType.Webm,
+                ".ogg" => ContentType.Ogg,
+                ".wav" => ContentType.Wav,
+                ".json" => ContentType.Json,
+                ".csv" => ContentType.Csv,
+                ".wasm" => ContentType.Wasm,
+                ".woff" => ContentType.Woff,
+                ".woff2" => ContentType.Woff2,
+                ".ttf" => ContentType.Ttf,
+                ".otf" => ContentType.Otf,
+                ".eot" => ContentType.Eot,
+                ".gz" => ContentType.Gz,
+                ".tar" => ContentType.Tar,
+                ".7z" => ContentType.SevenZip,
+                ".exe" => ContentType.Exe,
                 _ => ContentType.Unknown,
             };
         }
@@ -193,6 +310,7 @@
                 "text/plain" => ContentType.Txt,
                 "text/css" => ContentType.Css,
                 "application/javascript" => ContentType.Js,
+                "text/javascript" => ContentType.Js,
                 "application/xml" => ContentType.Xml,
                 "text/xml" => ContentType.Xml,
                 "text/html" => ContentType.Html,
@@ -200,8 +318,9 @@
                 "application/msword" => ContentType.Doc,
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ContentType.Docx,
                 "application/vnd.ms-excel" => ContentType.Xls,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ContentType.Xlx,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ContentType.Xlsx,
                 "application/vnd.ms-powerpoint" => ContentType.Ppt,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation" => ContentType.Pptx,
                 "image/gif" => ContentType.Gif,
                 "image/png" => ContentType.Png,
                 "image/svg+xml" => ContentType.Svg,
@@ -209,8 +328,24 @@
                 "image/jpg" => ContentType.Jpg,
                 "image/x-icon" => ContentType.Ico,
                 "image/webp" => ContentType.WebP,
+                "image/bmp" => ContentType.Bmp,
+                "image/avif" => ContentType.Avif,
                 "audio/mpeg" => ContentType.Mp3,
                 "video/mp4" => ContentType.Mp4,
+                "video/webm" => ContentType.Webm,
+                "audio/ogg" => ContentType.Ogg,
+                "audio/wav" => ContentType.Wav,
+                "application/json" => ContentType.Json,
+                "text/csv" => ContentType.Csv,
+                "application/wasm" => ContentType.Wasm,
+                "font/woff" => ContentType.Woff,
+                "font/woff2" => ContentType.Woff2,
+                "font/ttf" => ContentType.Ttf,
+                "font/otf" => ContentType.Otf,
+                "application/vnd.ms-fontobject" => ContentType.Eot,
+                "application/gzip" => ContentType.Gz,
+                "application/x-tar" => ContentType.Tar,
+                "application/x-7z-compressed" => ContentType.SevenZip,
                 _ => ContentType.Unknown,
             };
         }
@@ -220,7 +355,7 @@
         /// </summary>
         /// <param name="extension">The <see cref="ContentType"/> value to convert.</param>
         /// <returns>
-        /// A MIME type string such as <c>"image/png"</c> or <c>"application/pdf"</c>. 
+        /// A MIME type string such as <c>"image/png"</c> or <c>"application/pdf"</c>.
         /// If the content type is <see cref="ContentType.Unknown"/>, an empty string is returned.
         /// </returns>
         public static string GetMimeType(this ContentType extension)
@@ -230,16 +365,18 @@
                 ContentType.Pdf => "application/pdf",
                 ContentType.Txt => "text/plain",
                 ContentType.Css => "text/css",
-                ContentType.Js => "application/javascript",
+                ContentType.Js => "text/javascript",
                 ContentType.Xml => "text/xml",
                 ContentType.Html => "text/html",
                 ContentType.Htm => "text/html",
                 ContentType.Zip => "application/zip",
                 ContentType.Doc => "application/msword",
-                ContentType.Docx => "application/msword",
+                ContentType.Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 ContentType.Xls => "application/vnd.ms-excel",
                 ContentType.Xlx => "application/vnd.ms-excel",
+                ContentType.Xlsx => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 ContentType.Ppt => "application/vnd.ms-powerpoint",
+                ContentType.Pptx => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 ContentType.Gif => "image/gif",
                 ContentType.Png => "image/png",
                 ContentType.Svg => "image/svg+xml",
@@ -247,8 +384,25 @@
                 ContentType.Jpg => "image/jpeg",
                 ContentType.Ico => "image/x-icon",
                 ContentType.WebP => "image/webp",
+                ContentType.Bmp => "image/bmp",
+                ContentType.Avif => "image/avif",
                 ContentType.Mp3 => "audio/mpeg",
                 ContentType.Mp4 => "video/mp4",
+                ContentType.Webm => "video/webm",
+                ContentType.Ogg => "audio/ogg",
+                ContentType.Wav => "audio/wav",
+                ContentType.Json => "application/json",
+                ContentType.Csv => "text/csv",
+                ContentType.Wasm => "application/wasm",
+                ContentType.Woff => "font/woff",
+                ContentType.Woff2 => "font/woff2",
+                ContentType.Ttf => "font/ttf",
+                ContentType.Otf => "font/otf",
+                ContentType.Eot => "application/vnd.ms-fontobject",
+                ContentType.Gz => "application/gzip",
+                ContentType.Tar => "application/x-tar",
+                ContentType.SevenZip => "application/x-7z-compressed",
+                ContentType.Exe => "application/octet-stream",
                 _ => "application/octet-stream",
             };
         }
@@ -258,7 +412,7 @@
         /// </summary>
         /// <param name="extension">The <see cref="ContentType"/> value to convert.</param>
         /// <returns>
-        /// A file pattern string such as <c>"*.pdf"</c> or <c>"*.jpg"</c>. 
+        /// A file pattern string such as <c>"*.pdf"</c> or <c>"*.jpg"</c>.
         /// If the content type is <see cref="ContentType.Unknown"/>, an empty string is returned.
         /// </returns>
 
@@ -278,7 +432,9 @@
                 ContentType.Docx => "*.docx",
                 ContentType.Xls => "*.xls",
                 ContentType.Xlx => "*.xlx",
+                ContentType.Xlsx => "*.xlsx",
                 ContentType.Ppt => "*.ppt",
+                ContentType.Pptx => "*.pptx",
                 ContentType.Gif => "*.gif",
                 ContentType.Png => "*.png",
                 ContentType.Svg => "*.svg",
@@ -286,8 +442,25 @@
                 ContentType.Jpg => "*.jpg",
                 ContentType.Ico => "*.ico",
                 ContentType.WebP => "*.webp",
+                ContentType.Bmp => "*.bmp",
+                ContentType.Avif => "*.avif",
                 ContentType.Mp3 => "*.mp3",
                 ContentType.Mp4 => "*.mp4",
+                ContentType.Webm => "*.webm",
+                ContentType.Ogg => "*.ogg",
+                ContentType.Wav => "*.wav",
+                ContentType.Json => "*.json",
+                ContentType.Csv => "*.csv",
+                ContentType.Wasm => "*.wasm",
+                ContentType.Woff => "*.woff",
+                ContentType.Woff2 => "*.woff2",
+                ContentType.Ttf => "*.ttf",
+                ContentType.Otf => "*.otf",
+                ContentType.Eot => "*.eot",
+                ContentType.Gz => "*.gz",
+                ContentType.Tar => "*.tar",
+                ContentType.SevenZip => "*.7z",
+                ContentType.Exe => "*.exe",
                 _ => "*.*",
             };
         }

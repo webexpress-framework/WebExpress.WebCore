@@ -9,7 +9,7 @@
         /// Initializes a new instance of the class.
         /// </summary>
         public HtmlElementMultimediaMap()
-            : base("map", false)
+            : base("map")
         {
         }
     }

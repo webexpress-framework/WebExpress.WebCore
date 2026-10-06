@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace WebExpress.WebCore.WebParameter
 {
@@ -12,6 +13,7 @@ namespace WebExpress.WebCore.WebParameter
         /// <summary>
         /// Gets the key of the parameter.
         /// </summary>
+        [JsonInclude]
         public string Key { get; private set; }
 
         /// <summary>

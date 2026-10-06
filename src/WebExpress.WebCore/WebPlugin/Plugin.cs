@@ -1,7 +1,9 @@
 ﻿namespace WebExpress.WebCore.WebPlugin
 {
     /// <summary>
-    /// This represents an plugin.
+    /// Base class for a WebExpress plugin. Derive from it to create a plugin; the framework
+    /// instantiates the subclass, supplies its <see cref="PluginContext"/> (id, name, version, …),
+    /// and calls <c>Run</c> at start-up. See <see cref="IPlugin"/>.
     /// </summary>
     public abstract class Plugin : IPlugin
     {

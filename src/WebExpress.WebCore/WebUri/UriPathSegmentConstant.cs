@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebPage;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// Constant path segment.
+    /// A fixed-literal part of a URI path, such as <c>ix</c> in <c>/ix/home</c>. During routing it
+    /// matches a request only when that part of the path is exactly equal (case-insensitively).
     /// </summary>
     public class UriPathSegmentConstant : IUriPathSegmentConstant
     {

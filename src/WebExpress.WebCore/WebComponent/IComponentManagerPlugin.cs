@@ -4,7 +4,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebComponent
 {
     /// <summary>
-    /// Interface of the manager classes.
+    /// A component manager that fills itself from plugins: when a plugin is loaded it discovers and
+    /// registers the relevant entries, and when a plugin is unloaded it removes them again. Most of
+    /// the framework's managers implement this so their content follows the set of active plugins.
     /// </summary>
     public interface IComponentManagerPlugin : IComponentManager
     {

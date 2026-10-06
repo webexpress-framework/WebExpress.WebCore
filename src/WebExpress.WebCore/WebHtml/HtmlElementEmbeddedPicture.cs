@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a picture.
+    /// Renders an HTML <c>&lt;picture&gt;</c> element, a container that lets the browser choose between
+    /// several image sources (for example by screen size or format) and falls back to a contained image.
     /// </summary>
     public class HtmlElementEmbeddedPicture : HtmlElement, IHtmlElementEmbedded
     {

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using WebExpress.WebCore.WebIcon;
 using WebExpress.WebCore.WebMessage;
@@ -33,6 +34,12 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>A Regex object for matching relative URIs.</returns>
         [GeneratedRegex(@"^(\/([a-zA-Z0-9-+*%()=._/$]*))?(\?([a-zA-Z0-9-+*%()=._/$&]*))?(#([a-zA-Z0-9-+*%()=._/$]*))?$")]
         private static partial Regex RelativeUriRegex();
+
+        /// <summary>
+        /// Cached scheme tokens used to cheaply pre-filter whether a string looks like an
+        /// absolute uri before running the more expensive absolute-uri regular expression.
+        /// </summary>
+        private static readonly string[] SchemeNames = Enum.GetNames<UriScheme>();
 
         /// <summary>
         /// The scheme (e.g. Http, FTP).
@@ -96,12 +103,10 @@ namespace WebExpress.WebCore.WebUri
 
                 foreach (var path in PathSegments)
                 {
-                    if (path is IUriPathSegmentVariable variable)
+                    // only variable segments contribute parameters; a null/blank name cannot be a dictionary key
+                    if (path is IUriPathSegmentVariable variable && !string.IsNullOrEmpty(variable.VariableName))
                     {
-                        if (!dic.ContainsKey(variable.VariableName?.ToLower()))
-                        {
-                            dic.Add(variable.VariableName?.ToLower(), variable.Value);
-                        }
+                        dic.TryAdd(variable.VariableName.ToLowerInvariant(), variable.Value);
                     }
                 }
 
@@ -141,7 +146,7 @@ namespace WebExpress.WebCore.WebUri
                 return;
             }
 
-            if (Enum.GetNames<UriScheme>().Where(x => uri.StartsWith(x, StringComparison.OrdinalIgnoreCase)).Any())
+            if (SchemeNames.Any(x => uri.StartsWith(x, StringComparison.OrdinalIgnoreCase)))
             {
                 var match = UriRegex().Match(uri);
 
@@ -158,25 +163,32 @@ namespace WebExpress.WebCore.WebUri
                 {
                     User = match.Groups[2].Success ? match.Groups[2].Value : null,
                     Host = match.Groups[3].Success ? match.Groups[3].Value : null,
-                    Port = match.Groups[4].Success ? Convert.ToInt32(match.Groups[4].Value) : null
+                    // an empty port group (e.g. "host:/") must not throw a format exception
+                    Port = int.TryParse(match.Groups[4].Value, out var port) ? port : null
                 };
 
                 uri = match.Groups[5].Value;
-
             }
 
             var relativeMatch = RelativeUriRegex().Match(uri);
 
+            var segments = new List<IUriPathSegment>(PathSegments);
             foreach (var p in relativeMatch.Groups[2].Value.Split('/', StringSplitOptions.RemoveEmptyEntries))
             {
-                PathSegments = PathSegments.Concat([new UriPathSegmentConstant(p)]);
+                segments.Add(new UriPathSegmentConstant(p));
             }
+            PathSegments = segments;
 
-            foreach (var q in relativeMatch.Groups[4].Success ? relativeMatch.Groups[4].Value?.Split('&') : [])
+            if (relativeMatch.Groups[4].Success)
             {
-                var item = q.Split('=');
-
-                Query = Query.Concat([new UriQuery(item[0], item.Length > 1 ? item[1] : null)]);
+                var query = new List<IUriQuery>();
+                foreach (var q in relativeMatch.Groups[4].Value.Split('&'))
+                {
+                    // split on the first '=' only so values may legitimately contain '='
+                    var item = q.Split('=', 2);
+                    query.Add(new UriQuery(item[0], item.Length > 1 ? item[1] : null));
+                }
+                Query = query;
             }
 
             Fragment = relativeMatch.Groups[6].Success ? relativeMatch.Groups[6].Value : null;
@@ -190,8 +202,8 @@ namespace WebExpress.WebCore.WebUri
         {
             Scheme = uri?.Scheme ?? UriScheme.Http;
             Authority = uri?.Authority;
-            PathSegments = uri?.PathSegments.Select(x => x.Copy()) ?? [];
-            Query = uri?.Query.Select(x => new UriQuery(x.Key, x.Value)) ?? [];
+            PathSegments = [.. uri?.PathSegments.Select(x => x.Copy()) ?? []];
+            Query = [.. uri?.Query.Select(x => new UriQuery(x.Key, x.Value)) ?? []];
             Fragment = uri?.Fragment;
         }
 
@@ -201,12 +213,8 @@ namespace WebExpress.WebCore.WebUri
         /// <param name="segments">The path segments.</param>
         public UriEndpoint(params IUriPathSegment[] segments)
         {
-            PathSegments = PathSegments.Concat([new UriPathSegmentRoot()]);
-
-            foreach (var segment in segments.Where(x => x is not UriPathSegmentRoot))
-            {
-                PathSegments = PathSegments.Concat([segment]);
-            }
+            // PathSegments is already seeded with the single root; only non-root segments are appended
+            PathSegments = [.. PathSegments.Concat(segments?.Where(x => x is not UriPathSegmentRoot) ?? [])];
         }
 
         /// <summary>
@@ -244,8 +252,8 @@ namespace WebExpress.WebCore.WebUri
         {
             Scheme = scheme;
             Authority = authority;
-            PathSegments = PathSegments.Concat(segments?.Where(x => x is not UriPathSegmentRoot).Select(x => x.Copy()) ?? []);
-            Query = query.Select(x => new UriQuery(x.Key, x.Value));
+            PathSegments = [.. PathSegments.Concat(segments?.Where(x => x is not UriPathSegmentRoot).Select(x => x.Copy()) ?? [])];
+            Query = [.. query?.Select(x => new UriQuery(x.Key, x.Value)) ?? []];
             Fragment = fragment;
         }
 
@@ -259,7 +267,7 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>The current instance for method chaining.</returns>
         public virtual IUri Add(params IUriQuery[] query)
         {
-            Query = Query.Concat(query.Where(x => x is not null));
+            Query = [.. Query.Concat(query?.Where(x => x is not null) ?? [])];
 
             return this;
         }
@@ -277,9 +285,9 @@ namespace WebExpress.WebCore.WebUri
             }
 
             var copy = new UriEndpoint((IUri)this);
-            copy.PathSegments = copy.PathSegments
+            copy.PathSegments = [.. copy.PathSegments
                 .Concat(segment.Split('/', StringSplitOptions.RemoveEmptyEntries)
-                .Select(x => new UriPathSegmentConstant(x)));
+                .Select(x => new UriPathSegmentConstant(x)))];
 
             return copy;
         }
@@ -291,14 +299,15 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>A new IUri instance representing the URI after concatenation.</returns>
         public virtual IUri Concat(params IUriPathSegment[] segments)
         {
-            if (segments.Length == 0)
+            if (segments is null || segments.Length == 0)
             {
                 return this;
             }
 
+            // the copy constructor already deep-copies the existing segments, so they are not re-copied here
             var copy = new UriEndpoint((IUri)this);
-            copy.PathSegments = copy.PathSegments
-                .Select(x => x.Copy());
+            copy.PathSegments = [.. copy.PathSegments
+                .Concat(segments.Where(x => x is not null && !x.IsEmpty))];
 
             return copy;
         }
@@ -317,7 +326,7 @@ namespace WebExpress.WebCore.WebUri
         public IUri Concat(params IUriQuery[] query)
         {
             var copy = new UriEndpoint((IUri)this);
-            copy.Query = copy.Query.Concat(query.Where(x => x is not null));
+            copy.Query = [.. copy.Query.Concat(query?.Where(x => x is not null) ?? [])];
 
             return copy;
         }
@@ -332,21 +341,21 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>The sub uri with the specified number of elements.</returns>
         public virtual IUri Take(int count)
         {
-            var copy = new UriEndpoint((IUri)this);
-            var path = copy.PathSegments.ToList();
-            copy.PathSegments = [];
-
             if (count == 0)
             {
                 return new UriEndpoint();
             }
-            else if (count > 0)
+
+            var copy = new UriEndpoint((IUri)this);
+            var path = copy.PathSegments.ToList();
+
+            if (count > 0)
             {
-                copy.PathSegments = copy.PathSegments.Concat(path.Take(count));
+                copy.PathSegments = [.. path.Take(count)];
             }
-            else if (count < 0 && Math.Abs(count) < path.Count)
+            else if (Math.Abs(count) < path.Count)
             {
-                copy.PathSegments = copy.PathSegments.Concat(path.Take(path.Count + count));
+                copy.PathSegments = [.. path.Take(path.Count + count)];
             }
             else
             {
@@ -409,17 +418,14 @@ namespace WebExpress.WebCore.WebUri
             {
                 return null;
             }
+
+            var copy = new UriEndpoint((IUri)this);
             if (count > 0)
             {
-                var copy = new UriEndpoint((IUri)this);
-                var path = copy.PathSegments.ToList();
-                copy.PathSegments = [];
-                copy.PathSegments = copy.PathSegments.Concat(path.Skip(count));
-
-                return copy;
+                copy.PathSegments = [.. copy.PathSegments.Skip(count)];
             }
 
-            return new UriEndpoint((IUri)this);
+            return copy;
         }
 
         /// <summary>
@@ -429,7 +435,7 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>true if successful, false otherwise.</returns>
         public virtual bool Contains(string segment)
         {
-            return PathSegments.Where(x => x.Value.Equals(segment, StringComparison.OrdinalIgnoreCase)).Any();
+            return PathSegments.Any(x => x.Value.Equals(segment, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>
@@ -439,24 +445,24 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>true if part of the uri, false otherwise.</returns>
         public bool StartsWith(IUri uri)
         {
-            var a = uri.PathSegments;
-            var b = PathSegments;
+            // materialize once to avoid repeated enumeration (Count/ElementAt would be O(n²))
+            var a = uri.PathSegments as IReadOnlyList<IUriPathSegment> ?? uri.PathSegments.ToList();
+            var b = PathSegments as IReadOnlyList<IUriPathSegment> ?? PathSegments.ToList();
 
-            if (a.Count() > b.Count())
+            if (a.Count > b.Count)
             {
                 return false;
             }
 
-            for (int i = 0; i < a.Count(); i++)
+            for (int i = 0; i < a.Count; i++)
             {
-                if (!a.ElementAt(i).Value.Equals(b.ElementAt(i).Value, StringComparison.OrdinalIgnoreCase))
+                if (!a[i].Value.Equals(b[i].Value, StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
                 }
             }
 
             return true;
-
         }
 
         /// <summary>
@@ -500,7 +506,7 @@ namespace WebExpress.WebCore.WebUri
             var boundQuery = new List<IUriQuery>();
             foreach (var query in Query)
             {
-                var parameter = parameters
+                var parameter = (parameters ?? [])
                     .Select(x =>
                     {
                         var key = x switch
@@ -511,21 +517,15 @@ namespace WebExpress.WebCore.WebUri
                         };
                         return (key, x.Value);
                     })
-                    .FirstOrDefault(x => x.key.Equals(query?.Key, StringComparison.InvariantCultureIgnoreCase));
+                    .FirstOrDefault(x => string.Equals(x.key, query?.Key, StringComparison.InvariantCultureIgnoreCase));
 
-                if (!string.IsNullOrWhiteSpace(parameter.key))
-                {
-                    // if parameter found for query key, set value accordingly
-                    boundQuery.Add(new UriQuery(parameter.key, parameter.Value));
-                }
-                else
-                {
-                    // otherwise keep unchanged
-                    boundQuery.Add(new UriQuery(query.Key, query.Value));
-                }
+                // keep the uri's declared query key; only its value is replaced when a parameter matches
+                boundQuery.Add(string.IsNullOrWhiteSpace(parameter.key)
+                    ? new UriQuery(query.Key, query.Value)
+                    : new UriQuery(query.Key, parameter.Value));
             }
 
-            return new UriEndpoint(this, pathSegments)
+            return new UriEndpoint(this, [.. pathSegments])
             {
                 Query = boundQuery
             };
@@ -568,10 +568,10 @@ namespace WebExpress.WebCore.WebUri
         {
             var copy = new UriEndpoint();
 
-            copy.PathSegments = copy.PathSegments
+            copy.PathSegments = [.. copy.PathSegments
                 .Concat(uris.Where(x => !string.IsNullOrWhiteSpace(x))
                 .SelectMany(x => x.Split('/', StringSplitOptions.RemoveEmptyEntries))
-                .Select(x => new UriPathSegmentConstant(x) as IUriPathSegment));
+                .Select(x => new UriPathSegmentConstant(x) as IUriPathSegment))];
 
             return copy;
         }
@@ -584,8 +584,8 @@ namespace WebExpress.WebCore.WebUri
         public static IUri Combine(params IUri[] uris)
         {
             var copy = new UriEndpoint(uris.FirstOrDefault());
-            copy.PathSegments = copy.PathSegments
-                .Concat(uris.Skip(1).SelectMany(x => x.PathSegments.Skip(1)));
+            copy.PathSegments = [.. copy.PathSegments
+                .Concat(uris.Skip(1).Where(x => x is not null).SelectMany(x => x.PathSegments.Skip(1)))];
 
             return copy;
         }
@@ -599,10 +599,10 @@ namespace WebExpress.WebCore.WebUri
         public static IUri Combine(IUri uri, params string[] uris)
         {
             var copy = new UriEndpoint(uri);
-            copy.PathSegments = copy.PathSegments
+            copy.PathSegments = [.. copy.PathSegments
                 .Concat(uris.Where(x => !string.IsNullOrWhiteSpace(x))
                 .SelectMany(x => x.Split('/', StringSplitOptions.RemoveEmptyEntries))
-                .Select(x => new UriPathSegmentConstant(x) as IUriPathSegment));
+                .Select(x => new UriPathSegmentConstant(x) as IUriPathSegment))];
 
             return copy;
         }
@@ -674,41 +674,69 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>A string that represents the current uri.</returns>
         public override string ToString()
         {
-            var defaultPort = Scheme switch
+            var builder = new StringBuilder();
+
+            if (Scheme != UriScheme.Mailto && !IsRelative)
             {
-                UriScheme.Http => 80,
-                UriScheme.Https => 443,
-                UriScheme.FTP => 21,
-                UriScheme.Ldap => 389,
-                UriScheme.Ldaps => 636,
-                _ => -1
-
-            };
-
-            var scheme = Scheme.ToString("g").ToLower() + ":";
-            var authority = Authority?.ToString(defaultPort);
-            var uri = "/" + string.Join
-            (
-                "/",
-                PathSegments.Where(x => x is not UriPathSegmentRoot)
-                    .Select(x => x.ToString().TrimStart('/'))
-            ).TrimEnd('/');
-
-            if (Query.Any())
+                builder.Append(Scheme.ToSchemeString());
+                builder.Append(':');
+                Authority?.AppendTo(builder, Scheme.DefaultPort());
+            }
+            else if (Scheme == UriScheme.Mailto)
             {
-                uri += "?" + string.Join("&", Query.Select(x => x.ToString()));
+                builder.Append(Scheme.ToSchemeString());
+                builder.Append(':');
+                Authority?.AppendTo(builder, Scheme.DefaultPort());
+                return builder.ToString();
+            }
+
+            var hasPathSegment = false;
+            foreach (var segment in PathSegments)
+            {
+                if (segment is UriPathSegmentRoot)
+                {
+                    continue;
+                }
+
+                builder.Append('/');
+                var value = segment?.ToString();
+                if (!string.IsNullOrEmpty(value))
+                {
+                    builder.Append(value.TrimStart('/'));
+                }
+
+                hasPathSegment = true;
+            }
+
+            if (hasPathSegment)
+            {
+                while (builder.Length > 1 && builder[builder.Length - 1] == '/')
+                {
+                    builder.Length--;
+                }
+            }
+            else
+            {
+                builder.Append('/');
+            }
+
+            var hasQuery = false;
+            foreach (var query in Query)
+            {
+                builder.Append(hasQuery ? '&' : '?');
+                hasQuery = true;
+                builder.Append(query.Key);
+                builder.Append('=');
+                builder.Append(query.Value);
             }
 
             if (!string.IsNullOrWhiteSpace(Fragment))
             {
-                uri += "#" + Fragment;
+                builder.Append('#');
+                builder.Append(Fragment);
             }
 
-            return Scheme switch
-            {
-                UriScheme.Mailto => string.Format("{0}{1}", scheme, authority),
-                _ => IsRelative ? uri : string.Format("{0}{1}{2}", scheme, authority, uri),
-            };
+            return builder.ToString();
         }
     }
 }

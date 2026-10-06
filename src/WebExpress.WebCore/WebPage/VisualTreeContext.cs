@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebPage
 {
     /// <summary>
-    /// Represents the context of a visual tree.
+    /// Default implementation of <see cref="IVisualTreeContext"/>. It derives the request and URI
+    /// from the active render context, giving a page's control tree access to them while it is built.
     /// </summary>
     public class VisualTreeContext : IVisualTreeContext
     {

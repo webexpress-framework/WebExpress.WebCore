@@ -1,36 +1,19 @@
-﻿using System.Collections.Generic;
-
-namespace WebExpress.WebCore.WebHtml
+﻿namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents an integration point for external resources. These are typically not 
+    /// Represents an integration point for external resources. These are typically not
     /// html content, but for example an application or interactive content,
     /// which is represented with the help of a plugin(instead of natively by the user program).
+    /// The element is a void element, so it takes no content and is written without a closing tag.
     /// </summary>
     public class HtmlElementEmbeddedEmbed : HtmlElement, IHtmlElementEmbedded
     {
         /// <summary>
-        /// Gets the elements.
-        /// </summary>
-        public new IEnumerable<IHtmlNode> Elements => base.Elements;
-
-        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         public HtmlElementEmbeddedEmbed()
-            : base("embed")
+            : base("embed", false)
         {
-
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the class.
-        /// </summary>
-        /// <param name="nodes">The content of the html element.</param>
-        public HtmlElementEmbeddedEmbed(params IHtmlNode[] nodes)
-            : this()
-        {
-            Add(nodes);
         }
     }
 }

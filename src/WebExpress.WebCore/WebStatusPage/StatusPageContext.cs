@@ -6,7 +6,8 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebStatusPage
 {
     /// <summary>
-    /// Represents the context for a status page.
+    /// Default implementation of <see cref="IStatusPageContext"/>: the read-only descriptor that
+    /// identifies a registered status page and the application and plugin it belongs to.
     /// </summary>
     public class StatusPageContext : IStatusPageContext
     {
