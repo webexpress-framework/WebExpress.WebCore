@@ -115,6 +115,11 @@ namespace WebExpress.WebCore.WebSetting
         public ClusterSettings Cluster { get; set; }
 
         /// <summary>
+        /// Gets or sets the shared email profiles and delivery policy.
+        /// </summary>
+        public EmailSettings Email { get; set; }
+
+        /// <summary>
         /// Gets or sets the shared certificate inventory and expiry warning policy used for production HTTPS.
         /// </summary>
         public CertificateManagerSettings Certificates { get; set; }

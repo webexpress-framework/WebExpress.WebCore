@@ -5,6 +5,7 @@ using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAsset;
 using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebCluster;
+using WebExpress.WebCore.WebEmail;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
@@ -38,6 +39,11 @@ namespace WebExpress.WebCore.WebComponent
         /// Gets the shared certificate service used by hosting and application components.
         /// </summary>
         ICertificateManager CertificateManager { get; }
+
+        /// <summary>
+        /// Gets the central email delivery service shared by every application.
+        /// </summary>
+        IEmailManager EmailManager { get; }
 
         /// <summary>
         /// An event that fires when an component is added.

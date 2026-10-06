@@ -8,6 +8,7 @@ using WebExpress.WebCore.WebAsset;
 using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebComponent.Model;
+using WebExpress.WebCore.WebEmail;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebEvent;
 using WebExpress.WebCore.WebFragment;
@@ -40,6 +41,7 @@ namespace WebExpress.WebCore.WebComponent
         private readonly IHttpServerContext _httpServerContext;
         private readonly ComponentDictionary _dictionary = [];
         private readonly ClusterManager _clusterManager;
+        private readonly EmailManager _emailManager;
         private readonly LogManager _logManager;
         private readonly PackageManager _packageManager;
         private readonly InternationalizationManager _internationalizationManager;
@@ -90,6 +92,7 @@ namespace WebExpress.WebCore.WebComponent
         public IEnumerable<IComponentManager> Managers => new IComponentManager[]
             {
                 _clusterManager,
+                _emailManager,
                 _logManager,
                 _packageManager,
                 _pluginManager,
@@ -254,6 +257,11 @@ namespace WebExpress.WebCore.WebComponent
         public IClusterManager ClusterManager => _clusterManager;
 
         /// <summary>
+        /// Gets the central delivery service shared by every application.
+        /// </summary>
+        public IEmailManager EmailManager => _emailManager;
+
+        /// <summary>
         /// Gets the socket manager.
         /// </summary>
         /// <returns>The instance of the socket manager.</returns>
@@ -287,6 +295,8 @@ namespace WebExpress.WebCore.WebComponent
             // whether they run alone
             _clusterManager = CreateInstance(typeof(ClusterManager)) as ClusterManager
                 ?? throw new InvalidOperationException("Failed to create ClusterManager.");
+            _emailManager = CreateInstance(typeof(EmailManager)) as EmailManager
+                ?? throw new InvalidOperationException("Failed to create EmailManager.");
             _pluginManager = CreateInstance(typeof(PluginManager)) as PluginManager
                 ?? throw new InvalidOperationException("Failed to create PluginManager.");
             _packageManager = CreateInstance(typeof(PackageManager)) as PackageManager
