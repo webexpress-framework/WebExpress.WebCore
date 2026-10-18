@@ -120,6 +120,26 @@ namespace WebExpress.WebCore.Test.WebUri
         }
 
         /// <summary>
+        /// Tests that adding a query leaves the shared uri untouched, so an endpoint extended
+        /// once per row carries only that row's query.
+        /// </summary>
+        [Fact]
+        public void AddQueryKeepsOriginal()
+        {
+            // arrange
+            var uri = new UriEndpoint(new UriPathSegmentConstant("api"));
+
+            // act
+            var first = uri.Add(new UriQuery("id", "1"));
+            var second = uri.Add(new UriQuery("id", "2"));
+
+            // validation
+            Assert.Equal("/api", uri.ToString());
+            Assert.Equal("/api?id=1", first.ToString());
+            Assert.Equal("/api?id=2", second.ToString());
+        }
+
+        /// <summary>
         /// Test the skip method.
         /// </summary>
         [Theory]

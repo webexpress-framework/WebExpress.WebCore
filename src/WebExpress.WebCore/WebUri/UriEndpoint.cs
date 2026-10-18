@@ -258,18 +258,16 @@ namespace WebExpress.WebCore.WebUri
         }
 
         /// <summary>
-        /// Appends one or more query parameters to the current URI and returns a new instance with 
-        /// the updated query
-        /// string.
+        /// Appends one or more query parameters and returns a new instance with the updated query
+        /// string. The uri it is called on stays unchanged, because uris are handed out shared - an
+        /// endpoint captured once and extended per row would otherwise collect every row's query.
         /// </summary>
-        /// <param name="query">An array of objects representing the query parameters to add. Each 
+        /// <param name="query">An array of objects representing the query parameters to add. Each
         /// parameter must not be null.</param>
-        /// <returns>The current instance for method chaining.</returns>
+        /// <returns>A new uri instance with the specified query parameters appended.</returns>
         public virtual IUri Add(params IUriQuery[] query)
         {
-            Query = [.. Query.Concat(query?.Where(x => x is not null) ?? [])];
-
-            return this;
+            return Concat(query);
         }
 
         /// <summary>
