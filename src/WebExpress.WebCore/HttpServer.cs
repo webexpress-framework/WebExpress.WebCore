@@ -26,6 +26,7 @@ using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebHealth;
+using WebExpress.WebCore.WebHtml;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebMessage;
@@ -613,6 +614,7 @@ namespace WebExpress.WebCore
             // it is being asked on behalf of. It is closed with the response, so nothing reads
             // it afterwards
             using var current = WebEx.BeginRequest(request);
+            using var ids = DeterministicId.BeginScope();
 
             try
             {
