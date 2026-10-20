@@ -288,13 +288,14 @@ namespace WebExpress.WebCore.WebMessage
             var text = Encoding.UTF8.GetString(Content);
             foreach (var pair in text.Split('&'))
             {
-                // split into at most two parts so that values containing '=' stay intact;
-                // '+' decoding is handled by the Parameter constructor's UrlDecode.
+                // split into at most two parts so that values containing '=' stay intact; the
+                // body is url-encoded, key and value alike, so a '+' stands for a blank here and
+                // nowhere else
                 var parts = pair.Split('=', 2);
-                var key = parts[0];
+                var key = System.Web.HttpUtility.UrlDecode(parts[0]);
                 var value = parts.Length > 1 ? parts[1] : string.Empty;
 
-                AddParameter(new Parameter(key, value, ParameterScope.Parameter));
+                AddParameter(new Parameter(key, System.Web.HttpUtility.UrlDecode(value), ParameterScope.Parameter));
             }
         }
 

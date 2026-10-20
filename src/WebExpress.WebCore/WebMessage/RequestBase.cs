@@ -193,20 +193,13 @@ namespace WebExpress.WebCore.WebMessage
             {
                 if (!string.IsNullOrWhiteSpace(param))
                 {
-                    var split = param.Split('=');
+                    // the query is url-encoded, unlike a multipart body, so key and value are
+                    // decoded here; a value may contain '=' itself
+                    var split = param.Split('=', 2);
+                    var key = System.Web.HttpUtility.UrlDecode(split[0]);
+                    var value = split.Length > 1 ? System.Web.HttpUtility.UrlDecode(split[1]) : null;
 
-                    if (split.Length == 1)
-                    {
-                        AddParameter(new Parameter(split[0], null, ParameterScope.Parameter));
-                    }
-                    else if (split.Length == 2)
-                    {
-                        AddParameter(new Parameter(split[0], split[1], ParameterScope.Parameter));
-                    }
-                    else if (split.Length > 2)
-                    {
-                        AddParameter(new Parameter(split[0], string.Join("=", split.Skip(1)), ParameterScope.Parameter));
-                    }
+                    AddParameter(new Parameter(key, value, ParameterScope.Parameter));
                 }
             });
         }
