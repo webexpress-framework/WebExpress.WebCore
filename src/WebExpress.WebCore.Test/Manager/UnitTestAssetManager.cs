@@ -282,6 +282,88 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that a range request is answered with the requested part, so a media player can
+        /// seek, and that the full answer announces the support for ranges.
+        /// </summary>
+        [Fact]
+        public void RangeRequestReturnsPartialContent()
+        {
+            // arrange
+            var uri = "http://localhost:8080/server/appa/assets/css/mycss.css";
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var context = UnitTestFixture.CreateHttpContextMock();
+            componentHub.SitemapManager.Refresh();
+
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = context
+            });
+
+            // act
+            var full = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext);
+            var data = (byte[])full.Content;
+            var eTag = full.Header.CustomHeader["ETag"];
+
+            var part = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock($"GET {uri} HTTP/1.1\nRange: bytes=2-9\n\n", uri), searchResult.EndpointContext);
+            var outdated = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock($"GET {uri} HTTP/1.1\nRange: bytes=2-9\nIf-Range: \"outdated\"\n\n", uri), searchResult.EndpointContext);
+            var current = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock($"GET {uri} HTTP/1.1\nRange: bytes=2-9\nIf-Range: {eTag}\n\n", uri), searchResult.EndpointContext);
+            var outside = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock($"GET {uri} HTTP/1.1\nRange: bytes={data.Length}-\n\n", uri), searchResult.EndpointContext);
+
+            // validation
+            Assert.IsType<ResponseOK>(full);
+            Assert.Equal("bytes", full.Header.CustomHeader["Accept-Ranges"]);
+            Assert.IsType<ResponsePartialContent>(part);
+            Assert.Equal(data[2..10], (byte[])part.Content);
+            Assert.Equal(8, part.Header.ContentLength);
+            Assert.Equal($"bytes 2-9/{data.Length}", part.Header.CustomHeader["Content-Range"]);
+            Assert.IsType<ResponseOK>(outdated);
+            Assert.IsType<ResponsePartialContent>(current);
+            Assert.IsType<ResponseRangeNotSatisfiable>(outside);
+            Assert.Equal($"bytes */{data.Length}", outside.Header.CustomHeader["Content-Range"]);
+        }
+
+        /// <summary>
+        /// Tests the parsing of the Range header. A header that cannot be parsed or names several
+        /// ranges yields the whole file (null), a range outside of the file (-1, -1).
+        /// </summary>
+        [Theory]
+        [InlineData("bytes=0-99", 0L, 99L)]
+        [InlineData("bytes=10-", 10L, 99L)]
+        [InlineData("bytes=10-500", 10L, 99L)]
+        [InlineData("bytes=-30", 70L, 99L)]
+        [InlineData("bytes=-500", 0L, 99L)]
+        [InlineData("bytes=100-", -1L, -1L)]
+        [InlineData("bytes=-0", -1L, -1L)]
+        [InlineData("bytes=20-10", null, null)]
+        [InlineData("bytes=0-1,5-6", null, null)]
+        [InlineData("items=0-1", null, null)]
+        [InlineData("bytes=a-b", null, null)]
+        [InlineData("bytes=5", null, null)]
+        [InlineData("", null, null)]
+        public void ParseRange(string header, long? start, long? end)
+        {
+            // act
+            var range = Asset.ParseRange(header, 100);
+
+            // validation
+            Assert.Equal(start, range?.Start);
+            Assert.Equal(end, range?.End);
+        }
+
+        /// <summary>
         /// Tests whether the asset manager implements interface IComponentManager.
         /// </summary>
         [Fact]

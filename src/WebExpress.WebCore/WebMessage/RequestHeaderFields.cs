@@ -102,6 +102,18 @@ namespace WebExpress.WebCore.WebMessage
         public string IfNoneMatch { get; private set; }
 
         /// <summary>
+        /// Gets the Range header value. A media player asks for a part of a file with it, to
+        /// seek without loading everything before the position.
+        /// </summary>
+        public string Range { get; private set; }
+
+        /// <summary>
+        /// Gets the If-Range header value. It carries the entity tag of the version a range
+        /// belongs to, so a part of a changed resource is never joined to parts of the old one.
+        /// </summary>
+        public string IfRange { get; private set; }
+
+        /// <summary>
         /// Gets the X-Forwarded-For header, the chain of addresses a request passed through on its
         /// way to the server. Anyone can send it, so it is only meaningful on a request that comes
         /// from a trusted proxy (see <see cref="ForwardedClientResolver"/>).
@@ -151,6 +163,8 @@ namespace WebExpress.WebCore.WebMessage
             AuthenticationRequest = requestFeature.Headers["X-WebExpress-Auth"];
             SecFetchSite = requestFeature.Headers["Sec-Fetch-Site"];
             IfNoneMatch = requestFeature.Headers.IfNoneMatch;
+            Range = requestFeature.Headers.Range;
+            IfRange = requestFeature.Headers.IfRange;
             XForwardedFor = requestFeature.Headers["X-Forwarded-For"];
             Upgrade = requestFeature.Headers.Upgrade;
             SecWebSocketKey = requestFeature.Headers.SecWebSocketKey;

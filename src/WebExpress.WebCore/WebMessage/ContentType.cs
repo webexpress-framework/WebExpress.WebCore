@@ -214,7 +214,12 @@
         /// <summary>
         /// Executable file (.exe). Served as a generic binary download.
         /// </summary>
-        Exe
+        Exe,
+
+        /// <summary>
+        /// WebVTT text track (.vtt), the captions and subtitles format of media elements.
+        /// </summary>
+        Vtt
     }
 
     /// <summary>
@@ -288,6 +293,7 @@
                 ".tar" => ContentType.Tar,
                 ".7z" => ContentType.SevenZip,
                 ".exe" => ContentType.Exe,
+                ".vtt" => ContentType.Vtt,
                 _ => ContentType.Unknown,
             };
         }
@@ -346,6 +352,7 @@
                 "application/gzip" => ContentType.Gz,
                 "application/x-tar" => ContentType.Tar,
                 "application/x-7z-compressed" => ContentType.SevenZip,
+                "text/vtt" => ContentType.Vtt,
                 _ => ContentType.Unknown,
             };
         }
@@ -403,6 +410,7 @@
                 ContentType.Tar => "application/x-tar",
                 ContentType.SevenZip => "application/x-7z-compressed",
                 ContentType.Exe => "application/octet-stream",
+                ContentType.Vtt => "text/vtt",
                 _ => "application/octet-stream",
             };
         }
@@ -461,6 +469,7 @@
                 ContentType.Tar => "*.tar",
                 ContentType.SevenZip => "*.7z",
                 ContentType.Exe => "*.exe",
+                ContentType.Vtt => "*.vtt",
                 _ => "*.*",
             };
         }
