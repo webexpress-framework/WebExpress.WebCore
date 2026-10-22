@@ -23,6 +23,7 @@ namespace WebExpress.WebCore.Test.WebUri
         [InlineData(UriScheme.Http, "localhost", null, null, null, null, null, "http://localhost/")]
         [InlineData(UriScheme.Http, "localhost", null, null, "/", null, null, "http://localhost/")]
         [InlineData(UriScheme.Http, "example.com", "user", "80", "/abc", "a=1&b=2", "fragment", "http://user@example.com/abc?a=1&b=2#fragment")]
+        [InlineData(UriScheme.Http, "localhost", null, null, "/app/page", "q=~", null, "http://localhost/app/page?q=~")]
         public void UriAbsolute(UriScheme scheme, string authority, string user, string port, string path, string query, string fragment, string expected)
         {
             // arrange
@@ -61,6 +62,10 @@ namespace WebExpress.WebCore.Test.WebUri
         [InlineData("/", "a=1&b=2", null, "/?a=1&b=2")]
         [InlineData("/abc", "a=1&b=2", "fragment", "/abc?a=1&b=2#fragment")]
         [InlineData("/assets/img/example.svg", null, null, "/assets/img/example.svg")]
+        [InlineData("/app/page", "q=~", null, "/app/page?q=~")]
+        [InlineData("/~user/home", "a=1", null, "/~user/home?a=1")]
+        [InlineData("/a", "filter=name~'x',b:c@d!;e", "top~", "/a?filter=name~'x',b:c@d!;e#top~")]
+        [InlineData("/a", "json={\"k\":[1|2]}", null, "/a?json={\"k\":[1|2]}")]
         public void UriRelative(string path, string query, string fragment, string expected)
         {
             // arrange

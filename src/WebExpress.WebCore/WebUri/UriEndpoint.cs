@@ -29,10 +29,14 @@ namespace WebExpress.WebCore.WebUri
         private static partial Regex UriRegex();
 
         /// <summary>
-        /// Regular expression to match relative URIs.
+        /// Regular expression that splits a relative URI into path, query and fragment. It only
+        /// splits and does not validate: a request target may carry every character RFC 3986
+        /// allows unencoded, such as ~ ! ' , ; : @, and characters browsers leave unencoded in a
+        /// query, such as | [ ] { }. A character outside a whitelist would make the whole match
+        /// fail and the target fall back to the root, redirecting the request to the application.
         /// </summary>
-        /// <returns>A Regex object for matching relative URIs.</returns>
-        [GeneratedRegex(@"^(\/([a-zA-Z0-9-+*%()=._/$]*))?(\?([a-zA-Z0-9-+*%()=._/$&]*))?(#([a-zA-Z0-9-+*%()=._/$]*))?$")]
+        /// <returns>A Regex object for splitting relative URIs.</returns>
+        [GeneratedRegex(@"^(\/([^?#]*))?(\?([^#]*))?(#(.*))?$", RegexOptions.Singleline)]
         private static partial Regex RelativeUriRegex();
 
         /// <summary>
