@@ -336,6 +336,50 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that methods other than GET ignore ranges and retain the full representation metadata.
+        /// </summary>
+        /// <param name="method">The request method for which ranges must be ignored.</param>
+        /// <param name="range">The satisfiable or unsatisfiable range to ignore.</param>
+        [Theory]
+        [InlineData("HEAD", "bytes=2-9")]
+        [InlineData("HEAD", "bytes=999999999-")]
+        [InlineData("POST", "bytes=2-9")]
+        [InlineData("POST", "bytes=999999999-")]
+        public void NonGetRequestIgnoresRange(string method, string range)
+        {
+            // arrange
+            var uri = "http://localhost:8080/server/appa/assets/css/mycss.css";
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var context = UnitTestFixture.CreateHttpContextMock();
+            componentHub.SitemapManager.Refresh();
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = context
+            });
+
+            // act
+            var full = componentHub.EndpointManager.HandleRequest
+            (
+                UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext
+            );
+            var response = componentHub.EndpointManager.HandleRequest
+            (
+                UnitTestFixture.CreateRequestMock($"{method} {uri} HTTP/1.1\nRange: {range}\n\n", uri),
+                searchResult.EndpointContext
+            );
+
+            // validation
+            Assert.IsType<ResponseOK>(response);
+            Assert.Equal(full.Header.ContentLength, response.Header.ContentLength);
+            Assert.Equal(full.Header.ContentType, response.Header.ContentType);
+            Assert.Equal(full.Header.CustomHeader["ETag"], response.Header.CustomHeader["ETag"]);
+            Assert.False(response.Header.CustomHeader.ContainsKey("Content-Range"));
+        }
+
+        /// <summary>
         /// Tests the parsing of the Range header. A header that cannot be parsed or names several
         /// ranges yields the whole file (null), a range outside of the file (-1, -1).
         /// </summary>

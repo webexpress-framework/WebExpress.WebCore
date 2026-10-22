@@ -78,7 +78,8 @@ namespace WebExpress.WebCore.WebAsset
             var rangeHeader = request?.Header?.Range;
             var ifRange = request?.Header?.IfRange;
 
-            if (!string.IsNullOrWhiteSpace(rangeHeader) && (string.IsNullOrWhiteSpace(ifRange) || string.Equals(ifRange, _eTag, StringComparison.Ordinal)))
+            if (request?.Method == RequestMethod.GET && !string.IsNullOrWhiteSpace(rangeHeader) &&
+                (string.IsNullOrWhiteSpace(ifRange) || string.Equals(ifRange, _eTag, StringComparison.Ordinal)))
             {
                 var range = ParseRange(rangeHeader, _data.LongLength);
 
