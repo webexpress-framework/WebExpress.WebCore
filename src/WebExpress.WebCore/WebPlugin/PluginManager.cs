@@ -4,7 +4,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
@@ -12,11 +11,14 @@ using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebLog;
 using WebExpress.WebCore.WebPlugin.Model;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebPlugin
 {
     /// <summary>
-    /// The plugin manager manages the WebExpress plugins.
+    /// Central registry for plugins. It loads plugin assemblies, resolves the dependencies between
+    /// them, activates them in the right order, tracks their runtime state, and unloads them again.
+    /// This is the backbone of WebExpress's plugin system.
     /// </summary>
     public sealed class PluginManager : IPluginManager, IExecutableElements, ISystemComponent
     {
@@ -64,7 +66,10 @@ namespace WebExpress.WebCore.WebPlugin
         /// <returns>A list of plugins created.</returns>
         internal void Register()
         {
-            var path = Environment.CurrentDirectory;
+            // the statically deployed plugins sit next to the host assembly. the working
+            // directory is whatever the process happened to be started from - a service
+            // launched from the system directory would find no plugin at all
+            var path = AppContext.BaseDirectory;
             var assemblies = new List<Assembly>();
 
             // create plugins
@@ -185,7 +190,8 @@ namespace WebExpress.WebCore.WebPlugin
                         PluginName = assembly.GetName().Name.ToLower(),
                         Manufacturer = assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company,
                         Copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright,
-                        Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                        Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
+                        Settings = _httpServerContext?.Configuration?.GetPluginSettings(id)
                     };
 
                     var hasUnfulfilledDependencies = HasUnfulfilledDependencies(id, dependencies.Select(x => new ComponentId(x)));
@@ -304,9 +310,15 @@ namespace WebExpress.WebCore.WebPlugin
                         PluginName = name,
                         Manufacturer = type.Assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company,
                         Copyright = type.Assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright,
-                        Icon = RouteEndpoint.Combine(_httpServerContext?.Route, icon),
+                        // a plugin without an icon attribute has no icon: combining the empty
+                        // value would yield the server route, which callers cannot tell apart
+                        // from a real icon and would render as a broken image
+                        Icon = !string.IsNullOrWhiteSpace(icon)
+                            ? RouteEndpoint.Combine(_httpServerContext?.Route, icon)
+                            : null,
                         Description = description,
-                        Version = type.Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                        Version = type.Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
+                        Settings = _httpServerContext?.Configuration?.GetPluginSettings(id)
                     };
 
                     hasUnfulfilledDependencies = HasUnfulfilledDependencies(id, dependencies.Select(x => new ComponentId(x)));
@@ -365,6 +377,13 @@ namespace WebExpress.WebCore.WebPlugin
         /// <summary>
         /// Removes all elemets associated with the specified plugin context.
         /// </summary>
+        /// <remarks>
+        /// The plugin is released completely before its assembly load context is unloaded: the
+        /// listeners of the removal event dispose the applications and jobs bound to the plugin,
+        /// then the plugin itself and its cancellation token source are disposed. Unloading first
+        /// would leave instances whose code is gone, and anything they still hold - timers,
+        /// handles, background work - would keep running or pin the load context in memory.
+        /// </remarks>
         /// <param name="pluginContext">The context of the plugin that contains the elemets to remove.</param>
         public void Remove(IPluginContext pluginContext)
         {
@@ -373,12 +392,70 @@ namespace WebExpress.WebCore.WebPlugin
                 return;
             }
 
+            // a plugin still waiting for its dependencies has an instance as well
+            var pluginItem = _dictionary.GetValueOrDefault(pluginContext.PluginId)
+                ?? _unfulfilledDependencies.GetValueOrDefault(pluginContext.PluginId);
+
+            // a still running Run() sees the cancellation before anything is torn down
+            Cancel(pluginItem);
+
             OnRemovePlugin(pluginContext);
 
-            var pluginItem = GetPluginItem(pluginContext);
-            pluginItem?.PluginLoadContext?.Unload();
-
             _dictionary.Remove(pluginContext.PluginId);
+            _unfulfilledDependencies.Remove(pluginContext.PluginId);
+
+            Release(pluginItem);
+
+            pluginItem?.PluginLoadContext?.Unload();
+        }
+
+        /// <summary>
+        /// Signals a plugin's background work to stop, tolerating a token source that is already disposed.
+        /// </summary>
+        /// <param name="pluginItem">The plugin entry or null.</param>
+        private void Cancel(PluginItem pluginItem)
+        {
+            try
+            {
+                pluginItem?.CancellationTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (Exception ex)
+            {
+                // a callback registered on the token threw; the plugin is released regardless
+                _httpServerContext?.Log?.Exception(ex);
+            }
+        }
+
+        /// <summary>
+        /// Disposes a plugin instance and its cancellation token source. A plugin that fails to
+        /// release its resources must not keep its load context from being unloaded or the
+        /// remaining plugins from being released.
+        /// </summary>
+        /// <param name="pluginItem">The plugin entry or null.</param>
+        private void Release(PluginItem pluginItem)
+        {
+            if (pluginItem is null)
+            {
+                return;
+            }
+
+            Cancel(pluginItem);
+
+            try
+            {
+                pluginItem.Plugin?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _httpServerContext?.Log?.Exception(ex);
+            }
+            finally
+            {
+                pluginItem.CancellationTokenSource.Dispose();
+            }
         }
 
         /// <summary>
@@ -595,8 +672,13 @@ namespace WebExpress.WebCore.WebPlugin
             }
 
             // run plugin concurrently
-            Task.Run(() =>
+            _httpServerContext.Lifetime.TryRun(() =>
             {
+                if (token.Value.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 _httpServerContext?.Log?.Debug
                 (
                     I18N.Translate
@@ -617,8 +699,7 @@ namespace WebExpress.WebCore.WebPlugin
                     )
                 );
 
-                token?.ThrowIfCancellationRequested();
-            }, token.Value);
+            });
         }
 
         /// <summary>
@@ -735,6 +816,13 @@ namespace WebExpress.WebCore.WebPlugin
         /// </summary>
         public void Dispose()
         {
+            foreach (var item in _dictionary.Values.Concat(_unfulfilledDependencies.Values).ToArray())
+            {
+                Release(item);
+            }
+
+            _dictionary.Clear();
+            _unfulfilledDependencies.Clear();
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace WebExpress.WebCore.WebParameter
 {
@@ -12,6 +13,7 @@ namespace WebExpress.WebCore.WebParameter
         /// <summary>
         /// Gets the key of the parameter.
         /// </summary>
+        [JsonInclude]
         public string Key { get; private set; }
 
         /// <summary>
@@ -42,31 +44,25 @@ namespace WebExpress.WebCore.WebParameter
             Key = key.ToLower();
             Value = value.ToString();
             Scope = scope;
-
-            if (scope == ParameterScope.Parameter)
-            {
-                var decode = System.Web.HttpUtility.UrlDecode(value.ToString());
-                Value = decode;
-            }
         }
 
         /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
+        /// <remarks>
+        /// The value is taken as it is meant, not as it travelled: only some sources encode it -
+        /// a query string and an url-encoded body do, a multipart or plain text body does not -
+        /// so the source that encodes decodes before it creates the parameter. Decoding here
+        /// would turn a plus a user typed into a multipart field into a blank.
+        /// </remarks>
         /// <param name="key">The key.</param>
-        /// <param name="value">The value.</param>
+        /// <param name="value">The plain value.</param>
         /// <param name="scope">The scope of the parameter.</param>
         public Parameter(string key, string value, ParameterScope scope)
         {
             Key = key.ToLower();
             Value = value;
             Scope = scope;
-
-            if (scope == ParameterScope.Parameter)
-            {
-                var decode = System.Web.HttpUtility.UrlDecode(value);
-                Value = decode;
-            }
         }
 
         /// <summary>

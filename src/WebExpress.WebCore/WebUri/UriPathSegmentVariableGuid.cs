@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebParameter;
@@ -7,7 +6,8 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// Represents a URI path segment variable for GUIDs.
+    /// A placeholder path segment that only matches when the value at that position is a GUID
+    /// (for example <c>67d35a0f-7e94-4bfd-a309-36e9162a67ff</c>). Use it for routes keyed by a unique identifier.
     /// </summary>
     /// <typeparam name="TParameter">The parameter type.</typeparam>
     public class UriPathSegmentVariableGuid<TParameter> : UriPathSegmentVariable<TParameter>
@@ -62,7 +62,7 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>The variable value pair.</returns>
         public override IDictionary<string, string> GetVariable(string value)
         {
-            var match = Regex.Match(value, Expression, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            var match = UriPathSegmentRegexCache.Get(Expression).Match(value);
 
             if (match.Success)
             {
@@ -107,7 +107,7 @@ namespace WebExpress.WebCore.WebUri
                 return base.GetDisplayText(renderContext);
             }
 
-            var match = Regex.Match(Value, Expression, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            var match = UriPathSegmentRegexCache.Get(Expression).Match(Value);
             var guid = DisplayFormat == Format.Simple ? match.Groups[7].ToString() : match.Groups[2].ToString();
 
             if (string.IsNullOrWhiteSpace(Value) || !Value.Contains("{0}"))

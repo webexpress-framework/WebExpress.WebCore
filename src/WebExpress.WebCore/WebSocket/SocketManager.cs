@@ -130,13 +130,16 @@ namespace WebExpress.WebCore.WebSocket
 
             // create application socket instance
             var instance = CreateSocketInstance(connectionId, socketContext, httpContext.Request);
-            var socketConnection = new SocketConnection(networkStream, socketContext);
-
-            await instance.OnConnectedAsync(socketConnection);
-
-            await socketConnection.ReceiveLoopAsync();
-
-            instance.Dispose();
+            using var socketConnection = new SocketConnection(networkStream, socketContext);
+            try
+            {
+                await instance.OnConnectedAsync(socketConnection);
+                await socketConnection.ReceiveLoopAsync(_httpServerContext.Lifetime.Stopping);
+            }
+            finally
+            {
+                instance.Dispose();
+            }
         }
 
         /// <summary>

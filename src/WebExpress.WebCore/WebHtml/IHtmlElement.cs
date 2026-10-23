@@ -3,7 +3,9 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Interface of an html element.
+    /// An HTML node that has a tag, and therefore can carry attributes (id, class, style, role, …)
+    /// and contain child nodes. It exposes a fluent API (<c>Add</c>, <c>AddClass</c>, <c>AddStyle</c>, …)
+    /// so elements and their content can be built up in a readable, chainable way.
     /// </summary>
     public interface IHtmlElement : IHtmlNode
     {

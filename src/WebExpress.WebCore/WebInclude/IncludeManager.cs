@@ -117,6 +117,14 @@ namespace WebExpress.WebCore.WebInclude
                 return;
             }
 
+            // the asset manager subscribes to the plugin and application events before this
+            // manager does, so every asset of the plugin is already mounted by the time an
+            // include is registered and a file that resolves to nothing here would render a
+            // link that answers 404 at runtime. neither the page nor the browser reports
+            // that - the html error page is accepted as a stylesheet with no rules - so
+            // registration is the only moment the dead file can still be named.
+            var mountedRoutes = new Dictionary<IApplicationContext, HashSet<string>>();
+
             foreach (var includeType in assembly.GetTypes()
                 .Where(x => x.IsClass && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IInclude).Name) is not null))
@@ -182,6 +190,8 @@ namespace WebExpress.WebCore.WebInclude
                         Files = files.Select(x => new IncludeFile() { Type = x.Item1, FileName = x.Item2 })
                     };
 
+                    WarnAboutUnresolvedFiles(includeContext, mountedRoutes);
+
                     if (_dictionary.AddIncludeItem(pluginContext, applicationContext, includeItem))
                     {
                         OnAddInclude(includeItem.IncludeContext);
@@ -196,6 +206,60 @@ namespace WebExpress.WebCore.WebInclude
                     }
                 }
 
+            }
+        }
+
+        /// <summary>
+        /// Logs every file of an include that does not resolve to an asset the asset manager
+        /// has mounted. The include is kept rather than refused, because the two managers are
+        /// wired to the same events and a hard refusal would turn any future change of that
+        /// order into a failed start instead of a log line.
+        /// </summary>
+        /// <param name="includeContext">The include whose files are checked.</param>
+        /// <param name="mountedRoutes">The per-application index of mounted asset routes, filled on demand.</param>
+        private void WarnAboutUnresolvedFiles(IIncludeContext includeContext, Dictionary<IApplicationContext, HashSet<string>> mountedRoutes)
+        {
+            var applicationContext = includeContext.ApplicationContext;
+            var assetManager = _componentHub?.AssetManager;
+
+            if (assetManager is null)
+            {
+                return;
+            }
+
+            if (!mountedRoutes.TryGetValue(applicationContext, out var mounted))
+            {
+                mounted = assetManager.GetAssets(applicationContext)
+                    .Select(x => x.Route?.ToString())
+                    .Where(x => x is not null)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                mountedRoutes[applicationContext] = mounted;
+            }
+
+            foreach (var file in includeContext.Files)
+            {
+                var route = assetManager.GetAssetRoute
+                (
+                    applicationContext,
+                    includeContext.PluginContext,
+                    file.FileName
+                )?.ToString();
+
+                if (route is not null && mounted.Contains(route))
+                {
+                    continue;
+                }
+
+                _httpServerContext?.Log?.Warning(
+                    I18N.Translate(
+                        "webexpress.webcore:includemanager.unresolvedfile",
+                        includeContext.IncludeId,
+                        file.FileName,
+                        route ?? string.Empty,
+                        applicationContext.ApplicationId
+                    )
+                );
             }
         }
 

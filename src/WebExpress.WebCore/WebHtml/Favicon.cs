@@ -67,7 +67,7 @@
         /// Returns the media type.
         /// </summary>
         /// <returns>The media type.</returns>
-        public string GetMediatyp()
+        public string GetMediaType()
         {
             return Mediatype switch
             {

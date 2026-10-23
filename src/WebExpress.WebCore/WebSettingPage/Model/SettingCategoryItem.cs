@@ -5,7 +5,8 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebSettingPage.Model
 {
     /// <summary>
-    /// Represents an item on the setting category.
+    /// Internal record for one settings category — the top level of the settings navigation, which
+    /// contains groups, which in turn contain pages. Links the category to its application and plugin.
     /// </summary>
     public class SettingCategoryItem : IDisposable
     {

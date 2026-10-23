@@ -1,6 +1,8 @@
-﻿using WebExpress.WebCore.Test.Fixture;
+﻿using System.Reflection;
+using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebJob;
+using WebExpress.WebCore.WebJob.Model;
 
 namespace WebExpress.WebCore.Test.Manager
 {
@@ -38,6 +40,70 @@ namespace WebExpress.WebCore.Test.Manager
             jobManager.Remove(plugin);
 
             Assert.Empty(componentHub.JobManager.Jobs);
+        }
+
+        /// <summary>
+        /// Removing the jobs of a plugin releases them at once rather than when the manager shuts
+        /// down, so an unloaded plugin leaves no job instance behind.
+        /// </summary>
+        [Fact]
+        public void RemoveDisposesJobsImmediately()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+            var jobManager = componentHub.JobManager as JobManager;
+            var scheduleItems = GetScheduleItems(jobManager);
+
+            // act
+            jobManager.Remove(plugin);
+
+            // validation
+            Assert.NotEmpty(scheduleItems);
+            Assert.All(scheduleItems, x =>
+            {
+                Assert.True(x.IsDisposed);
+                Assert.True(((TestJobA)x.Instance).IsDisposed);
+                Assert.True(x.TokenSource.IsCancellationRequested);
+            });
+        }
+
+        /// <summary>
+        /// Removing an application releases the jobs bound to it and leaves those of the other
+        /// applications running.
+        /// </summary>
+        [Fact]
+        public void RemoveApplicationDisposesOnlyItsJobs()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).First();
+            var jobManager = componentHub.JobManager as JobManager;
+            var scheduleItems = GetScheduleItems(jobManager);
+
+            // act
+            jobManager.Remove(application);
+
+            // validation
+            Assert.All(scheduleItems, x => Assert.Equal(x.ApplicationContext == application, x.IsDisposed));
+            Assert.Equal(scheduleItems.Count - 1, componentHub.JobManager.Jobs.Count());
+        }
+
+        /// <summary>
+        /// Returns the schedule entries of all static jobs currently registered.
+        /// </summary>
+        /// <param name="jobManager">The job manager.</param>
+        /// <returns>The schedule entries.</returns>
+        private static List<ScheduleItem> GetScheduleItems(JobManager jobManager)
+        {
+            var dictionary = typeof(JobManager)
+                .GetField("_staticScheduleDictionary", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(jobManager) as ScheduleDictionary;
+
+            return [.. dictionary.Values
+                .SelectMany(x => x.Values)
+                .SelectMany(x => x.Values)
+                .SelectMany(x => x)];
         }
 
         /// <summary>

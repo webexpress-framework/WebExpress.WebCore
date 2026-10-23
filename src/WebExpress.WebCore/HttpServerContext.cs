@@ -1,17 +1,32 @@
 ﻿using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
-using WebExpress.WebCore.Config;
+using Microsoft.Extensions.Configuration;
+using WebExpress.WebCore.WebCertificate;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebLog;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore
 {
     /// <summary>
-    /// The context of the http server.
+    /// Default implementation of <see cref="IHttpServerContext"/>. It bundles the server-wide
+    /// information (routing, endpoints, version, directories, configuration, culture, log) that
+    /// is created once at start-up and handed to plugins and components throughout the server's
+    /// lifetime.
     /// </summary>
     public class HttpServerContext : IHttpServerContext
     {
+        /// <summary>
+        /// Gets the shared lifetime for framework workers and application synchronization processes.
+        /// </summary>
+        public ServerLifetime Lifetime { get; }
+
+        /// <summary>
+        /// Gets the certificate service shared with the host and application components.
+        /// </summary>
+        public ICertificateManager CertificateManager { get; }
+
         /// <summary>
         /// Gets the route of the web server.
         /// </summary>
@@ -20,7 +35,12 @@ namespace WebExpress.WebCore
         /// <summary>
         /// Gets the endpoints to which the web server responds.
         /// </summary>
-        public ICollection<EndpointConfig> Endpoints { get; protected set; }
+        public ICollection<EndpointSettings> Endpoints { get; protected set; }
+
+        /// <summary>
+        /// Gets the optional public base URI of the server, independent of its listener bindings.
+        /// </summary>
+        public string ExternalUri { get; protected set; }
 
         /// <summary>
         /// Gets the version of the http(s) server.
@@ -43,9 +63,14 @@ namespace WebExpress.WebCore
         public string DataPath { get; protected set; }
 
         /// <summary>
-        /// Gets the configuration directory.
+        /// Gets the settings directory.
         /// </summary>
-        public string ConfigPath { get; protected set; }
+        public string SettingsPath { get; protected set; }
+
+        /// <summary>
+        /// Gets the merged configuration of the server and all plugins.
+        /// </summary>
+        public IConfigurationRoot Configuration { get; protected set; }
 
         /// <summary>
         /// Gets the culture.
@@ -67,24 +92,32 @@ namespace WebExpress.WebCore
         /// </summary>
         /// <param name="route">The uri of the route server.</param>
         /// <param name="endpoints">The endpoints to which the web server responds.</param>
-        /// <param name="packageBaseFolder">The package home directory.chnis</param>
+        /// <param name="packageBaseFolder">The package home directory.</param>
         /// <param name="assetBaseFolder">The asset home directory.</param>
         /// <param name="dataBaseFolder">The data home directory.</param>
-        /// <param name="configBaseFolder">The configuration directory.</param>
+        /// <param name="settingsBaseFolder">The settings directory.</param>
+        /// <param name="configuration">The merged configuration of the server and all plugins.</param>
         /// <param name="culture">The culture.</param>
         /// <param name="log">The log.</param>
         /// <param name="host">The host.</param>
+        /// <param name="certificateManager">The optional shared certificate service owned by the host.</param>
+        /// <param name="externalUri">The optional public base URI, independent of the listener bindings.</param>
+        /// <param name="lifetime">The optional lifetime shared when the host creates its server context.</param>
         public HttpServerContext
         (
             IRoute route,
-            ICollection<EndpointConfig> endpoints,
+            ICollection<EndpointSettings> endpoints,
             string packageBaseFolder,
             string assetBaseFolder,
             string dataBaseFolder,
-            string configBaseFolder,
+            string settingsBaseFolder,
+            IConfigurationRoot configuration,
             CultureInfo culture,
             ILog log,
-            IHost host
+            IHost host,
+            ICertificateManager certificateManager = null,
+            string externalUri = null,
+            ServerLifetime lifetime = null
         )
         {
             var assembly = typeof(HttpServer).Assembly;
@@ -92,13 +125,17 @@ namespace WebExpress.WebCore
 
             Route = route;
             Endpoints = endpoints;
+            ExternalUri = externalUri;
             PackagePath = packageBaseFolder;
             AssetPath = assetBaseFolder;
             DataPath = dataBaseFolder;
-            ConfigPath = configBaseFolder;
+            SettingsPath = settingsBaseFolder;
+            Configuration = configuration;
             Culture = culture;
             Log = log;
             Host = host;
+            Lifetime = lifetime ?? new ServerLifetime(log);
+            CertificateManager = certificateManager ?? new CertificateManager(log);
         }
     }
 }

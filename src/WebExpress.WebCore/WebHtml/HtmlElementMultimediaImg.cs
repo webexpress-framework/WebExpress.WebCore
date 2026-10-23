@@ -3,7 +3,9 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents an image.
+    /// Renders an HTML <c>&lt;img&gt;</c> element, which embeds an image in the page. The image source
+    /// and presentation are set through properties such as <see cref="Src"/>, <see cref="Alt"/>,
+    /// <see cref="Width"/>, and <see cref="Height"/>.
     /// </summary>
     public class HtmlElementMultimediaImg : HtmlElement, IHtmlElementMultimedia
     {
@@ -39,7 +41,7 @@ namespace WebExpress.WebCore.WebHtml
         /// </summary>
         public int Width
         {
-            get => Convert.ToInt32(GetAttribute("width"));
+            get => int.TryParse(GetAttribute("width"), out var width) ? width : 0;
             set => SetAttribute("width", value.ToString());
         }
 
@@ -48,7 +50,7 @@ namespace WebExpress.WebCore.WebHtml
         /// </summary>
         public int Height
         {
-            get => Convert.ToInt32(GetAttribute("height"));
+            get => int.TryParse(GetAttribute("height"), out var height) ? height : 0;
             set => SetAttribute("height", value.ToString());
         }
 

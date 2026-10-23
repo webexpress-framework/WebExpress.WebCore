@@ -5,7 +5,8 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebEvent
 {
     /// <summary>
-    /// Represents the context of an event.
+    /// Read-only descriptor of a registered event handler, exposing its id and the application and
+    /// plugin it belongs to, so the event manager can manage handlers without referencing their instances.
     /// </summary>
     public interface IEventHandlerContext : IContext
     {

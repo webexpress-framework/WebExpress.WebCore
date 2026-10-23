@@ -31,21 +31,21 @@ namespace WebExpress.WebCore.WebResource
         /// </summary>
         /// <param name="pluginContext">A context of a plugin whose resources are to be registered.</param>
         /// <returns>An enumeration of resource contexts.</returns>
-        IEnumerable<IResourceContext> GetResorces(IPluginContext pluginContext);
+        IEnumerable<IResourceContext> GetResources(IPluginContext pluginContext);
 
         /// <summary>
         /// Returns an enumeration of resource contextes.
         /// </summary>
         /// <typeparam name="T">The resource type.</typeparam>
         /// <returns>An enumeration of resource contextes.</returns>
-        IEnumerable<IResourceContext> GetResorces<T>() where T : IResource;
+        IEnumerable<IResourceContext> GetResources<T>() where T : IResource;
 
         /// <summary>
         /// Returns an enumeration of resource contextes.
         /// </summary>
         /// <param name="resourceType">The resource type.</param>
         /// <returns>An enumeration of resource contextes.</returns>
-        IEnumerable<IResourceContext> GetResorces(Type resourceType);
+        IEnumerable<IResourceContext> GetResources(Type resourceType);
 
         /// <summary>
         /// Returns an enumeration of resource contextes.
@@ -53,7 +53,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="resourceType">The resource type.</param>
         /// <param name="applicationContext">The context of the application.</param>
         /// <returns>An enumeration of resource contextes.</returns>
-        IEnumerable<IResourceContext> GetResorces(Type resourceType, IApplicationContext applicationContext);
+        IEnumerable<IResourceContext> GetResources(Type resourceType, IApplicationContext applicationContext);
 
         /// <summary>
         /// Returns an enumeration of resource contextes.
@@ -61,7 +61,7 @@ namespace WebExpress.WebCore.WebResource
         /// <typeparam name="T">The resource type.</typeparam>
         /// <param name="applicationContext">The context of the application.</param>
         /// <returns>An enumeration of resource contextes.</returns>
-        IEnumerable<IResourceContext> GetResorces<T>(IApplicationContext applicationContext) where T : IResource;
+        IEnumerable<IResourceContext> GetResources<T>(IApplicationContext applicationContext) where T : IResource;
 
         /// <summary>
         /// Returns the resource context.
@@ -69,7 +69,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationContext">The context of the application.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        IResourceContext GetResorce(IApplicationContext applicationContext, string resourceId);
+        IResourceContext GetResource(IApplicationContext applicationContext, string resourceId);
 
         /// <summary>
         /// Returns the resource context.
@@ -77,6 +77,6 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationId">The application id.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        IResourceContext GetResorce(string applicationId, string resourceId);
+        IResourceContext GetResource(string applicationId, string resourceId);
     }
 }

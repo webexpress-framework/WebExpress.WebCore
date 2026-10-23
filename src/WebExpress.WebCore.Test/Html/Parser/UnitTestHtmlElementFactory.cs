@@ -115,14 +115,13 @@ namespace WebExpress.WebCore.Test.Html.Parser
         }
 
         /// <summary>
-        /// Both 'kbd' and 'kdb' map to the existing <see cref="HtmlElementTextSemanticsKdb"/>.
+        /// Both 'kbd' and the legacy 'kdb' map to <see cref="HtmlElementTextSemanticsKbd"/>.
         /// </summary>
         [Fact]
-        public void KbdTag_MapsToKdbElement()
+        public void KbdTag_MapsToKbdElement()
         {
-            var element = HtmlElementFactory.Create("kbd");
-
-            Assert.IsType<HtmlElementTextSemanticsKdb>(element);
+            Assert.IsType<HtmlElementTextSemanticsKbd>(HtmlElementFactory.Create("kbd"));
+            Assert.IsType<HtmlElementTextSemanticsKbd>(HtmlElementFactory.Create("kdb"));
         }
 
         /// <summary>

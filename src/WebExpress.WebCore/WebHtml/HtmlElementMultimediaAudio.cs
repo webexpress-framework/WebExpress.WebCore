@@ -18,7 +18,7 @@
         /// Initializes a new instance of the class.
         /// </summary>
         public HtmlElementMultimediaAudio()
-            : base("audio", false)
+            : base("audio")
         {
         }
     }

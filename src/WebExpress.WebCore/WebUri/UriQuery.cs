@@ -34,7 +34,7 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>A string that represents the current query.</returns>
         public override string ToString()
         {
-            return $"{Key}={Value}";
+            return string.Concat(Key, "=", Value);
         }
     }
 
@@ -74,7 +74,7 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>A string that represents the current query.</returns>
         public override string ToString()
         {
-            return $"{Key}={Value}";
+            return string.Concat(Key, "=", Value);
         }
     }
 }

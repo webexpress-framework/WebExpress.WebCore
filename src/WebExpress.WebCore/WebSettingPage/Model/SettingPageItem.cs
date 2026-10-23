@@ -11,7 +11,8 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebSettingPage.Model
 {
     /// <summary>
-    /// Represents an item on the setting page.
+    /// Internal record the settings system keeps for one registered setting page, linking the page
+    /// to the group it appears in and to the application and plugin that provided it.
     /// </summary>
     public class SettingPageItem : IDisposable
     {

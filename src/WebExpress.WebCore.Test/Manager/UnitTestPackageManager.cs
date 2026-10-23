@@ -1,10 +1,13 @@
 using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebPackage;
 using WebExpress.WebCore.WebPackage.Model;
+using WebExpress.WebCore.WebPlugin;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.Test.Manager
 {
@@ -69,7 +72,7 @@ namespace WebExpress.WebCore.Test.Manager
             packageManager.AddPackage += (sender, item) => { eventFired = true; };
 
             // create dummy package
-            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogeItemState.Active };
+            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogItemState.Active };
 
             // act
             var method = typeof(PackageManager).GetMethod("OnAddPackage", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -92,7 +95,7 @@ namespace WebExpress.WebCore.Test.Manager
             packageManager.RemovePackage += (sender, item) => { eventFired = true; };
 
             // create dummy package
-            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogeItemState.Active };
+            var package = new PackageCatalogItem() { Id = "test", File = "test.wxp", State = PackageCatalogItemState.Active };
 
             // act
             var method = typeof(PackageManager).GetMethod("OnRemovePackage", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -308,17 +311,17 @@ namespace WebExpress.WebCore.Test.Manager
                 // act + validation (install active)
                 var install = packageManager.InstallPackage(packageFile, true);
                 Assert.True(install.Success);
-                Assert.Equal(PackageCatalogeItemState.Active, packageManager.GetPackage("lifecycle")?.State);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("lifecycle")?.State);
 
                 // act + validation (deactivate)
                 var deactivate = packageManager.DeactivatePackage("lifecycle");
                 Assert.True(deactivate.Success);
-                Assert.Equal(PackageCatalogeItemState.Disable, packageManager.GetPackage("lifecycle")?.State);
+                Assert.Equal(PackageCatalogItemState.Disable, packageManager.GetPackage("lifecycle")?.State);
 
                 // act + validation (activate)
                 var activate = packageManager.ActivatePackage("lifecycle");
                 Assert.True(activate.Success);
-                Assert.Equal(PackageCatalogeItemState.Active, packageManager.GetPackage("lifecycle")?.State);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("lifecycle")?.State);
 
                 // act + validation (uninstall)
                 var uninstall = packageManager.UninstallPackage("lifecycle");
@@ -332,6 +335,92 @@ namespace WebExpress.WebCore.Test.Manager
                     Directory.Delete(packagePath, true);
                 }
             }
+        }
+
+        /// <summary>
+        /// Tests that two instances sharing the package directory follow each other's changes:
+        /// what one installs, deactivates, activates or uninstalls, the other adopts on its next
+        /// scan - while each extracts into a directory of its own.
+        /// </summary>
+        [Fact]
+        public void ClusterInstancesFollowSharedCatalog()
+        {
+            // arrange
+            var packagePath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var statePath = Path.Combine(Path.GetTempPath(), "wx-cluster-" + Guid.NewGuid().ToString("N"));
+            var a = CreateClusterInstance(packagePath, statePath);
+            var b = CreateClusterInstance(packagePath, statePath);
+            var packageFile = Path.Combine(packagePath, "shared.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "shared", "1.0.0");
+
+                // act + validation (install on a, b follows)
+                Assert.True(a.InstallPackage(packageFile, true).Success);
+                b.Scan();
+                Assert.Equal(PackageCatalogItemState.Active, b.GetPackage("shared")?.State);
+                Assert.False(Directory.Exists(Path.Combine(packagePath, "shared.1.0.0")), "extraction must not touch the shared directory");
+
+                // act + validation (deactivate on a, b follows)
+                Assert.True(a.DeactivatePackage("shared").Success);
+                b.Scan();
+                Assert.Equal(PackageCatalogItemState.Disable, b.GetPackage("shared")?.State);
+
+                // act + validation (activate on b, a follows)
+                Assert.True(b.ActivatePackage("shared").Success);
+                a.Scan();
+                Assert.Equal(PackageCatalogItemState.Active, a.GetPackage("shared")?.State);
+
+                // act + validation (uninstall on a, b follows)
+                Assert.True(a.UninstallPackage("shared").Success);
+                b.Scan();
+                Assert.Null(b.GetPackage("shared"));
+                Assert.Empty(Directory.GetFiles(packagePath, "*.tmp"));
+            }
+            finally
+            {
+                foreach (var directory in new[] { packagePath, statePath })
+                {
+                    if (Directory.Exists(directory))
+                    {
+                        Directory.Delete(directory, true);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates the package manager of one cluster instance over a shared package directory.
+        /// </summary>
+        /// <param name="packagePath">The shared package directory.</param>
+        /// <param name="statePath">The shared cluster state directory.</param>
+        /// <returns>The package manager.</returns>
+        private static PackageManager CreateClusterInstance(string packagePath, string statePath)
+        {
+            var context = new HttpServerContext
+            (
+                new WebExpress.WebCore.WebEndpoint.RouteEndpoint("server"),
+                [],
+                packagePath,
+                Environment.CurrentDirectory,
+                Environment.CurrentDirectory,
+                Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString()),
+                new ConfigurationBuilder().Build(),
+                System.Globalization.CultureInfo.GetCultureInfo("en"),
+                new WebExpress.WebCore.WebLog.Log() { LogMode = WebExpress.WebCore.WebLog.LogMode.Off },
+                null
+            );
+            var hub = UnitTestFixture.CreateComponentHubMock(context);
+
+            ((WebExpress.WebCore.WebCluster.ClusterManager)hub.ClusterManager).Configure(new ClusterSettings
+            {
+                NodeId = "node-" + Guid.NewGuid().ToString("N"),
+                StatePath = statePath
+            });
+
+            return hub.PackageManager as PackageManager;
         }
 
         /// <summary>
@@ -405,12 +494,433 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that the plugins loaded from the application directory are reported by the read
+        /// side even though they are not packages.
+        /// </summary>
+        /// <remarks>
+        /// This is the defect the built-in entries exist for: in a plain build deployment every
+        /// plugin is referenced statically, the catalog is empty, and a management surface reading
+        /// the catalog alone stays blank while the server logs the plugins as running.
+        /// </remarks>
+        [Fact]
+        public void GetPackagesReportsStaticallyLoadedPluginsAsBuiltIn()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var pluginIds = componentHub.PluginManager.Plugins.Select(x => x.PluginId.ToString()).ToList();
+
+            // act
+            var packages = packageManager.GetPackages().ToList();
+
+            // validation
+            Assert.NotEmpty(pluginIds);
+            Assert.Empty(packageManager.Catalog.Packages);
+
+            foreach (var pluginId in pluginIds)
+            {
+                var package = Assert.Single(packages, x => x.Id == pluginId);
+
+                Assert.True(package.BuiltIn);
+                Assert.Equal(string.Empty, package.File);
+                Assert.Equal(PackageCatalogItemState.Active, package.State);
+                Assert.Contains(package.Plugins, x => x.PluginId.ToString() == pluginId);
+                Assert.Equal(pluginId, package.Metadata?.Id);
+            }
+        }
+
+        /// <summary>
+        /// Tests that a plugin present both statically and as an installed package is reported
+        /// once, by the package - which is the entry the lifecycle operations can act on.
+        /// </summary>
+        [Fact]
+        public void GetPackagesReportsAPluginOnceWhenItIsAlsoInstalled()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var pluginId = componentHub.PluginManager.Plugins.First().PluginId.ToString();
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, $"{pluginId}.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, pluginId, "1.0.0");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+                var packages = packageManager.GetPackages().Where(x => x.Id == pluginId).ToList();
+
+                // validation
+                Assert.True(install.Success);
+                Assert.False(Assert.Single(packages).BuiltIn);
+            }
+            finally
+            {
+                if (Directory.Exists(packagePath))
+                {
+                    Directory.Delete(packagePath, true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tests that the built-in entries never reach the persisted catalog.
+        /// </summary>
+        /// <remarks>
+        /// Persisting them would be worse than the original defect: on the next start LoadCatalog
+        /// would read them back as installed packages, every path built from their empty file name
+        /// would fail to resolve, and Scan would count them as no longer present and drop them.
+        /// </remarks>
+        [Fact]
+        public void SaveCatalogLeavesBuiltInEntriesOutOfTheCatalogFile()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var catalogFile = Path.Combine(packagePath, "catalog.xml");
+            var save = typeof(PackageManager).GetMethod("SaveCatalog", BindingFlags.NonPublic | BindingFlags.Instance);
+            var load = typeof(PackageManager).GetMethod("LoadCatalog", BindingFlags.NonPublic | BindingFlags.Instance);
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                Assert.NotEmpty(packageManager.GetPackages());
+
+                // act - two start cycles worth of save/load must not adopt the built-ins
+                save.Invoke(packageManager, null);
+                load.Invoke(packageManager, null);
+                save.Invoke(packageManager, null);
+
+                // validation
+                Assert.Empty(packageManager.Catalog.Packages);
+                Assert.DoesNotContain("<package", File.ReadAllText(catalogFile), StringComparison.Ordinal);
+                Assert.NotEmpty(packageManager.GetPackages());
+            }
+            finally
+            {
+                if (Directory.Exists(packagePath))
+                {
+                    Directory.Delete(packagePath, true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tests that the directory scan neither adopts nor removes the built-in entries, which
+        /// only exist in the read path.
+        /// </summary>
+        [Fact]
+        public void ScanKeepsBuiltInEntriesOutOfTheCatalog()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+
+                // act
+                packageManager.Scan();
+                packageManager.Scan();
+
+                // validation
+                Assert.Empty(packageManager.Catalog.Packages);
+                Assert.All(packageManager.GetPackages(), x => Assert.True(x.BuiltIn));
+            }
+            finally
+            {
+                if (Directory.Exists(packagePath))
+                {
+                    Directory.Delete(packagePath, true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tests that every lifecycle operation refuses a built-in plugin with a defined failure
+        /// rather than running half of its steps.
+        /// </summary>
+        [Fact]
+        public void BuiltInPackageRefusesEveryLifecycleOperation()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var pluginId = componentHub.PluginManager.Plugins.First().PluginId.ToString();
+
+            // act
+            var results = new[]
+            {
+                packageManager.ActivatePackage(pluginId),
+                packageManager.DeactivatePackage(pluginId),
+                packageManager.UpdatePackage(pluginId, Path.Combine(httpServerContext.PackagePath, "missing.wxp")),
+                packageManager.UninstallPackage(pluginId)
+            };
+
+            // validation
+            Assert.All(results, x =>
+            {
+                Assert.False(x.Success);
+                Assert.Contains("ships with the application", x.Message, StringComparison.OrdinalIgnoreCase);
+            });
+
+            // the refusal has to leave the plugin exactly as it was
+            Assert.Contains(componentHub.PluginManager.Plugins, x => x.PluginId.ToString() == pluginId);
+            Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage(pluginId)?.State);
+        }
+
+        /// <summary>
+        /// A package ships its settings file under settings/; installing it deploys the file to
+        /// the settings directory of the server and reloads the configuration, so the plugin's
+        /// section is there before the plugin boots.
+        /// </summary>
+        [Fact]
+        public void InstallDeploysSettingsFileAndReloadsConfiguration()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+            var section = configuration.GetPluginSettings("withsettings");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", """{ "Plugins": { "withsettings": { "Greeting": "hello" } } }""");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.True(File.Exists(Path.Combine(settingsPath, "withsettings.settings.json")));
+                Assert.Equal("hello", section["Greeting"]);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(settingsPath, true);
+            }
+        }
+
+        /// <summary>
+        /// A settings file the administrator already has is theirs: a package update must not
+        /// overwrite it with the shipped default.
+        /// </summary>
+        [Fact]
+        public void InstallKeepsExistingSettingsFile()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            Directory.CreateDirectory(settingsPath);
+            File.WriteAllText(Path.Combine(settingsPath, "withsettings.settings.json"), """{ "Plugins": { "withsettings": { "Greeting": "edited" } } }""");
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", """{ "Plugins": { "withsettings": { "Greeting": "shipped" } } }""");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.Equal("edited", configuration.GetPluginSettings("withsettings")["Greeting"]);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(settingsPath, true);
+            }
+        }
+
+        /// <summary>
+        /// A settings file that does not parse is refused: once in the directory it would fail
+        /// every following start of the server, so the installation goes on without it.
+        /// </summary>
+        [Fact]
+        public void InstallRefusesInvalidSettingsFile()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "broken.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "broken", "1.0.0", "{ this is not json");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.False(Directory.Exists(settingsPath));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// A package may only configure its own plugin: a settings file that sets any key outside
+        /// of Plugins:&lt;plugin-id&gt; - a server section, another plugin, or a sibling id that
+        /// merely starts with the same name - is refused as a whole and never deployed.
+        /// </summary>
+        [Theory]
+        [InlineData("""{ "Http": { "Port": "8080" } }""")]
+        [InlineData("""{ "Plugins": { "other": { "Greeting": "hello" } } }""")]
+        [InlineData("""{ "Plugins": { "withsettingsx": { "Greeting": "hello" } } }""")]
+        [InlineData("""{ "Plugins:other:Greeting": "hello" }""")]
+        [InlineData("""{ "Plugins": "hello" }""")]
+        [InlineData("""{ "Plugins": { "withsettings": { "Greeting": "hello" } }, "Security": { "Enabled": "false" } }""")]
+        public void InstallRefusesSettingsOutsideOwnPluginSection(string settings)
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", settings);
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.False(Directory.Exists(settingsPath));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// Configuration keys are case-insensitive, so a settings file that addresses its own
+        /// plugin section in different casing - or through a colon-separated property name - is
+        /// still within scope and deployed.
+        /// </summary>
+        [Theory]
+        [InlineData("""{ "plugins": { "WithSettings": { "Greeting": "hello" } } }""")]
+        [InlineData("""{ "Plugins:withsettings": { "Greeting": "hello" } }""")]
+        public void InstallDeploysSettingsOfOwnPluginSection(string settings)
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", settings);
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.Equal("hello", configuration.GetPluginSettings("withsettings")["Greeting"]);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+
+                if (Directory.Exists(settingsPath))
+                {
+                    Directory.Delete(settingsPath, true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Only a json file directly below settings/ is a settings file; an entry that tries to
+        /// leave the directory is ignored and never written anywhere.
+        /// </summary>
+        [Fact]
+        public void InstallIgnoresNestedSettingsEntry()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "nested.1.0.0.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "nested", "1.0.0", null, "settings/sub/escape.json");
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success);
+                Assert.False(Directory.Exists(settingsPath));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
         /// Creates a simple package archive for tests.
         /// </summary>
         /// <param name="file">The package file path.</param>
         /// <param name="id">The package id.</param>
         /// <param name="version">The package version.</param>
-        private static void CreatePackageArchive(string file, string id, string version)
+        /// <param name="settings">The content of a settings file shipped as settings/{id}.settings.json, or null for none.</param>
+        /// <param name="settingsEntry">The entry name of the settings file, if it is to differ from the default.</param>
+        private static void CreatePackageArchive(string file, string id, string version, string settings = null, string settingsEntry = null)
         {
             using var zip = ZipFile.Open(file, ZipArchiveMode.Create);
             var specEntry = zip.CreateEntry($"{id}.spec");
@@ -427,6 +937,13 @@ namespace WebExpress.WebCore.Test.Manager
 
             // add minimal lib folder marker to resemble package layout
             zip.CreateEntry("lib/");
+
+            if (settings is not null || settingsEntry is not null)
+            {
+                var entry = zip.CreateEntry(settingsEntry ?? $"settings/{id}.settings.json");
+                using var writer = new StreamWriter(entry.Open());
+                writer.Write(settings ?? "{}");
+            }
         }
 
         /// <summary>

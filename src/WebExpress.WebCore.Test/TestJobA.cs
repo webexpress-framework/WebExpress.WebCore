@@ -7,8 +7,15 @@ namespace WebExpress.WebCore.Test
     /// A dummy job for testing purposes.
     /// </summary>
     [Job("50", "8", "31", "1-2", "Saturday")]
+    [JobScope(JobScope.Node)]
     public sealed class TestJobA : IJob
     {
+        /// <summary>
+        /// Determines whether the job has been released, so a test can tell that removing
+        /// the job disposes this very instance.
+        /// </summary>
+        public bool IsDisposed { get; private set; }
+
         /// <summary>
         /// Initialization of the job.
         /// </summary>
@@ -34,6 +41,7 @@ namespace WebExpress.WebCore.Test
         /// </summary>
         public void Dispose()
         {
+            IsDisposed = true;
         }
     }
 }

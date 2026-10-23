@@ -207,30 +207,5 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.NotNull(theme);
             Assert.Equal(expected, theme?.ThemeStyle?.ToString());
         }
-
-        /// <summary>
-        /// Test the icon theme property of the theme. <c>TestThemeA</c>
-        /// carries <c>[IconTheme(Light)]</c>; <c>TestThemeB</c> does not
-        /// declare an icon theme and therefore falls back to
-        /// <see cref="WebCore.WebIcon.TypeIconTheme.Default"/>.
-        /// </summary>
-        [Theory]
-        [InlineData(typeof(TestApplicationA), typeof(TestThemeA), WebCore.WebIcon.TypeIconTheme.Light)]
-        [InlineData(typeof(TestApplicationA), typeof(TestThemeB), WebCore.WebIcon.TypeIconTheme.Default)]
-        [InlineData(typeof(TestApplicationB), typeof(TestThemeA), WebCore.WebIcon.TypeIconTheme.Light)]
-        [InlineData(typeof(TestApplicationB), typeof(TestThemeB), WebCore.WebIcon.TypeIconTheme.Default)]
-        public void IconTheme(Type applicationType, Type themeType, WebCore.WebIcon.TypeIconTheme expected)
-        {
-            // arrange
-            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
-            var application = componentHub.ApplicationManager.GetApplications(applicationType).FirstOrDefault();
-
-            // act
-            var theme = componentHub.ThemeManager.GetThemes(application, themeType).FirstOrDefault();
-
-            // validation
-            Assert.NotNull(theme);
-            Assert.Equal(expected, theme?.IconTheme);
-        }
     }
 }

@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// Int variable path segment.
+    /// A placeholder path segment that only matches when the value at that position is an integer
+    /// (for example <c>42</c> in <c>/item/42</c>). Use it to restrict a route parameter to whole numbers.
     /// </summary>
     /// <typeparam name="TParameter">The parameter type.</typeparam>
     public class UriPathSegmentVariableInt<TParameter> : UriPathSegmentVariable<TParameter>
@@ -17,7 +18,7 @@ namespace WebExpress.WebCore.WebUri
         public UriPathSegmentVariableInt(object tag = null)
             : base(tag)
         {
-            Expression = @"^[+-]*\d$";
+            Expression = @"^[+-]?\d+$";
             Tag = tag;
         }
 

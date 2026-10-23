@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents an empty HTML node.
+    /// A node without its own tag that simply writes out its (possibly empty) value. It is handy as
+    /// a neutral placeholder where a node is required but no surrounding element should be produced.
     /// </summary>
     public class HtmlEmpty : IHtmlNode
     {

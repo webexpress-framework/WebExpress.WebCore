@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Text;
 
 namespace WebExpress.WebCore.WebUri
 {
@@ -74,17 +75,59 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>The string representation of the authority.</returns>
         public virtual string ToString(int defaultPort)
         {
+            var builder = new StringBuilder();
+            AppendTo(builder, defaultPort);
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Appends the string representation of the authority directly to the given builder,
+        /// avoiding the intermediate string/array allocations of <see cref="ToString(int)"/>.
+        /// </summary>
+        /// <param name="builder">The target builder.</param>
+        /// <param name="defaultPort">The default port for the active scheme.</param>
+        internal void AppendTo(StringBuilder builder, int defaultPort)
+        {
+            builder.Append("//");
+
 #pragma warning disable 618
-            var userinfo = string.Join(":", new string[] { User, Password }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            var hasUser = !string.IsNullOrWhiteSpace(User);
+            var hasPassword = !string.IsNullOrWhiteSpace(Password);
 #pragma warning restore 618
 
-            var address = string.Join(":", new string[]
+            if (hasUser || hasPassword)
             {
-                Host,
-                Port != defaultPort ? Port?.ToString() : ""
-            }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                if (hasUser)
+                {
+                    builder.Append(User);
+                }
 
-            return "//" + string.Join("@", new string[] { userinfo, address }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                if (hasPassword)
+                {
+#pragma warning disable 618
+                    if (hasUser)
+                    {
+                        builder.Append(':');
+                    }
+
+                    builder.Append(Password);
+#pragma warning restore 618
+                }
+
+                builder.Append('@');
+            }
+
+            if (!string.IsNullOrWhiteSpace(Host))
+            {
+                builder.Append(Host);
+            }
+
+            if (Port.HasValue && Port != defaultPort)
+            {
+                builder.Append(':');
+                builder.Append(Port.Value);
+            }
         }
     }
 }

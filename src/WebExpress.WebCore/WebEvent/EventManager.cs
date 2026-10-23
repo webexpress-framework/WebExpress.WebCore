@@ -13,7 +13,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebEvent
 {
     /// <summary>
-    /// The event manager.
+    /// Central registry for event handlers. It discovers the event handlers a plugin provides,
+    /// keeps track of them per application, and dispatches a raised event to every handler that
+    /// listens for it. This is the wiring that connects events to their handlers at run time.
     /// </summary>
     public sealed class EventManager : IEventManager, ISystemComponent
     {

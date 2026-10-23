@@ -6,7 +6,8 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebSettingPage
 {
     /// <summary>
-    /// Provides the context for a setting group.
+    /// Read-only descriptor of a settings group — the heading under which related setting pages are
+    /// listed in the settings navigation — exposing the application and plugin it belongs to.
     /// </summary>
     public interface ISettingGroupContext : IContext
     {

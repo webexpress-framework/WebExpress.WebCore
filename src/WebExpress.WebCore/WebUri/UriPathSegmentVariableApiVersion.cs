@@ -5,7 +5,8 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// A variable path segment for the api version (e.g., /api/1/...).
+    /// A placeholder path segment that captures the API version number from the path
+    /// (the <c>1</c> in <c>/api/1/...</c>), so REST endpoints can be routed per version.
     /// </summary>
     /// <typeparam name="TParameter">The parameter type.</typeparam>
     internal class UriPathSegmentVariableApiVersion<TParameter> : UriPathSegmentVariable<TParameter>

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using WebExpress.WebCore.WebIcon;
@@ -8,7 +9,31 @@ using WebExpress.WebCore.WebParameter;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// Variable path segment.
+    /// Caches compiled regular expressions keyed by their pattern so that route matching does not
+    /// recompile the same expression on every request. Compilation is comparatively expensive, while
+    /// matching against an already compiled instance is fast, which matters on the request hot path.
+    /// </summary>
+    internal static class UriPathSegmentRegexCache
+    {
+        private static readonly ConcurrentDictionary<string, Regex> _cache = new();
+
+        /// <summary>
+        /// Returns a compiled regular expression for the given pattern, reusing a cached instance when available.
+        /// </summary>
+        /// <param name="pattern">The regular expression pattern.</param>
+        /// <returns>A compiled, case-insensitive regular expression.</returns>
+        public static Regex Get(string pattern)
+        {
+            return _cache.GetOrAdd(pattern, p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled));
+        }
+    }
+
+    /// <summary>
+    /// Base class for placeholder path segments such as <c>:id</c> in <c>/user/:id</c>. It captures
+    /// the value found at that position under a variable name and matches it against an optional
+    /// constraint expression. Concrete subclasses (int, double, GUID, string, regex, …) supply the
+    /// constraint for a particular value type; <typeparamref name="TParameter"/> ties the captured
+    /// value to the strongly typed request parameter it represents.
     /// </summary>
     /// <typeparam name="TParameter">The parameter type.</typeparam>
     public abstract class UriPathSegmentVariable<TParameter> : IUriPathSegmentVariable
@@ -86,16 +111,14 @@ namespace WebExpress.WebCore.WebUri
             {
                 return false;
             }
-            else if (string.IsNullOrWhiteSpace(Expression) && Value.Equals(value, StringComparison.OrdinalIgnoreCase))
+
+            // without a constraint expression the segment can only be matched by a literal value
+            if (string.IsNullOrEmpty(Expression))
             {
-                return true;
-            }
-            else if (Regex.IsMatch(value, Expression, RegexOptions.IgnoreCase))
-            {
-                return true;
+                return Value is not null && Value.Equals(value, StringComparison.OrdinalIgnoreCase);
             }
 
-            return false;
+            return UriPathSegmentRegexCache.Get(Expression).IsMatch(value);
         }
 
         /// <summary>

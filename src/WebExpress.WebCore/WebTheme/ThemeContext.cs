@@ -1,7 +1,6 @@
 ﻿using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
-using WebExpress.WebCore.WebIcon;
 using WebExpress.WebCore.WebPlugin;
 
 namespace WebExpress.WebCore.WebTheme
@@ -50,10 +49,5 @@ namespace WebExpress.WebCore.WebTheme
         /// Gets the route resource for the css theme style.
         /// </summary>
         public IRoute ThemeStyle { get; internal set; }
-
-        /// <summary>
-        /// Gets the icon theme used when this theme is active.
-        /// </summary>
-        public TypeIconTheme IconTheme { get; internal set; }
     }
 }

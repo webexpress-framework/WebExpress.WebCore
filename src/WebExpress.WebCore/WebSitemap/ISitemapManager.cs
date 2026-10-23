@@ -9,7 +9,8 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebSitemap
 {
     /// <summary>
-    /// The interface of the sitemap manager.
+    /// Contract for the sitemap registry — the component that builds and holds the tree of all
+    /// routes and resolves an incoming URI to the endpoint that should handle it (and back again).
     /// </summary>
     public interface ISitemapManager : IComponentManager
     {

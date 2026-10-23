@@ -2,7 +2,8 @@
 {
 
     /// <summary>
-    /// Represents a status message.
+    /// Carries the human-readable text shown on a status page (for example the explanation rendered
+    /// for a 404 or 500 response), so the status page can display a meaningful message to the user.
     /// </summary>
     public class StatusMessage
     {

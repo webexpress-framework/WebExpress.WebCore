@@ -4,7 +4,8 @@ using System.Text;
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a set of controls.
+    /// Renders an HTML <c>&lt;fieldset&gt;</c> element, which groups related form controls together
+    /// (often with a caption) so they appear and behave as one logical block within a form.
     /// </summary>
     public class HtmlElementFormFieldset : HtmlElement, IHtmlElementFormItem
     {
@@ -47,7 +48,6 @@ namespace WebExpress.WebCore.WebHtml
         public HtmlElementFormFieldset()
             : base("fieldset")
         {
-            CloseTag = false;
         }
 
         /// <summary>

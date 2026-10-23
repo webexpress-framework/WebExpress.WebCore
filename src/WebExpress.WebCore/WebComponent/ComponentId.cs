@@ -1,7 +1,9 @@
 ﻿namespace WebExpress.WebCore.WebComponent
 {
     /// <summary>
-    /// Represents a component identifier.
+    /// The identifier of a component, stored in a normalized (lower-case) form so lookups are
+    /// case-insensitive. Implicit conversions to and from <see cref="string"/> let an id be used
+    /// wherever a plain string is convenient.
     /// </summary>
     public class ComponentId : IComponentId
     {

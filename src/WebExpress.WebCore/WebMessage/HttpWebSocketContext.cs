@@ -70,7 +70,7 @@ namespace WebExpress.WebCore.WebMessage
             var connectionFeature = contextFeatures.Get<IHttpConnectionFeature>();
             var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
             var header = new RequestHeaderFields(contextFeatures);
-            var baseUri = new UriBuilder(requestFeature.Scheme, header.Host, connectionFeature.LocalPort).Uri;
+            var baseUri = new UriBuilder(requestFeature.Scheme, HttpContext.HostNameOf(header.Host), connectionFeature.LocalPort).Uri;
 
             Features = contextFeatures;
             HttpServerContext = httpServerContext;

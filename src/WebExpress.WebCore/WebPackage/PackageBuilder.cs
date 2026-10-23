@@ -15,6 +15,11 @@ namespace WebExpress.WebCore.WebPackage
     public static class PackageBuilder
     {
         /// <summary>
+        /// The directory inside a package that holds the settings files.
+        /// </summary>
+        public const string SettingsDirectory = "settings";
+
+        /// <summary>
         /// Creates a webex package.
         /// </summary>
         /// <param name="specFile">The spec file (*.spec).</param>
@@ -129,6 +134,7 @@ namespace WebExpress.WebCore.WebPackage
 
             ProjectToZip(archive, package, rootDirectory, config, targets);
             ArtifactsToZip(archive, package, rootDirectory);
+            SettingsToZip(archive, package, rootDirectory);
         }
 
         /// <summary>
@@ -215,6 +221,7 @@ namespace WebExpress.WebCore.WebPackage
                 Tags = package?.Tags,
                 Plugins = package?.Plugins?.Select(x => $"{zipBinarys}/{SanitizeFileNameComponent(Path.GetFileName(x))}").ToArray(),
                 Dependencies = package?.Dependencies,
+                Settings = package?.Settings?.Select(x => $"{SettingsDirectory}/{SanitizeFileNameComponent(Path.GetFileName(x))}").ToArray()
             };
 
             serializer.Serialize(zipStream, newPackage);
@@ -307,6 +314,30 @@ namespace WebExpress.WebCore.WebPackage
                     AddFileToZip(archive, entryPath, fileName);
 
                     Console.WriteLine($"*** PackageBuilder: Create the artifact file '{fileName}'.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Create the settings files. They are kept apart from the libraries under their own
+        /// directory, so the package manager can deploy them to the settings directory of the
+        /// server without extracting them next to the code.
+        /// </summary>
+        /// <param name="archive">The zip archive.</param>
+        /// <param name="package">The package.</param>
+        /// <param name="path">The root path.</param>
+        private static void SettingsToZip(ZipArchive archive, PackageItemSpec package, string path)
+        {
+            foreach (var item in package?.Settings ?? Enumerable.Empty<string>())
+            {
+                var fileName = Find(path, item);
+
+                if (!string.IsNullOrWhiteSpace(fileName) && File.Exists(fileName))
+                {
+                    var entryPath = SanitizeEntryPath($"{SettingsDirectory}/{Path.GetFileName(fileName)}");
+                    AddFileToZip(archive, entryPath, fileName);
+
+                    Console.WriteLine($"*** PackageBuilder: Create the settings file '{fileName}'.");
                 }
             }
         }

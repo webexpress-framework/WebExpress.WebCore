@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseInternalServerError(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>404</title></head><body>500 - Internal Server Error</body></html>";
+            var content = message?.Message ?? "<html><head><title>500</title></head><body>500 - Internal Server Error</body></html>";
             Reason = "Internal Server Error";
 
             Header.ContentType = "text/html";

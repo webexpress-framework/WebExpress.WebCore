@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebPage
 {
     /// <summary>
-    /// Defines the contract for a page resource.
+    /// An endpoint that renders an HTML page using the default visual tree. Implement it to build a
+    /// page from controls; the framework routes a request to it and renders the result.
     /// </summary>
     public interface IPage : IPage<VisualTree>
     {
