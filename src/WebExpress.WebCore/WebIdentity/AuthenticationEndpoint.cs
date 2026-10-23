@@ -1,10 +1,11 @@
-﻿using Microsoft.Extensions.Configuration;
-using System;
+﻿using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Configuration;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using System.Threading.Tasks;
+using System;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebUri;
@@ -56,6 +57,11 @@ namespace WebExpress.WebCore.WebIdentity
             response.Header.CacheControl = "no-store";
             response.Header.CustomHeader["Pragma"] = "no-cache";
             response.Header.CustomHeader["Referrer-Policy"] = "no-referrer";
+            if (path == "/api/auth/callback")
+            {
+                response.Header.Cookies.Add(IdentityManager.CreateCookie(OpenIdConnectIdentityProvider.ChallengeCookieName,
+                    null, "/api/auth/callback", null));
+            }
             _hub.IdentityManager.ApplyAuthenticationCookies(request, response);
             return response;
         }
@@ -101,10 +107,11 @@ namespace WebExpress.WebCore.WebIdentity
                             using var body = ReadBody(request);
                             var username = body.RootElement.GetProperty("username").GetString();
                             var password = body.RootElement.GetProperty("password").GetString();
+                            var rememberMe = !body.RootElement.TryGetProperty("rememberMe", out var persistence) || persistence.GetBoolean();
                             var identity = _hub.IdentityProviderManager.GetProviders(application).OfType<LocalIdentityProvider>()
                                 .Select(x => x.Authenticate(username, password)).FirstOrDefault(x => x is not null);
                             if (identity is null) { manager.Metrics?.Logins.Increment("failure"); return Unauthorized(); }
-                            return SignedIn(manager.Login(identity, request));
+                            return SignedIn(manager.Login(identity, request, rememberMe));
                         }
                     case IdentityManager.RefreshPath:
                         if (isDelete) { manager.Logout(request); return new ResponseNoContent(); }
@@ -115,17 +122,7 @@ namespace WebExpress.WebCore.WebIdentity
                         return new ResponseNoContent();
                     case "/api/auth/authorize":
                     case "/api/auth/callback":
-                        var providerId = OpenIdConnectIdentityProvider.Query(request, "provider");
-                        var providers = _hub.IdentityProviderManager.GetProviders(application).OfType<OpenIdConnectIdentityProvider>()
-                            .Where(x => x.ProviderId == providerId).ToArray();
-                        if (providers.Length != 1) { return Error(new ResponseBadRequest(), "unknown_provider"); }
-                        if (path == "/api/auth/authorize") { return await providers[0].CreateChallengeAsync(manager, application); }
-                        var external = await providers[0].AuthenticateCallbackAsync(request, manager);
-                        if (external is null) { manager.Metrics?.Logins.Increment("failure"); }
-                        var callback = external is null ? Unauthorized() : SignedIn(manager.Login(external, request));
-                        callback.Header.Cookies.Add(IdentityManager.CreateCookie(OpenIdConnectIdentityProvider.ChallengeCookieName,
-                            null, "/api/auth/callback", null));
-                        return callback;
+                        return await HandleOpenIdConnectAsync(request, manager, path == "/api/auth/authorize");
                     case "/api/auth/pat":
                         var owner = manager.GetCurrentIdentity(request);
                         if (owner is null || request.Header.Authorization is not null) { return Unauthorized(); }
@@ -156,6 +153,110 @@ namespace WebExpress.WebCore.WebIdentity
             {
                 return Error(new ResponseServiceUnavailable(), "identity_provider_unavailable");
             }
+        }
+
+        /// <summary>
+        /// Completes browser navigation with destinations captured before leaving the application.
+        /// Requests without a browser destination retain the JSON authentication contract.
+        /// </summary>
+        /// <param name="request">The authorization or callback request scoped to a known application.</param>
+        /// <param name="manager">The identity manager that validates correlation and issues local cookies.</param>
+        /// <param name="authorize">Whether this request starts a new authorization flow.</param>
+        /// <returns>The provider redirect, local browser redirect, or JSON authentication response.</returns>
+        private async Task<IResponse> HandleOpenIdConnectAsync(IRequest request, IdentityManager manager, bool authorize)
+        {
+            var providerId = OpenIdConnectIdentityProvider.Query(request, "provider");
+            string returnUrl = null;
+            string failureUrl = null;
+            var rememberMe = true;
+            if (authorize)
+            {
+                var persistence = OpenIdConnectIdentityProvider.Query(request, "rememberMe");
+                if (persistence is not null && !bool.TryParse(persistence, out rememberMe))
+                {
+                    return Error(new ResponseBadRequest(), "invalid_authentication_request");
+                }
+                returnUrl = OpenIdConnectIdentityProvider.Query(request, "returnUrl");
+                failureUrl = OpenIdConnectIdentityProvider.Query(request, "failureUrl") ?? returnUrl;
+                if ((returnUrl is not null && !OpenIdConnectIdentityProvider.IsLocalRedirectUri(returnUrl)) ||
+                    (failureUrl is not null && (returnUrl is null || !OpenIdConnectIdentityProvider.IsLocalRedirectUri(failureUrl))))
+                {
+                    return Error(new ResponseBadRequest(), "invalid_redirect");
+                }
+            }
+            else
+            {
+                // callback parameters cannot replace destinations from the initiating browser
+                var challenge = manager.ValidateChallenge(IdentityManager.CookieValue(request,
+                    OpenIdConnectIdentityProvider.ChallengeCookieName), request.ApplicationContext);
+                rememberMe = challenge is not null &&
+                    (!challenge.TryGetPayloadValue<bool>("remember_me", out var persistent) || persistent);
+                if (challenge is not null && challenge.TryGetPayloadValue<string>("provider", out var boundProvider) &&
+                    boundProvider == providerId && challenge.TryGetPayloadValue<string>("returnUrl", out var destination) &&
+                    challenge.TryGetPayloadValue<string>("failureUrl", out var failure) &&
+                    OpenIdConnectIdentityProvider.IsLocalRedirectUri(destination) && OpenIdConnectIdentityProvider.IsLocalRedirectUri(failure))
+                {
+                    returnUrl = destination;
+                    failureUrl = failure;
+                }
+            }
+
+            try
+            {
+                var providers = _hub.IdentityProviderManager.GetProviders(request.ApplicationContext)
+                    .OfType<OpenIdConnectIdentityProvider>().Where(x => x.ProviderId == providerId).ToArray();
+                if (providers.Length != 1)
+                {
+                    return BrowserFailure(failureUrl, new ResponseBadRequest(), "unknown_provider");
+                }
+                if (authorize)
+                {
+                    return await providers[0].CreateChallengeAsync(manager, request.ApplicationContext, returnUrl, failureUrl, rememberMe);
+                }
+                var external = await providers[0].AuthenticateCallbackAsync(request, manager);
+                if (external is null)
+                {
+                    manager.Metrics?.Logins.Increment("failure");
+                    return BrowserFailure(failureUrl, new ResponseUnauthorized(), "authentication_failed");
+                }
+                var pair = manager.Login(external, request, rememberMe);
+                return returnUrl is null ? SignedIn(pair) : BrowserRedirect(returnUrl);
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+            {
+                return BrowserFailure(failureUrl, new ResponseServiceUnavailable(), "identity_provider_unavailable");
+            }
+            catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException or
+                System.Collections.Generic.KeyNotFoundException or FormatException)
+            {
+                return BrowserFailure(failureUrl, new ResponseBadRequest(), "invalid_authentication_request");
+            }
+        }
+
+        /// <summary>
+        /// Returns stable error codes to a trusted login page without reflecting provider error descriptions.
+        /// </summary>
+        /// <param name="failureUrl">The validated local login destination, or null for a JSON caller.</param>
+        /// <param name="response">The status response used when no browser destination is available.</param>
+        /// <param name="error">The framework error code suitable for translation by a login control.</param>
+        /// <returns>A local failure redirect or the JSON error response.</returns>
+        private static IResponse BrowserFailure(string failureUrl, IResponse response, string error)
+        {
+            response.Header.WWWAuthenticate = false;
+            return failureUrl is null ? Error(response, error) :
+                BrowserRedirect(QueryHelpers.AddQueryString(failureUrl, "wx-auth-error", error));
+        }
+
+        /// <summary>
+        /// Leaves authentication endpoints without exposing tokens in the destination or response body.
+        /// </summary>
+        /// <param name="destination">The previously validated local destination.</param>
+        /// <returns>A temporary redirect to the application.</returns>
+        private static IResponse BrowserRedirect(string destination)
+        {
+            var response = new ResponseMovedTemporarily();
+            response.Header.Location = destination;
+            return response;
         }
 
         /// <summary>

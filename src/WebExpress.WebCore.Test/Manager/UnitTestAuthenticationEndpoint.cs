@@ -14,6 +14,82 @@ namespace WebExpress.WebCore.Test.Manager
     public class UnitTestAuthenticationEndpoint
     {
         /// <summary>
+        /// Keeps the selected cookie lifetime through rotation while logout still removes both cookies.
+        /// </summary>
+        /// <param name="rememberMe">The submitted persistence choice, or null to exercise the default.</param>
+        /// <returns>A task that completes after login, refresh, and logout have been verified.</returns>
+        [Theory]
+        [InlineData(null)]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task LoginPreservesPersistenceAcrossRefresh(bool? rememberMe)
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+            fixture.Hub.IdentityProviderManager.Register(new PasswordProvider(), fixture.Application);
+            var body = new Dictionary<string, object> { ["username"] = "alice", ["password"] = "correct" };
+            if (rememberMe.HasValue) { body["rememberMe"] = rememberMe.Value; }
+
+            // act
+            var login = await endpoint.HandleAsync(fixture.Request("X-WebExpress-Auth: 1\r\n", "POST",
+                "/api/auth/login", JsonSerializer.Serialize(body)));
+            var refresh = login.Header.Cookies[IdentityManager.RefreshCookieName];
+            var renewed = await endpoint.HandleAsync(fixture.Request($"X-WebExpress-Auth: 1\r\nCookie: {refresh.Name}={refresh.Value}\r\n",
+                "POST", IdentityManager.RefreshPath));
+            var next = renewed.Header.Cookies[IdentityManager.RefreshCookieName];
+            var logout = await endpoint.HandleAsync(fixture.Request($"X-WebExpress-Auth: 1\r\nCookie: {next.Name}={next.Value}\r\n",
+                "DELETE", IdentityManager.RefreshPath));
+
+            // validation
+            Assert.Equal(200, login.Status);
+            Assert.Equal(200, renewed.Status);
+            foreach (var response in new[] { login, renewed })
+            {
+                Assert.All(response.Header.Cookies.Cast<System.Net.Cookie>(), cookie =>
+                {
+                    Assert.Equal(rememberMe ?? true, cookie.Expires != DateTime.MinValue);
+                    Assert.True(cookie.Secure && cookie.HttpOnly);
+                    var header = ResponseSender.SerializeSetCookie(cookie, Microsoft.AspNetCore.Http.SameSiteMode.Lax);
+                    Assert.Equal(rememberMe ?? true, header.Contains("Expires="));
+                });
+            }
+            Assert.Equal(refresh.Expires.ToString("r"), next.Expires.ToString("r"));
+            Assert.NotEqual(refresh.Value, next.Value);
+            Assert.Equal(204, logout.Status);
+            Assert.All(logout.Header.Cookies.Cast<System.Net.Cookie>(), cookie =>
+            {
+                Assert.Equal("", cookie.Value);
+                Assert.Equal(DateTime.UnixEpoch, cookie.Expires);
+            });
+        }
+
+        /// <summary>
+        /// Rejects malformed persistence choices before issuing credentials.
+        /// </summary>
+        /// <param name="choice">The JSON value whose type is not boolean.</param>
+        /// <returns>A task that completes after input validation has been checked.</returns>
+        [Theory]
+        [InlineData("null")]
+        [InlineData("0")]
+        [InlineData("\"false\"")]
+        public async Task LoginRejectsInvalidPersistence(string choice)
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+            fixture.Hub.IdentityProviderManager.Register(new PasswordProvider(), fixture.Application);
+
+            // act
+            var response = await endpoint.HandleAsync(fixture.Request("X-WebExpress-Auth: 1\r\n", "POST",
+                "/api/auth/login", "{\"username\":\"alice\",\"password\":\"correct\",\"rememberMe\":" + choice + "}"));
+
+            // validation
+            Assert.Equal(400, response.Status);
+            Assert.Empty(response.Header.Cookies.Cast<System.Net.Cookie>());
+        }
+
+        /// <summary>
         /// Preserves explicit HTTP and HTTPS ports so same-origin checks accept browser requests without accepting other origins.
         /// </summary>
         /// <param name="host">The authority sent in the Host header, including the public port.</param>

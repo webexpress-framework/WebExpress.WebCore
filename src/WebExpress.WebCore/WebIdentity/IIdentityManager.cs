@@ -68,8 +68,9 @@ namespace WebExpress.WebCore.WebIdentity
         /// </summary>
         /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
         /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <param name="rememberMe">Whether browser credentials persist beyond the browser session.</param>
         /// <returns>The issued token pair, or null when no identity was authenticated.</returns>
-        IdentityTokenPair Login(IIdentity identity, IRequest request);
+        IdentityTokenPair Login(IIdentity identity, IRequest request, bool rememberMe = true);
 
         /// <summary>
         /// Clears authentication cookies and revokes renewal for the current login grant.

@@ -1,17 +1,17 @@
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Tokens;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
-using System.Threading;
+using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
+using System;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
@@ -38,6 +38,11 @@ namespace WebExpress.WebCore.WebIdentity
         public string ProviderId => _settings.ProviderId;
 
         /// <summary>
+        /// Supplies a public login label without disclosing authority credentials.
+        /// </summary>
+        public string DisplayName => string.IsNullOrWhiteSpace(_settings.DisplayName) ? ProviderId : _settings.DisplayName;
+
+        /// <summary>
         /// Pins HTTPS endpoints and uses cached discovery with signing-key refresh for key rotation.
         /// An injected client permits controlled backchannel transport and deterministic integration tests.
         /// </summary>
@@ -57,7 +62,7 @@ namespace WebExpress.WebCore.WebIdentity
             }
             _settings = new OpenIdConnectSettings
             {
-                ProviderId = settings.ProviderId, Authority = settings.Authority, ClientId = settings.ClientId,
+                ProviderId = settings.ProviderId, DisplayName = settings.DisplayName, Authority = settings.Authority, ClientId = settings.ClientId,
                 ClientSecret = settings.ClientSecret, RedirectUri = settings.RedirectUri,
                 RolePermissions = settings.RolePermissions.ToDictionary(x => x.Key, x => x.Value.ToArray(), StringComparer.Ordinal),
                 RolePolicies = settings.RolePolicies.ToDictionary(x => x.Key, x => x.Value.ToArray(), StringComparer.Ordinal)
@@ -74,9 +79,18 @@ namespace WebExpress.WebCore.WebIdentity
         /// </summary>
         /// <param name="identityManager">The identity manager whose signing authority binds browser correlation to this deployment.</param>
         /// <param name="applicationContext">The application that scopes token audiences and authentication.</param>
+        /// <param name="returnUrl">The optional local destination that selects browser navigation after authentication.</param>
+        /// <param name="failureUrl">The optional local login page to revisit when browser authentication fails.</param>
+        /// <param name="rememberMe">Whether the completed login should persist beyond the browser session.</param>
         /// <returns>A redirect response with a protected browser correlation cookie.</returns>
-        public async Task<IResponse> CreateChallengeAsync(IdentityManager identityManager, IApplicationContext applicationContext)
+        public async Task<IResponse> CreateChallengeAsync(IdentityManager identityManager, IApplicationContext applicationContext,
+            string returnUrl = null, string failureUrl = null, bool rememberMe = true)
         {
+            if ((returnUrl is not null && !IsLocalRedirectUri(returnUrl)) ||
+                (failureUrl is not null && (returnUrl is null || !IsLocalRedirectUri(failureUrl))))
+            {
+                throw new ArgumentException("Browser authentication requires local redirect destinations.");
+            }
             var applicationId = applicationContext?.ApplicationId;
             var redirectQuery = QueryHelpers.ParseQuery(new Uri(_settings.RedirectUri).Query);
             if (redirectQuery["application"].Count != 1 || redirectQuery["application"] != applicationId ||
@@ -88,10 +102,17 @@ namespace WebExpress.WebCore.WebIdentity
             var state = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
             var nonce = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
             var verifier = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
-            var challenge = identityManager.ProtectChallenge(new Dictionary<string, object>
+            var claims = new Dictionary<string, object>
             {
-                ["state"] = state, ["nonce"] = nonce, ["verifier"] = verifier, ["provider"] = ProviderId
-            }, applicationContext);
+                ["state"] = state, ["nonce"] = nonce, ["verifier"] = verifier, ["provider"] = ProviderId,
+                ["remember_me"] = rememberMe
+            };
+            if (returnUrl is not null)
+            {
+                claims["returnUrl"] = returnUrl;
+                claims["failureUrl"] = failureUrl ?? returnUrl;
+            }
+            var challenge = identityManager.ProtectChallenge(claims, applicationContext);
             var response = new ResponseMovedTemporarily();
             response.Header.Location = QueryHelpers.AddQueryString(configuration.AuthorizationEndpoint, new Dictionary<string, string>
             {
@@ -106,6 +127,39 @@ namespace WebExpress.WebCore.WebIdentity
             response.Header.CookieSameSite[ChallengeCookieName] = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
             response.Header.CacheControl = "no-store";
             return response;
+        }
+
+        /// <summary>
+        /// Rejects destinations that browsers could interpret as another origin or as header delimiters.
+        /// </summary>
+        /// <param name="value">The root-relative destination supplied by a login control or request.</param>
+        /// <returns>True when the destination stays on the current origin and has a bounded length.</returns>
+        public static bool IsLocalRedirectUri(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length > 1024) { return false; }
+            var decoded = Uri.UnescapeDataString(value);
+            return decoded.StartsWith('/') && !decoded.StartsWith("//", StringComparison.Ordinal) &&
+                !decoded.Contains('\\') && !decoded.Any(char.IsControl);
+        }
+
+        /// <summary>
+        /// Builds the browser entry point from the registered provider and application without exposing secrets.
+        /// </summary>
+        /// <param name="applicationContext">The application that owns this provider registration.</param>
+        /// <param name="returnUrl">The local destination to visit after successful authentication.</param>
+        /// <param name="failureUrl">The local login page that can display an authentication failure.</param>
+        /// <returns>The root-relative authorization URL.</returns>
+        public string CreateLoginUri(IApplicationContext applicationContext, string returnUrl, string failureUrl)
+        {
+            if (!IsLocalRedirectUri(returnUrl) || !IsLocalRedirectUri(failureUrl))
+            {
+                throw new ArgumentException("Browser authentication requires local redirect destinations.");
+            }
+            return QueryHelpers.AddQueryString("/api/auth/authorize", new Dictionary<string, string>
+            {
+                ["application"] = applicationContext.ApplicationId, ["provider"] = ProviderId,
+                ["returnUrl"] = returnUrl, ["failureUrl"] = failureUrl
+            });
         }
 
         /// <summary>

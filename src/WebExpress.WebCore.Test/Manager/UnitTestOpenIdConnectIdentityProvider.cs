@@ -3,8 +3,8 @@ using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using System.Net;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
+using System.Text;
 using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebSetting;
@@ -17,6 +17,148 @@ namespace WebExpress.WebCore.Test.Manager
     [Collection("NonParallelTests")]
     public class UnitTestOpenIdConnectIdentityProvider
     {
+        /// <summary>
+        /// Preserves the initiating destination while issuing browser cookies through the actual authentication endpoint.
+        /// </summary>
+        /// <param name="browser">Whether the initiating request selects browser navigation.</param>
+        /// <param name="rememberMe">Whether the initiating request selects persistent cookies.</param>
+        /// <returns>A task that completes after the callback and protected-cookie assertions.</returns>
+        [Theory]
+        [InlineData(true, true)]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        [InlineData(false, false)]
+        public async Task EndpointCompletesAuthenticationWithoutTrustingCallbackDestinations(bool browser, bool rememberMe)
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var backchannel = new Backchannel();
+            using var client = new HttpClient(backchannel);
+            using var provider = new PluginIdentityProvider(Settings(fixture), client);
+            fixture.Hub.IdentityProviderManager.Register(provider, fixture.Application);
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+            var start = "/api/auth/authorize?provider=external&rememberMe=" + rememberMe.ToString().ToLowerInvariant() + (browser
+                ? "&returnUrl=" + Uri.EscapeDataString("/workspace?view=mine#items") + "&failureUrl=%2Flogin" : "");
+            var redirect = await endpoint.HandleAsync(fixture.Request(path: start));
+            var parameters = QueryHelpers.ParseQuery(new Uri(redirect.Header.Location).Query);
+            backchannel.Nonce = parameters["nonce"];
+            var cookie = redirect.Header.Cookies[OpenIdConnectIdentityProvider.ChallengeCookieName];
+            var callback = fixture.Request($"Cookie: {cookie.Name}={cookie.Value}\r\n", path:
+                $"/api/auth/callback?provider=external&state={parameters["state"]}&code=code&returnUrl=https%3A%2F%2Fevil.test&failureUrl=%2Fevil&rememberMe={!rememberMe}");
+
+            // act
+            var response = await endpoint.HandleAsync(callback);
+
+            // validation
+            Assert.Equal(browser ? 302 : 200, response.Status);
+            if (browser) { Assert.Equal("/workspace?view=mine#items", response.Header.Location); }
+            else { Assert.True(JsonDocument.Parse((string)response.Content).RootElement.GetProperty("authenticated").GetBoolean()); }
+            Assert.True(response.Header.Cookies[IdentityManager.AccessCookieName].HttpOnly);
+            Assert.True(response.Header.Cookies[IdentityManager.RefreshCookieName].Secure);
+            Assert.Equal(rememberMe, response.Header.Cookies[IdentityManager.AccessCookieName].Expires != DateTime.MinValue);
+            Assert.Equal(rememberMe, response.Header.Cookies[IdentityManager.RefreshCookieName].Expires != DateTime.MinValue);
+            Assert.True(response.Header.Cookies[cookie.Name].Expires < DateTime.UtcNow);
+            Assert.Equal("no-store", response.Header.CacheControl);
+            Assert.Equal(1, backchannel.Exchanges);
+            Assert.Equal("alice", fixture.Manager.GetCurrentIdentity(fixture.Request(
+                $"Cookie: {IdentityManager.AccessCookieName}={response.Header.Cookies[IdentityManager.AccessCookieName].Value}\r\n"))?.Name);
+            Assert.Equal(browser ? 302 : 401, (await endpoint.HandleAsync(callback)).Status);
+            Assert.Equal(1, backchannel.Exchanges);
+        }
+
+        /// <summary>
+        /// Returns cancellation, invalid state, and unavailable providers to the signed login destination without credentials.
+        /// </summary>
+        /// <param name="failure">The failure injected after authorization starts.</param>
+        /// <returns>A task that completes after failure navigation has been checked.</returns>
+        [Theory]
+        [InlineData("cancel")]
+        [InlineData("state")]
+        [InlineData("unavailable")]
+        [InlineData("nonce")]
+        public async Task BrowserFailuresReturnToTheBoundLoginPage(string failure)
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var backchannel = new Backchannel();
+            using var client = new HttpClient(backchannel);
+            using var provider = new PluginIdentityProvider(Settings(fixture), client);
+            fixture.Hub.IdentityProviderManager.Register(provider, fixture.Application);
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+            var redirect = await endpoint.HandleAsync(fixture.Request(path:
+                "/api/auth/authorize?provider=external&returnUrl=%2Fworkspace&failureUrl=%2Flogin%3Flang%3Dde%23form"));
+            var parameters = QueryHelpers.ParseQuery(new Uri(redirect.Header.Location).Query);
+            backchannel.Nonce = parameters["nonce"];
+            backchannel.Failure = failure;
+            var cookie = redirect.Header.Cookies[OpenIdConnectIdentityProvider.ChallengeCookieName];
+            var state = failure == "state" ? "wrong" : parameters["state"].ToString();
+            var result = failure == "cancel" ? "error=access_denied&error_description=untrusted" : "code=code";
+
+            // act
+            var response = await endpoint.HandleAsync(fixture.Request($"Cookie: {cookie.Name}={cookie.Value}\r\n", path:
+                $"/api/auth/callback?provider=external&state={state}&{result}&failureUrl=https%3A%2F%2Fevil.test"));
+
+            // validation
+            Assert.Equal(302, response.Status);
+            Assert.Equal("/login?lang=de&wx-auth-error=" + (failure == "unavailable"
+                ? "identity_provider_unavailable" : "authentication_failed") + "#form", response.Header.Location);
+            Assert.Null(response.Header.Cookies[IdentityManager.AccessCookieName]);
+            Assert.True(response.Header.Cookies[cookie.Name].Expires < DateTime.UtcNow);
+        }
+
+        /// <summary>
+        /// Rejects external or ambiguous navigation before initiating discovery or issuing correlation cookies.
+        /// </summary>
+        /// <param name="destination">The untrusted destination submitted at the authorization boundary.</param>
+        /// <returns>A task that completes after the boundary response has been checked.</returns>
+        [Theory]
+        [InlineData("https://evil.test")]
+        [InlineData("//evil.test")]
+        [InlineData("/\\evil.test")]
+        [InlineData("/%2fevil.test")]
+        [InlineData("/ok%0d%0aLocation:evil")]
+        [InlineData("relative")]
+        public async Task AuthorizationRejectsUnsafeDestinations(string destination)
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+
+            // act
+            var response = await endpoint.HandleAsync(fixture.Request(path:
+                "/api/auth/authorize?provider=external&returnUrl=" + Uri.EscapeDataString(destination)));
+
+            // validation
+            Assert.Equal(400, response.Status);
+            Assert.Contains("invalid_redirect", (string)response.Content);
+            Assert.Null(response.Header.Location);
+            Assert.Empty(response.Header.Cookies.Cast<Cookie>());
+        }
+
+        /// <summary>
+        /// Keeps missing browser correlation from turning callback query parameters into trusted navigation.
+        /// </summary>
+        /// <returns>A task that completes after the uncorrelated callback has been checked.</returns>
+        [Fact]
+        public async Task CallbackWithoutCorrelationDoesNotRedirect()
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var client = new HttpClient(new Backchannel());
+            using var provider = new PluginIdentityProvider(Settings(fixture), client);
+            fixture.Hub.IdentityProviderManager.Register(provider, fixture.Application);
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+
+            // act
+            var response = await endpoint.HandleAsync(fixture.Request(path:
+                "/api/auth/callback?provider=external&code=stolen&returnUrl=%2Fworkspace&failureUrl=%2Flogin"));
+
+            // validation
+            Assert.Equal(401, response.Status);
+            Assert.Null(response.Header.Location);
+            Assert.False(response.Header.WWWAuthenticate);
+        }
+
         /// <summary>
         /// A plugin can map its verified external roles into the common identity without changing protocol validation.
         /// </summary>
@@ -152,6 +294,7 @@ namespace WebExpress.WebCore.Test.Manager
             /// <returns>The simulated discovery, signing-key, or token response.</returns>
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
+                if (Failure == "unavailable") { throw new HttpRequestException("Provider unavailable."); }
                 object payload;
                 if (request.RequestUri.AbsolutePath.EndsWith("openid-configuration"))
                 {

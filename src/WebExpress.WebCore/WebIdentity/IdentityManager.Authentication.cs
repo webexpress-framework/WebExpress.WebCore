@@ -70,13 +70,14 @@ namespace WebExpress.WebCore.WebIdentity
         /// </summary>
         /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
         /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <param name="rememberMe">Whether browser credentials persist beyond the browser session.</param>
         /// <returns>The issued token pair, or null when no identity was authenticated.</returns>
-        public IdentityTokenPair Login(IIdentity identity, IRequest request)
+        public IdentityTokenPair Login(IIdentity identity, IRequest request, bool rememberMe = true)
         {
             if (identity is null) { return null; }
             ArgumentNullException.ThrowIfNull(request);
             var snapshot = Snapshot(identity, request.ApplicationContext);
-            var pair = Issue(snapshot, request.ApplicationContext);
+            var pair = Issue(snapshot, request.ApplicationContext, rememberMe);
             var state = _authenticationStates.GetOrCreateValue(request);
             state.Identity = snapshot;
             state.Pair = pair;
@@ -180,9 +181,10 @@ namespace WebExpress.WebCore.WebIdentity
         {
             if (request is null || response is null || !_authenticationStates.TryGetValue(request, out var state) || !state.Changed) { return; }
             response.Header.CacheControl = "no-store";
+            var expiration = state.Pair?.RememberMe == true ? state.Pair.RefreshTokenExpiresAt : (DateTimeOffset?)null;
             // an expired access credential still identifies the grant for logout; validation always enforces its signed expiry
-            response.Header.Cookies.Add(CreateCookie(AccessCookie, state.Pair?.AccessToken, "/", state.Pair?.RefreshTokenExpiresAt, RequiresHttps));
-            response.Header.Cookies.Add(CreateCookie(RefreshCookie, state.Pair?.RefreshToken, RefreshPath, state.Pair?.RefreshTokenExpiresAt, RequiresHttps));
+            response.Header.Cookies.Add(CreateCookie(AccessCookie, state.Pair?.AccessToken, "/", expiration, RequiresHttps));
+            response.Header.Cookies.Add(CreateCookie(RefreshCookie, state.Pair?.RefreshToken, RefreshPath, expiration, RequiresHttps));
             // only the own scripts ever renew the grant, so no cross-site request needs the refresh token
             response.Header.CookieSameSite[RefreshCookie] = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
         }
@@ -193,7 +195,7 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="name">The exact cookie or claim name to inspect.</param>
         /// <param name="value">The value being validated or placed in the protected response.</param>
         /// <param name="path">The route or cookie path that constrains credential use.</param>
-        /// <param name="expiration">The cookie deadline, or null when the cookie must be deleted.</param>
+        /// <param name="expiration">The cookie deadline, or null for a browser session cookie. A null value always deletes the cookie.</param>
         /// <param name="secure">Whether the browser must restrict the cookie to HTTPS transport.</param>
         /// <returns>The protected authentication cookie or its deletion counterpart.</returns>
         internal static Cookie CreateCookie(string name, string value, string path, DateTimeOffset? expiration, bool secure = true)
@@ -202,7 +204,7 @@ namespace WebExpress.WebCore.WebIdentity
             {
                 Secure = secure,
                 HttpOnly = true,
-                Expires = expiration?.UtcDateTime ?? DateTime.UnixEpoch
+                Expires = value is null ? DateTime.UnixEpoch : expiration?.UtcDateTime ?? DateTime.MinValue
             };
         }
 

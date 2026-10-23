@@ -8,6 +8,11 @@ namespace WebExpress.WebCore.WebIdentity
     public sealed class IdentityTokenPair
     {
         /// <summary>
+        /// Preserves the browser persistence choice across credential renewal.
+        /// </summary>
+        public bool RememberMe { get; internal init; } = true;
+
+        /// <summary>
         /// Authorizes requests until the short-lived snapshot expires.
         /// </summary>
         public string AccessToken { get; internal init; }

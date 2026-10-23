@@ -98,10 +98,11 @@ namespace WebExpress.WebCore.WebIdentity
         /// </summary>
         /// <param name="identity">The verified identity whose authorization snapshot is being processed.</param>
         /// <param name="applicationContext">The application that scopes token audiences and authentication.</param>
+        /// <param name="rememberMe">Whether browser credentials persist beyond the browser session.</param>
         /// <returns>The signed access and refresh credentials for the new login grant.</returns>
-        public IdentityTokenPair Issue(IIdentity identity, IApplicationContext applicationContext)
+        public IdentityTokenPair Issue(IIdentity identity, IApplicationContext applicationContext, bool rememberMe = true)
         {
-            return IssuePair(identity, applicationContext, Guid.NewGuid().ToString("N"), Clock.GetUtcNow() + RequireAuthority().RefreshLifetime);
+            return IssuePair(identity, applicationContext, Guid.NewGuid().ToString("N"), Clock.GetUtcNow() + RequireAuthority().RefreshLifetime, rememberMe);
         }
 
         /// <summary>
@@ -149,7 +150,8 @@ namespace WebExpress.WebCore.WebIdentity
                 store.Revoke("grant:" + grant, expires);
                 return null;
             }
-            return IssuePair(identity, applicationContext, grant, expires);
+            var rememberMe = !jwt.TryGetPayloadValue<bool>("remember_me", out var persistent) || persistent;
+            return IssuePair(identity, applicationContext, grant, expires, rememberMe);
         }
 
         /// <summary>
@@ -262,8 +264,9 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="applicationContext">The application that scopes token audiences and authentication.</param>
         /// <param name="grant">The identifier of the original login grant.</param>
         /// <param name="deadline">The absolute deadline beyond which the login grant cannot be renewed.</param>
+        /// <param name="rememberMe">Whether browser credentials persist beyond the browser session.</param>
         /// <returns>The signed token pair constrained by the absolute grant deadline.</returns>
-        private IdentityTokenPair IssuePair(IIdentity identity, IApplicationContext applicationContext, string grant, DateTimeOffset deadline)
+        private IdentityTokenPair IssuePair(IIdentity identity, IApplicationContext applicationContext, string grant, DateTimeOffset deadline, bool rememberMe)
         {
             ArgumentNullException.ThrowIfNull(identity);
             var accessDeadline = Clock.GetUtcNow() + RequireAuthority().AccessLifetime;
@@ -271,9 +274,10 @@ namespace WebExpress.WebCore.WebIdentity
             var pair = new IdentityTokenPair
             {
                 AccessToken = SignIdentity(identity, applicationContext, "access", accessDeadline, grant, deadline),
-                RefreshToken = SignIdentity(identity, applicationContext, "refresh", deadline, grant, deadline),
+                RefreshToken = SignIdentity(identity, applicationContext, "refresh", deadline, grant, deadline, rememberMe),
                 AccessTokenExpiresAt = accessDeadline,
-                RefreshTokenExpiresAt = deadline
+                RefreshTokenExpiresAt = deadline,
+                RememberMe = rememberMe
             };
             if (pair.AccessToken.Length > 3800 || pair.RefreshToken.Length > 3800)
             {
@@ -291,9 +295,10 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="expires">The signed expiration deadline of the credential.</param>
         /// <param name="grant">The identifier of the original login grant.</param>
         /// <param name="grantExpires">The expiration deadline shared by credentials from one login grant.</param>
+        /// <param name="rememberMe">Whether a refresh credential may restore persistent browser cookies.</param>
         /// <returns>The signed credential containing the trusted identity snapshot.</returns>
         private string SignIdentity(IIdentity identity, IApplicationContext applicationContext, string purpose, DateTimeOffset expires,
-            string grant = null, DateTimeOffset? grantExpires = null)
+            string grant = null, DateTimeOffset? grantExpires = null, bool rememberMe = true)
         {
             var claims = new Dictionary<string, object>
             {
@@ -301,6 +306,7 @@ namespace WebExpress.WebCore.WebIdentity
                 ["roles"] = identity.Roles.ToArray(), ["permissions"] = identity.Permissions.ToArray(),
                 ["policies"] = identity.PolicyNames.ToArray()
             };
+            if (purpose == "refresh") { claims["remember_me"] = rememberMe; }
             if (identity.Email is not null) { claims["email"] = identity.Email; }
             if (grant is not null) { claims["grant"] = grant; claims["grant_exp"] = grantExpires.Value.ToUnixTimeSeconds(); }
             return SignToken(claims, applicationContext, purpose, expires);

@@ -13,6 +13,11 @@ namespace WebExpress.WebCore.WebSetting
         public string ProviderId { get; set; }
 
         /// <summary>
+        /// Gets or sets the provider label shown on login forms, falling back to the provider identifier.
+        /// </summary>
+        public string DisplayName { get; set; }
+
+        /// <summary>
         /// Pins the HTTPS issuer advertised by discovery and by every accepted ID token.
         /// </summary>
         public string Authority { get; set; }
