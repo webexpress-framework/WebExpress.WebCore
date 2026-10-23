@@ -18,6 +18,7 @@ namespace WebExpress.WebCore.WebHtml.Parser
     {
         private readonly string _input;
         private int _position;
+        private string _rawTextTag;
 
         /// <summary>
         /// Returns the set of HTML void-element tag names that are always
@@ -55,6 +56,7 @@ namespace WebExpress.WebCore.WebHtml.Parser
         {
             var tokens = new List<HtmlToken>();
             _position = 0;
+            _rawTextTag = null;
 
             while (_position < _input.Length)
             {
@@ -92,6 +94,11 @@ namespace WebExpress.WebCore.WebHtml.Parser
         /// </returns>
         private HtmlToken ReadNextToken()
         {
+            if (_rawTextTag != null)
+            {
+                return ReadRawText();
+            }
+
             if (Current == '<')
             {
                 return ReadTagOrSpecial();
@@ -283,7 +290,43 @@ namespace WebExpress.WebCore.WebHtml.Parser
                 return new HtmlToken(HtmlTokenType.SelfClosingTag, tagName, attributes);
             }
 
+            if (tagName is "script" or "style" or "title" or "textarea" or
+                "xmp" or "iframe" or "noembed" or "noframes" or "plaintext")
+            {
+                _rawTextTag = tagName;
+            }
+
             return new HtmlToken(HtmlTokenType.StartTag, tagName, attributes);
+        }
+
+        /// <summary>
+        /// Keeps markup-like content inside raw text and escapable raw text elements from becoming tags.
+        /// </summary>
+        /// <returns>The literal content, or the matching end tag when the content is empty.</returns>
+        private HtmlToken ReadRawText()
+        {
+            var start = _position;
+            var closingTag = "</" + _rawTextTag;
+            var end = _rawTextTag == "plaintext" ? -1 :
+                _input.IndexOf(closingTag, start, StringComparison.OrdinalIgnoreCase);
+
+            while (end >= 0)
+            {
+                var boundary = end + closingTag.Length;
+                if (boundary < _input.Length &&
+                    (_input[boundary] is '>' or '/' or ' ' or '\t' or '\r' or '\n' or '\f'))
+                {
+                    break;
+                }
+
+                end = _input.IndexOf(closingTag, boundary, StringComparison.OrdinalIgnoreCase);
+            }
+
+            _position = end < 0 ? _input.Length : end;
+            _rawTextTag = null;
+            return _position > start
+                ? new HtmlToken(HtmlTokenType.Text, _input[start.._position])
+                : ReadTagOrSpecial();
         }
 
         /// <summary>

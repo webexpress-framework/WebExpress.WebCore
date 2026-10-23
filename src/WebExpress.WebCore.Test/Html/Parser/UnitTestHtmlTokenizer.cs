@@ -317,5 +317,89 @@ namespace WebExpress.WebCore.Test.Html.Parser
             Assert.Equal(HtmlTokenType.SelfClosingTag, tokens[0].Type);
             Assert.Equal("keygen", tokens[0].TagName);
         }
+
+        /// <summary>
+        /// Keeps embedded markup literal until the matching raw text closing tag.
+        /// </summary>
+        /// <param name="tag">The raw text or escapable raw text element.</param>
+        [Theory]
+        [InlineData("script")]
+        [InlineData("style")]
+        [InlineData("title")]
+        [InlineData("textarea")]
+        [InlineData("iframe")]
+        [InlineData("xmp")]
+        [InlineData("noembed")]
+        [InlineData("noframes")]
+        public void RawText_OnlyRecognizesMatchingEndTag(string tag)
+        {
+            // arrange
+            var content = $"<a href='https://example.com/'>literal</a></{tag}suffix>&amp;";
+            var html = $"<{tag}>{content}</{tag.ToUpperInvariant()} ><p>after</p>";
+
+            // act
+            var tokens = Tokenize(html);
+
+            // validation
+            Assert.Equal(HtmlTokenType.Text, tokens[1].Type);
+            Assert.Equal(content, tokens[1].Value);
+            Assert.Equal(HtmlTokenType.EndTag, tokens[2].Type);
+            Assert.Equal(tag, tokens[2].TagName);
+            Assert.Equal("p", tokens[3].TagName);
+            Assert.DoesNotContain(tokens, token => token.TagName == "a");
+        }
+
+        /// <summary>
+        /// Resets raw text state when a tokenizer instance is reused after an incomplete document.
+        /// </summary>
+        [Fact]
+        public void RawText_UnterminatedElementCanBeTokenizedRepeatedly()
+        {
+            // arrange
+            var tokenizer = new HtmlTokenizer("<script><a>literal");
+
+            // act
+            var first = tokenizer.Tokenize();
+            var second = tokenizer.Tokenize();
+
+            // validation
+            Assert.Equal(3, first.Count);
+            Assert.Equal("<a>literal", first[1].Value);
+            Assert.Equal(first.Select(token => token.ToString()), second.Select(token => token.ToString()));
+        }
+
+        /// <summary>
+        /// Continues immediately after an empty raw text element.
+        /// </summary>
+        [Fact]
+        public void RawText_EmptyElementPreservesFollowingMarkup()
+        {
+            // arrange
+            const string html = "<script></script><a>link</a>";
+
+            // act
+            var tokens = Tokenize(html);
+
+            // validation
+            Assert.Equal(HtmlTokenType.EndTag, tokens[1].Type);
+            Assert.Equal("a", tokens[2].TagName);
+        }
+
+        /// <summary>
+        /// Treats all remaining plaintext content literally, including apparent closing tags.
+        /// </summary>
+        [Fact]
+        public void Plaintext_DoesNotResumeMarkupParsing()
+        {
+            // arrange
+            const string html = "<plaintext><a>literal</plaintext><p>still literal";
+
+            // act
+            var tokens = Tokenize(html);
+
+            // validation
+            Assert.Equal(3, tokens.Length);
+            Assert.Equal("<a>literal</plaintext><p>still literal", tokens[1].Value);
+        }
     }
 }
