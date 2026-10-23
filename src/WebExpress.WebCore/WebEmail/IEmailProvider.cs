@@ -1,6 +1,6 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
-using MimeKit;
+using System.Net.Mail;
 using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebEmail
@@ -23,6 +23,6 @@ namespace WebExpress.WebCore.WebEmail
         /// <param name="profile">A private copy of the selected configuration.</param>
         /// <param name="cancellationToken">The caller cancellation and total delivery deadline.</param>
         /// <returns>A task that completes on acceptance or throws on failure.</returns>
-        Task SendAsync(MimeMessage message, EmailProfileSettings profile, CancellationToken cancellationToken);
+        Task SendAsync(MailMessage message, EmailProfileSettings profile, CancellationToken cancellationToken);
     }
 }

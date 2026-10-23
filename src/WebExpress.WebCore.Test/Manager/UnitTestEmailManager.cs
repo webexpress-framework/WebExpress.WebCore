@@ -1,5 +1,5 @@
 ﻿using Microsoft.Extensions.Configuration;
-using MimeKit;
+using System.Net.Mail;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -83,15 +83,15 @@ namespace WebExpress.WebCore.Test.Manager
             {
                 entered.SetResult();
                 await release.Task.WaitAsync(token);
-                Assert.Equal("Plain München", message.TextBody);
-                Assert.Equal("<p>HTML München</p>", message.HtmlBody);
+                Assert.Equal("Plain München", ReadBody(message, "text/plain"));
+                Assert.Equal("<p>HTML München</p>", ReadBody(message, "text/html"));
                 Assert.Single(message.To);
-                Assert.Single(message.Cc);
+                Assert.Single(message.CC);
                 Assert.Single(message.Bcc);
-                Assert.Equal("reply@example.org", message.ReplyTo.Mailboxes.Single().Address);
+                Assert.Equal("reply@example.org", message.ReplyToList.Single().Address);
                 Assert.Equal("eu", profile.Options["region"]);
                 using var output = new MemoryStream();
-                ((MimePart)message.Attachments.Single()).Content.DecodeTo(output, TestContext.Current.CancellationToken);
+                message.Attachments.Single().ContentStream.CopyTo(output);
                 received = output.ToArray();
             });
             hub.EmailManager.RegisterProvider(provider);
@@ -430,7 +430,7 @@ namespace WebExpress.WebCore.Test.Manager
             string sender = null;
             var provider = new TestProvider((message, _, _) =>
             {
-                sender = message.From.Mailboxes.Single().Address;
+                sender = message.From.Address;
                 return Task.CompletedTask;
             });
             hub.EmailManager.RegisterProvider(provider);
@@ -480,38 +480,54 @@ namespace WebExpress.WebCore.Test.Manager
         /// </summary>
         /// <param name="plainText">Whether to include the plain text alternative.</param>
         /// <param name="html">Whether to include the HTML alternative.</param>
+        /// <param name="withAttachment">Whether a mixed container is required for binary content.</param>
         [Theory]
-        [InlineData(true, true)]
-        [InlineData(true, false)]
-        [InlineData(false, true)]
-        public async Task SmtpRoundTripPreservesMimeAndHidesBcc(bool plainText, bool html)
+        [InlineData(true, true, true)]
+        [InlineData(true, false, true)]
+        [InlineData(false, true, true)]
+        [InlineData(true, true, false)]
+        [InlineData(true, false, false)]
+        [InlineData(false, true, false)]
+        public async Task SmtpRoundTripPreservesMimeAndHidesBcc(bool plainText, bool html, bool withAttachment)
         {
             // arrange
             await using var server = new SmtpServer();
             using var hub = CreateHub(SmtpSettings(server.Port));
+            var bytes = Enumerable.Range(0, 1024).Select(x => (byte)x).ToArray();
+            var filename = string.Concat(Enumerable.Repeat("Prüfung", 12)) + ".bin";
             var message = new EmailMessage
             {
                 To = ["receiver@example.org"], Bcc = ["hidden@example.org"],
                 Subject = "Grüße", TextBody = plainText ? "Plain München" : null,
                 HtmlBody = html ? "<p>HTML München</p>" : null,
-                Attachments = [new() { FileName = "Prüfung.bin", Content = [0, 128, 255] }]
+                Attachments = withAttachment ? [new() { FileName = filename, Content = bytes }] : []
             };
 
             // act
             var result = await hub.EmailManager.SendAsync("app", message, cancellationToken: TestContext.Current.CancellationToken);
             var wire = await server.Content.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            using var mime = MimeMessage.Load(new MemoryStream(Encoding.UTF8.GetBytes(wire)), TestContext.Current.CancellationToken);
-            using var attachment = new MemoryStream();
-            ((MimePart)mime.Attachments.Single()).Content.DecodeTo(attachment, TestContext.Current.CancellationToken);
+
+            var parts = ReadMimeParts(wire).ToArray();
 
             // validation
             Assert.Equal(EmailSendResult.Accepted, result);
-            Assert.Equal("Grüße", mime.Subject);
-            Assert.Equal(plainText ? "Plain München" : null, mime.TextBody?.TrimEnd());
-            Assert.Equal(html ? "<p>HTML München</p>" : null, mime.HtmlBody?.TrimEnd());
-            Assert.Empty(mime.Bcc);
+            Assert.Contains("Subject: =?utf-8?B?" + Convert.ToBase64String(Encoding.UTF8.GetBytes("Grüße")) + "?=", wire);
+            Assert.Equal(plainText ? "Plain München" : null, parts.SingleOrDefault(x => x.MediaType == "text/plain").Text);
+            Assert.Equal(html ? "<p>HTML München</p>" : null, parts.SingleOrDefault(x => x.MediaType == "text/html").Text);
+            Assert.DoesNotContain("Bcc:", wire, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("hidden@example.org", wire);
             Assert.Contains(server.Commands, command => command.Contains("hidden@example.org"));
-            Assert.Equal(new byte[] { 0, 128, 255 }, attachment.ToArray());
+            if (withAttachment)
+            {
+                Assert.Equal(bytes, parts.Single(x => x.MediaType == "application/octet-stream").Bytes);
+                var segments = System.Text.RegularExpressions.Regex.Matches(wire, @" filename\*\d+\*=(?:utf-8'')?([^;\r\n]+)")
+                    .Select(x => x.Groups[1].Value);
+                Assert.Equal(filename, Uri.UnescapeDataString(string.Concat(segments)));
+            }
+            else
+            {
+                Assert.DoesNotContain(parts, x => x.MediaType == "application/octet-stream");
+            }
         }
 
         /// <summary>
@@ -552,6 +568,54 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.Equal(EmailError.DeliveryFailed, error.Error);
             Assert.Equal(EmailSendResult.AlreadyAttempted, duplicate);
             Assert.False(server.Content.IsCompletedSuccessfully);
+        }
+
+        /// <summary>
+        /// Independently decodes MIME boundaries and transfer encodings observed on the SMTP wire.
+        /// </summary>
+        /// <param name="wire">One complete MIME entity including its headers.</param>
+        /// <returns>The decoded leaf entities for content comparisons.</returns>
+        private static IEnumerable<(string MediaType, string Text, byte[] Bytes)> ReadMimeParts(string wire)
+        {
+            var separator = wire.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+            Assert.True(separator >= 0);
+            var headers = System.Text.RegularExpressions.Regex.Replace(wire[..separator], "\r\n[ \t]+", " ")
+                .Split("\r\n").Select(x => x.Split(':', 2)).ToDictionary(x => x[0], x => x[1].Trim(), StringComparer.OrdinalIgnoreCase);
+            var type = new System.Net.Mime.ContentType(headers["Content-Type"]);
+            var body = wire[(separator + 4)..];
+            if (type.MediaType.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.False(string.IsNullOrEmpty(type.Boundary));
+                Assert.EndsWith("--" + type.Boundary + "--\r\n", body);
+                foreach (var part in body.Split("--" + type.Boundary).Skip(1).TakeWhile(x => !x.StartsWith("--", StringComparison.Ordinal)))
+                {
+                    foreach (var leaf in ReadMimeParts(part[2..])) { yield return leaf; }
+                }
+            }
+            else
+            {
+                Assert.Equal("base64", headers["Content-Transfer-Encoding"]);
+                Assert.All(body.Split("\r\n"), line => Assert.True(line.Length <= 76));
+                var bytes = Convert.FromBase64String(body);
+                yield return (type.MediaType, Encoding.UTF8.GetString(bytes), bytes);
+            }
+        }
+
+        /// <summary>
+        /// Reads a detached alternative without changing the stream position seen by a provider.
+        /// </summary>
+        /// <param name="message">The framework-owned message snapshot.</param>
+        /// <param name="mediaType">The alternative selected for validation.</param>
+        /// <returns>The decoded UTF-8 alternative, or null when absent.</returns>
+        private static string ReadBody(MailMessage message, string mediaType)
+        {
+            var view = message.AlternateViews.SingleOrDefault(x => x.ContentType.MediaType == mediaType);
+            if (view is null) { return null; }
+            var position = view.ContentStream.Position;
+            using var reader = new StreamReader(view.ContentStream, Encoding.UTF8, leaveOpen: true);
+            var text = reader.ReadToEnd();
+            view.ContentStream.Position = position;
+            return text;
         }
 
         /// <summary>
@@ -612,7 +676,7 @@ namespace WebExpress.WebCore.Test.Manager
         /// </summary>
         private sealed class TestProvider : IEmailProvider
         {
-            private readonly Func<MimeMessage, EmailProfileSettings, CancellationToken, Task> _send;
+            private readonly Func<MailMessage, EmailProfileSettings, CancellationToken, Task> _send;
 
             /// <summary>Counts submissions independently of concurrent caller attempts.</summary>
             public int Calls;
@@ -622,7 +686,7 @@ namespace WebExpress.WebCore.Test.Manager
 
             /// <summary>Configures the provider behavior without replacing manager logic.</summary>
             /// <param name="send">The optional controlled submission behavior.</param>
-            public TestProvider(Func<MimeMessage, EmailProfileSettings, CancellationToken, Task> send = null)
+            public TestProvider(Func<MailMessage, EmailProfileSettings, CancellationToken, Task> send = null)
             {
                 _send = send ?? ((_, _, _) => Task.CompletedTask);
             }
@@ -632,7 +696,7 @@ namespace WebExpress.WebCore.Test.Manager
             /// <param name="profile">The selected profile copy.</param>
             /// <param name="cancellationToken">The combined deadline and caller cancellation.</param>
             /// <returns>The configured submission task.</returns>
-            public Task SendAsync(MimeMessage message, EmailProfileSettings profile, CancellationToken cancellationToken)
+            public Task SendAsync(MailMessage message, EmailProfileSettings profile, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref Calls);
                 return _send(message, profile, cancellationToken);

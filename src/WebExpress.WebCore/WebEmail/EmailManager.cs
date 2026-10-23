@@ -8,7 +8,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
-using MimeKit;
+using System.IO;
+using System.Net.Mail;
+using System.Net.Mime;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebSetting;
 
@@ -154,7 +156,7 @@ namespace WebExpress.WebCore.WebEmail
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            MimeMessage snapshot = null;
+            MailMessage snapshot = null;
             try
             {
                 EmailProfileSettings options;
@@ -266,25 +268,25 @@ namespace WebExpress.WebCore.WebEmail
         /// <param name="profile">The profile supplying a default sender.</param>
         /// <param name="key">The opaque delivery correlation used for the Message-Id header.</param>
         /// <returns>An owned MIME snapshot.</returns>
-        private MimeMessage CreateSnapshot(EmailMessage message, EmailProfileSettings profile, string key)
+        private MailMessage CreateSnapshot(EmailMessage message, EmailProfileSettings profile, string key)
         {
-            var result = new MimeMessage();
+            var result = new MailMessage();
             try
             {
-                result.From.Add(ParseMailbox(message.From ?? profile.From));
+                result.From = ParseMailbox(message.From ?? profile.From);
                 foreach (var address in message.To ?? [])
                 {
                     result.To.Add(ParseMailbox(address));
                 }
                 foreach (var address in message.Cc ?? [])
                 {
-                    result.Cc.Add(ParseMailbox(address));
+                    result.CC.Add(ParseMailbox(address));
                 }
                 foreach (var address in message.Bcc ?? [])
                 {
                     result.Bcc.Add(ParseMailbox(address));
                 }
-                if (result.To.Count + result.Cc.Count + result.Bcc.Count == 0
+                if (result.To.Count + result.CC.Count + result.Bcc.Count == 0
                     || (message.TextBody is null && message.HtmlBody is null)
                     || message.Subject?.IndexOfAny(['\r', '\n', '\0']) >= 0)
                 {
@@ -293,11 +295,19 @@ namespace WebExpress.WebCore.WebEmail
 
                 if (message.ReplyTo is not null)
                 {
-                    result.ReplyTo.Add(ParseMailbox(message.ReplyTo));
+                    result.ReplyToList.Add(ParseMailbox(message.ReplyTo));
                 }
                 result.Subject = message.Subject ?? "";
-                result.MessageId = $"{key.ToLowerInvariant()}@webexpress.invalid";
-                var body = new BodyBuilder { TextBody = message.TextBody, HtmlBody = message.HtmlBody };
+                result.Headers["Message-ID"] = $"<{key.ToLowerInvariant()}@webexpress.invalid>";
+                result.SubjectEncoding = Encoding.UTF8;
+                if (message.TextBody is not null)
+                {
+                    result.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(message.TextBody, Encoding.UTF8, "text/plain"));
+                }
+                if (message.HtmlBody is not null)
+                {
+                    result.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(message.HtmlBody, Encoding.UTF8, "text/html"));
+                }
                 long size = 0;
                 foreach (var attachment in message.Attachments ?? [])
                 {
@@ -313,10 +323,14 @@ namespace WebExpress.WebCore.WebEmail
                     {
                         throw new ArgumentException("The combined attachment limit was exceeded.");
                     }
-                    body.Attachments.Add(attachment.FileName, attachment.Content.ToArray(), ContentType.Parse(attachment.ContentType));
+                    var contentType = new ContentType(attachment.ContentType);
+                    result.Attachments.Add(new Attachment(new MemoryStream(attachment.Content.ToArray(), false), contentType)
+                    {
+                        Name = attachment.FileName,
+                        NameEncoding = Encoding.UTF8
+                    });
                 }
 
-                result.Body = body.ToMessageBody();
                 return result;
             }
             catch
@@ -331,13 +345,14 @@ namespace WebExpress.WebCore.WebEmail
         /// </summary>
         /// <param name="value">The single mailbox input, optionally with a display name.</param>
         /// <returns>The parsed mailbox.</returns>
-        private static MailboxAddress ParseMailbox(string value)
+        private static MailAddress ParseMailbox(string value)
         {
             if (string.IsNullOrWhiteSpace(value) || value.IndexOfAny(['\r', '\n', '\0']) >= 0
-                || !MailboxAddress.TryParse(value, out var mailbox) || !mailbox.Address.Contains('@'))
+                || !MailAddress.TryCreate(value, out var mailbox) || !mailbox.Address.Contains('@'))
             {
                 throw new ArgumentException("A valid mailbox address is required.");
             }
+            _ = SmtpEmailProvider.EnvelopeAddress(mailbox);
             return mailbox;
         }
 
@@ -350,7 +365,7 @@ namespace WebExpress.WebCore.WebEmail
         /// <param name="provider">The provider retained for this admitted operation.</param>
         /// <param name="cancellationToken">The caller cancellation signal.</param>
         /// <returns>Acceptance or suppression without falsely reporting delivery for a duplicate.</returns>
-        private async Task<EmailSendResult> DeliverAsync(string key, MimeMessage message, EmailProfileSettings profile,
+        private async Task<EmailSendResult> DeliverAsync(string key, MailMessage message, EmailProfileSettings profile,
             IEmailProvider provider, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
