@@ -19,6 +19,12 @@ The **WebExpress** family includes the following projects:
 # WebExpress.WebCore
 `WebCore` is part of the **WebExpress** family and includes the basic elements of a **WebExpress** application.
 
+# Libraries used
+
+- https://github.com/dotnet/core (MIT)
+- [Microsoft.IdentityModel.JsonWebTokens](https://www.nuget.org/packages/Microsoft.IdentityModel.JsonWebTokens/) ([MIT](licenses/Microsoft.IdentityModel.JsonWebTokens.lic))
+- [Microsoft.IdentityModel.Protocols.OpenIdConnect](https://www.nuget.org/packages/Microsoft.IdentityModel.Protocols.OpenIdConnect/) ([MIT](licenses/Microsoft.IdentityModel.Protocols.OpenIdConnect.lic))
+
 # Download 
 The current binaries are available for download [here](https://github.com/webexpress-framework/WebExpress/releases).
 
