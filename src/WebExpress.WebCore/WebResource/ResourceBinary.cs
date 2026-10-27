@@ -12,6 +12,14 @@ namespace WebExpress.WebCore.WebResource
     public abstract class ResourceBinary : Resource
     {
         /// <summary>
+        /// The cache policy of a binary resource. Its address carries no version, so a browser
+        /// allowed to reuse a copy without asking would keep an outdated script or stylesheet
+        /// after every deployment; it keeps the copy but revalidates, which the entity tag
+        /// answers with a body-less 304.
+        /// </summary>
+        protected const string CacheControlRevalidate = "no-cache";
+
+        /// <summary>
         /// Gets or sets the data.
         /// </summary>
         public byte[] Data { get; set; }
@@ -113,7 +121,7 @@ namespace WebExpress.WebCore.WebResource
         protected static IResponse CreateNotModifiedResponse(string eTag)
         {
             var response = new ResponseNotModified();
-            response.Header.CacheControl = "public, max-age=31536000";
+            response.Header.CacheControl = CacheControlRevalidate;
             response.Header.AddCustomHeader("ETag", eTag);
 
             return response;

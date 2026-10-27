@@ -14,6 +14,10 @@ namespace WebExpress.WebCore.WebAsset
     /// </summary>
     public class Asset : IAsset
     {
+        // the address of an asset carries no version, so a copy reused without asking would keep
+        // an outdated script after every deployment; the entity tag makes revalidation a cheap 304
+        private const string CacheControl = "no-cache";
+
         private readonly IComponentHub _componentHub;
         private readonly IAssetContext _assetContext;
         private readonly IHttpServerContext _httpServerContext;
@@ -67,7 +71,7 @@ namespace WebExpress.WebCore.WebAsset
             if (!string.IsNullOrEmpty(_eTag) && string.Equals(request?.Header?.IfNoneMatch, _eTag, StringComparison.Ordinal))
             {
                 var notModified = new ResponseNotModified();
-                notModified.Header.CacheControl = "public, max-age=31536000";
+                notModified.Header.CacheControl = CacheControl;
                 notModified.Header.AddCustomHeader("ETag", _eTag);
 
                 return notModified;
@@ -94,7 +98,7 @@ namespace WebExpress.WebCore.WebAsset
                 if (range is (var start, var end))
                 {
                     var partial = new ResponsePartialContent();
-                    partial.Header.CacheControl = "public, max-age=31536000";
+                    partial.Header.CacheControl = CacheControl;
                     partial.Header.ContentLength = (int)(end - start + 1);
                     partial.Header.ContentType = _contentType.GetMimeType();
                     partial.Header.AddCustomHeader("Accept-Ranges", "bytes");
@@ -111,7 +115,7 @@ namespace WebExpress.WebCore.WebAsset
             }
 
             var response = new ResponseOK();
-            response.Header.CacheControl = "public, max-age=31536000";
+            response.Header.CacheControl = CacheControl;
             response.Header.ContentLength = _data.Length;
             response.Header.ContentType = _contentType.GetMimeType();
             response.Content = _data;

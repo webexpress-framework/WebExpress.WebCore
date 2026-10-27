@@ -72,7 +72,7 @@ namespace WebExpress.WebCore.WebResource
                 Data = File.ReadAllBytes(path);
 
                 var response = base.Process(request);
-                response.Header.CacheControl = "public, max-age=31536000";
+                response.Header.CacheControl = CacheControlRevalidate;
 
                 // content type and download handling are resolved through the shared logic
                 ApplyContentType(response, path);
