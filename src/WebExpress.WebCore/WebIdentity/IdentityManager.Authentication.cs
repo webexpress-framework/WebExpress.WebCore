@@ -29,6 +29,14 @@ namespace WebExpress.WebCore.WebIdentity
         internal const string DevelopmentRefreshCookieName = "wx-refresh";
 
         /// <summary>
+        /// Names the one authentication cookie a page's script may read. Both credentials stay
+        /// unreadable, so without it the script could not tell whether a grant exists or when the
+        /// access credential runs out; it carries the application and that deadline, nothing secret.
+        /// </summary>
+        public const string RenewalHintCookieName = "__Host-wx-auth-renew";
+        internal const string DevelopmentRenewalHintCookieName = "wx-auth-renew";
+
+        /// <summary>
         /// Keeps secure transport mandatory unless the deployment explicitly opts into development HTTP.
         /// </summary>
         internal bool RequiresHttps => _httpServerContext.Configuration.GetValue("WebExpress:Authentication:RequireHttps", true);
@@ -42,6 +50,11 @@ namespace WebExpress.WebCore.WebIdentity
         /// Keeps development renewal credentials outside the protected production cookie namespace.
         /// </summary>
         private string RefreshCookie => RequiresHttps ? RefreshCookieName : DevelopmentRefreshCookieName;
+
+        /// <summary>
+        /// Keeps the development renewal hint outside the protected production cookie namespace.
+        /// </summary>
+        private string RenewalHintCookie => RequiresHttps ? RenewalHintCookieName : DevelopmentRenewalHintCookieName;
         /// <summary>
         /// Keeps refresh credentials out of ordinary application requests.
         /// </summary>
@@ -96,8 +109,16 @@ namespace WebExpress.WebCore.WebIdentity
         {
             ArgumentNullException.ThrowIfNull(request);
             var pair = Refresh(CookieValue(request, RefreshCookie), request.ApplicationContext);
-            if (pair is null) { return null; }
             var state = _authenticationStates.GetOrCreateValue(request);
+            if (pair is null)
+            {
+                // a grant that cannot be renewed is over; removing its cookies, the hint among them,
+                // keeps the page's script from asking again on every page
+                state.Identity = null;
+                state.Pair = null;
+                state.Changed = true;
+                return null;
+            }
             state.Identity = ValidateAccessToken(pair.AccessToken, request.ApplicationContext);
             state.Pair = pair;
             state.Changed = true;
@@ -187,6 +208,14 @@ namespace WebExpress.WebCore.WebIdentity
             response.Header.Cookies.Add(CreateCookie(RefreshCookie, state.Pair?.RefreshToken, RefreshPath, expiration, RequiresHttps));
             // only the own scripts ever renew the grant, so no cross-site request needs the refresh token
             response.Header.CookieSameSite[RefreshCookie] = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
+
+            // lives as long as the refresh cookie, so the script still finds it on a page rendered
+            // after the access credential ran out (an idle tab, a restarted server) and can renew there
+            var hint = state.Pair is null ? null
+                : request.ApplicationContext?.ApplicationId + ":" + state.Pair.AccessTokenExpiresAt.ToUnixTimeSeconds();
+            var hintCookie = CreateCookie(RenewalHintCookie, hint, "/", expiration, RequiresHttps);
+            hintCookie.HttpOnly = false;
+            response.Header.Cookies.Add(hintCookie);
         }
 
         /// <summary>

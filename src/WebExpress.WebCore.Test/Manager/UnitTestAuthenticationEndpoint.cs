@@ -49,7 +49,8 @@ namespace WebExpress.WebCore.Test.Manager
                 Assert.All(response.Header.Cookies.Cast<System.Net.Cookie>(), cookie =>
                 {
                     Assert.Equal(rememberMe ?? true, cookie.Expires != DateTime.MinValue);
-                    Assert.True(cookie.Secure && cookie.HttpOnly);
+                    // the renewal hint is the one cookie a script has to read; it carries no credential
+                    Assert.True(cookie.Secure && cookie.HttpOnly == (cookie.Name != IdentityManager.RenewalHintCookieName));
                     var header = ResponseSender.SerializeSetCookie(cookie, Microsoft.AspNetCore.Http.SameSiteMode.Lax);
                     Assert.Equal(rememberMe ?? true, header.Contains("Expires="));
                 });
@@ -303,11 +304,14 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.Equal(200, login.Status);
             Assert.True(JsonDocument.Parse((string)login.Content).RootElement.GetProperty("authenticated").GetBoolean());
             Assert.Null(request.ExistingSession);
-            Assert.Equal(2, login.Header.Cookies.Count);
+            Assert.Equal(3, login.Header.Cookies.Count);
             var refresh = login.Header.Cookies[IdentityManager.RefreshCookieName].Value;
             var access = login.Header.Cookies[IdentityManager.AccessCookieName].Value;
+            var hint = login.Header.Cookies[IdentityManager.RenewalHintCookieName].Value;
             Assert.DoesNotContain(access, (string)login.Content);
             Assert.DoesNotContain(refresh, (string)login.Content);
+            Assert.DoesNotContain(access, hint);
+            Assert.DoesNotContain(refresh, hint);
             var renewed = await endpoint.HandleAsync(fixture.Request($"X-WebExpress-Auth: 1\r\nCookie: {IdentityManager.RefreshCookieName}={refresh}\r\n", "POST", IdentityManager.RefreshPath));
             Assert.Equal(200, renewed.Status);
             var rotated = renewed.Header.Cookies[IdentityManager.RefreshCookieName].Value;
@@ -316,6 +320,60 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.Equal(204, logout.Status);
             var revoked = await endpoint.HandleAsync(fixture.Request($"X-WebExpress-Auth: 1\r\nCookie: {IdentityManager.RefreshCookieName}={rotated}\r\n", "POST", IdentityManager.RefreshPath));
             Assert.Equal(401, revoked.Status);
+        }
+
+        /// <summary>
+        /// The renewal hint names the application and the access deadline, lives as long as the
+        /// grant and is the only cookie a page's script can read.
+        /// </summary>
+        /// <returns>A task that completes after the asynchronous assertions have finished.</returns>
+        [Fact]
+        public async Task LoginLeavesAReadableRenewalHintWithTheAccessDeadline()
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+            fixture.Hub.IdentityProviderManager.Register(new PasswordProvider(), fixture.Application);
+
+            // act
+            var login = await endpoint.HandleAsync(fixture.Request("X-WebExpress-Auth: 1\r\n", "POST", "/api/auth/login",
+                "{\"username\":\"alice\",\"password\":\"correct\"}"));
+            var hint = login.Header.Cookies[IdentityManager.RenewalHintCookieName];
+            var refresh = login.Header.Cookies[IdentityManager.RefreshCookieName];
+            var deadline = JsonDocument.Parse((string)login.Content).RootElement.GetProperty("expiresAt").GetDateTimeOffset();
+
+            // validation
+            Assert.False(hint.HttpOnly);
+            Assert.True(hint.Secure);
+            Assert.Equal("/", hint.Path);
+            Assert.Equal(refresh.Expires, hint.Expires);
+            Assert.Equal($"{fixture.Application.ApplicationId}:{deadline.ToUnixTimeSeconds()}", hint.Value);
+        }
+
+        /// <summary>
+        /// A grant that can no longer be renewed takes its cookies with it, so a page's script does
+        /// not ask again on every page.
+        /// </summary>
+        /// <returns>A task that completes after the asynchronous assertions have finished.</returns>
+        [Fact]
+        public async Task RefusedRenewalRemovesCredentialsAndHint()
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            using var endpoint = new AuthenticationEndpoint(fixture.Hub, fixture.Server);
+
+            // act
+            var refused = await endpoint.HandleAsync(fixture.Request($"X-WebExpress-Auth: 1\r\nCookie: {IdentityManager.RefreshCookieName}=forged\r\n",
+                "POST", IdentityManager.RefreshPath));
+
+            // validation
+            Assert.Equal(401, refused.Status);
+            Assert.Equal(3, refused.Header.Cookies.Count);
+            Assert.All(refused.Header.Cookies.Cast<System.Net.Cookie>(), cookie =>
+            {
+                Assert.Equal("", cookie.Value);
+                Assert.Equal(DateTime.UnixEpoch, cookie.Expires);
+            });
         }
 
         /// <summary>
