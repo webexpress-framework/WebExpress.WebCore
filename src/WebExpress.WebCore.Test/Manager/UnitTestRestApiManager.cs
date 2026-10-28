@@ -386,7 +386,7 @@ namespace WebExpress.WebCore.Test.Manager
             request.AddParameter(new Parameter("description", input, ParameterScope.Parameter));
 
             var validator = new RestApiValidator(request)
-                .Contains("description", "pirate");
+                .Contains("description", "admin");
 
             Assert.False(validator.IsValid);
             Assert.Contains(validator.Result.Errors, e => e.Code == "MISSING_FRAGMENT");
@@ -436,7 +436,7 @@ namespace WebExpress.WebCore.Test.Manager
         [Theory]
         [InlineData(null)]
         [InlineData("")]
-        [InlineData("nonpirate")]
+        [InlineData("nonadmin")]
         public void ValidateCustom(string input)
         {
             var request = UnitTestFixture.CreateRequestMock();
@@ -444,14 +444,14 @@ namespace WebExpress.WebCore.Test.Manager
 
             var validator = new RestApiValidator(request)
                 .Custom(
-                    r => r.GetParameter("nickname")?.Value == "pirate",
-                    "Only pirates allowed",
+                    r => r.GetParameter("nickname")?.Value == "admin",
+                    "Only admins allowed",
                     "nickname",
-                    "NOT_PIRATE"
+                    "NOT_ADMIN"
                 );
 
             Assert.False(validator.IsValid);
-            Assert.Contains(validator.Result.Errors, e => e.Code == "NOT_PIRATE");
+            Assert.Contains(validator.Result.Errors, e => e.Code == "NOT_ADMIN");
         }
 
         /// <summary>

@@ -57,9 +57,9 @@ namespace WebExpress.WebCore.Test.Html
         /// </summary>
         /// <param name="value">The attribute value under test.</param>
         [Theory]
-        [InlineData("Guybrush's quest")]
+        [InlineData("Grace's quest")]
         [InlineData("a < b > c")]
-        [InlineData("Grüße aus Mêlée")]
+        [InlineData("Grüße aus Genève")]
         public void LeavesEverythingElseAlone(string value)
         {
             // arrange
