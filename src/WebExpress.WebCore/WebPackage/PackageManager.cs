@@ -646,8 +646,9 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>True when a manifest of the host lists the file.</returns>
         private static bool IsHostDependency(string file)
         {
+            // the host joins the manifests with ';' on every platform, not with the path separator
             var manifests = (AppContext.GetData("APP_CONTEXT_DEPS_FILES") as string)?
-                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries) ?? [];
+                .Split(';', StringSplitOptions.RemoveEmptyEntries) ?? [];
 
             foreach (var manifest in manifests)
             {
