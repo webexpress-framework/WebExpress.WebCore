@@ -162,5 +162,51 @@ namespace WebExpress.WebCore.Test.Server
                 UnitTestFixture.BindComponentHub(previousHub);
             }
         }
+
+        /// <summary>
+        /// Verifies that a socket's policies guard its upgrade like they guard a page: an anonymous
+        /// client must not open a connection the endpoint restricts to holders of a policy.
+        /// </summary>
+        /// <returns>A task that completes after the refused handshake has been verified.</returns>
+        [Fact]
+        public async Task ConnectAsync_ProtectedSocketWithoutIdentity_IsRefused()
+        {
+            // arrange
+            var previousHub = WebEx.ComponentHub;
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
+            {
+                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }] }
+            };
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock(server.HttpServerContext);
+            using var client = new ClientWebSocket();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            try
+            {
+                var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).First();
+                var socket = (SocketContext)componentHub.SocketManager.GetSockets<TestSocketA>(application).First();
+                socket.Policies = [new TestIdentityPolicyA()];
+                componentHub.SitemapManager.Refresh();
+                Assert.True(server.Start());
+                var kestrel = (IServer)typeof(HttpServer).GetProperty("Kestrel", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(server);
+                var address = kestrel.Features.Get<IServerAddressesFeature>().Addresses.Single();
+                var target = new UriBuilder(address) { Scheme = "ws", Path = socket.Route.ToString() }.Uri;
+                client.Options.CollectHttpResponseDetails = true;
+
+                // act
+                await Assert.ThrowsAsync<WebSocketException>(() => client.ConnectAsync(target, timeout.Token));
+
+                // validation
+                Assert.Equal(HttpStatusCode.Unauthorized, client.HttpStatusCode);
+            }
+            finally
+            {
+                client.Abort();
+                server.Stop();
+                componentHub.IdentityProviderManager.Dispose();
+                UnitTestFixture.BindComponentHub(previousHub);
+            }
+        }
     }
 }

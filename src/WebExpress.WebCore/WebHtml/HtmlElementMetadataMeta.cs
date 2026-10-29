@@ -76,21 +76,23 @@ namespace WebExpress.WebCore.WebHtml
             builder.Append(ElementName);
             builder.Append(" ");
 
+            // values go through the attribute escaping, so a quote in a description cannot end
+            // the attribute and inject markup into the head
             if (Array.Exists(_standaloneKeys, x => x.Equals(Key, StringComparison.OrdinalIgnoreCase)))
             {
                 builder.Append(Key);
-                builder.Append("='");
-                builder.Append(Value);
-                builder.Append("'>");
+                builder.Append("=\"");
+                HtmlAttribute.Escape(builder, Value);
+                builder.Append("\">");
 
                 return;
             }
 
-            builder.Append("name='");
-            builder.Append(Key);
-            builder.Append("' content='");
-            builder.Append(Value);
-            builder.Append("'>");
+            builder.Append("name=\"");
+            HtmlAttribute.Escape(builder, Key);
+            builder.Append("\" content=\"");
+            HtmlAttribute.Escape(builder, Value);
+            builder.Append("\">");
         }
     }
 }

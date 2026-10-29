@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebMessage;
@@ -43,6 +44,7 @@ namespace WebExpress.WebCore.WebResource
                 var routePrefix = ResourceContext.Route.ToString();
 
                 if (string.IsNullOrEmpty(requestUri) ||
+                    string.IsNullOrEmpty(RootDirectory) ||
                     routePrefix is null ||
                     !requestUri.StartsWith(routePrefix) ||
                     requestUri.Length < routePrefix.Length)
@@ -54,9 +56,11 @@ namespace WebExpress.WebCore.WebResource
                     ? string.Empty
                     : requestUri[routePrefix.Length..];
 
+                var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(RootDirectory)) + Path.DirectorySeparatorChar;
                 var path = Path.GetFullPath(RootDirectory + url);
 
-                if (!File.Exists(path))
+                // the url comes from the client; ".." segments must not climb out of the served directory
+                if (!path.StartsWith(root, StringComparison.Ordinal) || !File.Exists(path))
                 {
                     return new ResponseNotFound();
                 }

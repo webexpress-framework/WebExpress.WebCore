@@ -17,7 +17,7 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementMetadataMeta("charset", "utf-8");
 
-            Assert.Equal(@"<meta charset='utf-8'>", html.Trim());
+            Assert.Equal(@"<meta charset=""utf-8"">", html.Trim());
         }
 
         /// <summary>
@@ -33,7 +33,21 @@ namespace WebExpress.WebCore.Test.Html
             // act
             var html = new HtmlElementMetadataMeta(key, value);
 
-            Assert.Equal($"<meta name='{key}' content='{value}'>", html.Trim());
+            Assert.Equal($"<meta name=\"{key}\" content=\"{value}\">", html.Trim());
+        }
+
+        /// <summary>
+        /// Tests that a value carrying a quote stays inside its attribute. A description
+        /// often comes from content an author typed, and an unescaped quote would let it
+        /// close the attribute and put markup of its own into the head.
+        /// </summary>
+        [Fact]
+        public void ValueIsEscaped()
+        {
+            // act
+            var html = new HtmlElementMetadataMeta("description", "a\"><script>x</script>&b");
+
+            Assert.Equal("<meta name=\"description\" content=\"a&quot;><script>x</script>&amp;b\">", html.Trim());
         }
     }
 }

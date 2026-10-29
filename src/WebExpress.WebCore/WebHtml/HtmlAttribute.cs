@@ -79,7 +79,7 @@ namespace WebExpress.WebCore.WebHtml
         /// </remarks>
         /// <param name="builder">The string builder.</param>
         /// <param name="value">The value to append, may be null.</param>
-        private static void Escape(StringBuilder builder, string value)
+        internal static void Escape(StringBuilder builder, string value)
         {
             if (string.IsNullOrEmpty(value))
             {

@@ -1442,6 +1442,20 @@ namespace WebExpress.WebCore
                 request.EndpointContext = searchResult.EndpointContext;
             }
 
+            // no policies (null or empty) -> serve without an access check; a websocket upgrade
+            // is checked here too, otherwise an endpoint's policies would only guard plain requests
+            if (searchResult.EndpointContext.Policies?.Any() ?? false)
+            {
+                var identity = WebEx.ComponentHub.IdentityManager.GetCurrentIdentity(httpContext.Request);
+
+                if (!WebEx.ComponentHub.IdentityManager.CheckAccess(identity, searchResult.EndpointContext))
+                {
+                    await SendAsync(httpContext, CreateAccessDeniedResponse(httpContext.Request, searchResult, identity));
+
+                    return;
+                }
+            }
+
             if (httpContext is HttpWebSocketContext)
             {
                 // try to obtain websocket context and optional handler
@@ -1452,28 +1466,7 @@ namespace WebExpress.WebCore
                 return;
             }
 
-            // no policies (null or empty) -> serve directly without an access check
-            if (!(searchResult.EndpointContext.Policies?.Any() ?? false))
-            {
-                var response = HandleClient(httpContext, searchResult);
-                await SendAsync(httpContext, response);
-
-                return;
-            }
-
-            var identity = WebEx.ComponentHub.IdentityManager.GetCurrentIdentity(httpContext.Request);
-
-            // if access is granted
-            if (WebEx.ComponentHub.IdentityManager.CheckAccess(identity, searchResult.EndpointContext))
-            {
-                var response = HandleClient(httpContext, searchResult);
-                await SendAsync(httpContext, response);
-
-                return;
-            }
-
-            // access is denied (the grant case returned above)
-            await SendAsync(httpContext, CreateAccessDeniedResponse(httpContext.Request, searchResult, identity));
+            await SendAsync(httpContext, HandleClient(httpContext, searchResult));
         }
 
         /// <summary>
