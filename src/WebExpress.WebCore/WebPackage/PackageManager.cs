@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -13,7 +14,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Serialization;
-using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebAttribute;
 using WebExpress.WebCore.WebCluster;
@@ -646,7 +646,7 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>True when a manifest of the host lists the file.</returns>
         private static bool IsHostDependency(string file)
         {
-            // the host joins the manifests with ';' on every platform, not with the path separator
+            // the host joins the manifests with ';' on every platform
             var manifests = (AppContext.GetData("APP_CONTEXT_DEPS_FILES") as string)?
                 .Split(';', StringSplitOptions.RemoveEmptyEntries) ?? [];
 
