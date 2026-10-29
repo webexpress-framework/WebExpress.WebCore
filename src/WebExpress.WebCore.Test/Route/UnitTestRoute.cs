@@ -6,7 +6,6 @@ namespace WebExpress.WebCore.Test.Route
     /// <summary>
     /// Tests the route.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestRoute
     {
         /// <summary>

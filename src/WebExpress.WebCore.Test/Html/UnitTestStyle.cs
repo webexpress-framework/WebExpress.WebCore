@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for Style utility methods.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestStyle
     {
         /// <summary>

@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Message
     /// <summary>
     /// Unit tests for parsing HTTP POST requests.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestPostRequest : UnitTestRequest
     {
         /// <summary>

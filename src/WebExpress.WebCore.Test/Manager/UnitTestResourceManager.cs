@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the resource manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestResourceManager
     {
         /// <summary>

@@ -114,12 +114,11 @@ namespace WebExpress.WebCore.Test.Server
         [InlineData("/server/appa/no/such/route", 404)]
         public async Task ProcessRequestAsync_ServerCreatedBeforeHub_PreservesResponse(string path, int status)
         {
-            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
             var previousHub = WebEx.ComponentHub;
             WebComponent.ComponentHub componentHub = null;
             try
             {
-                hubField.SetValue(null, null);
+                UnitTestFixture.BindComponentHub(null);
                 var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
                 componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
                 componentHub.SitemapManager.Refresh();
@@ -138,7 +137,7 @@ namespace WebExpress.WebCore.Test.Server
             finally
             {
                 componentHub?.IdentityProviderManager.Dispose();
-                hubField.SetValue(null, previousHub);
+                UnitTestFixture.BindComponentHub(previousHub);
             }
         }
 
@@ -154,7 +153,6 @@ namespace WebExpress.WebCore.Test.Server
         [InlineData(true)]
         public void BadRequest_EncodesTheMessage(bool detailedErrors)
         {
-            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
             var previousHub = WebEx.ComponentHub;
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
             {
@@ -166,7 +164,7 @@ namespace WebExpress.WebCore.Test.Server
             try
             {
                 // without a hub the built-in page renders the message as given, so nothing else encodes it
-                hubField.SetValue(null, null);
+                UnitTestFixture.BindComponentHub(null);
 
                 var response = (WebMessage.IResponse)create.Invoke(server, [rejection, null, null]);
                 var content = response.Content as string;
@@ -178,7 +176,7 @@ namespace WebExpress.WebCore.Test.Server
             }
             finally
             {
-                hubField.SetValue(null, previousHub);
+                UnitTestFixture.BindComponentHub(previousHub);
             }
         }
 
@@ -195,7 +193,6 @@ namespace WebExpress.WebCore.Test.Server
         [InlineData(true, true)]
         public async Task ProcessRequestAsync_UnhandledFailure_ShowsDetailsOnlyWhenEnabled(bool? detailedErrors, bool detailed)
         {
-            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
             var previousHub = WebEx.ComponentHub;
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
             {
@@ -210,7 +207,7 @@ namespace WebExpress.WebCore.Test.Server
             try
             {
                 // without a component hub the pipeline throws a NullReferenceException
-                hubField.SetValue(null, null);
+                UnitTestFixture.BindComponentHub(null);
 
                 await server.ProcessRequestAsync(context);
                 var body = System.Text.Encoding.UTF8.GetString(output.ToArray());
@@ -221,7 +218,7 @@ namespace WebExpress.WebCore.Test.Server
             }
             finally
             {
-                hubField.SetValue(null, previousHub);
+                UnitTestFixture.BindComponentHub(previousHub);
             }
         }
 
@@ -234,7 +231,6 @@ namespace WebExpress.WebCore.Test.Server
         [Fact]
         public async Task ProcessRequestAsync_UnhandledFailure_IsRecordedOnceAsError()
         {
-            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
             var previousHub = WebEx.ComponentHub;
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
             var context = UnitTestFixture.CreateHttpContextMock($"GET {Endpoint} HTTP/1.1\r\nCookie:\r\n\r\n");
@@ -249,7 +245,7 @@ namespace WebExpress.WebCore.Test.Server
             try
             {
                 // without a component hub the pipeline throws before it records any response
-                hubField.SetValue(null, null);
+                UnitTestFixture.BindComponentHub(null);
 
                 await server.ProcessRequestAsync(context);
 
@@ -259,7 +255,7 @@ namespace WebExpress.WebCore.Test.Server
             }
             finally
             {
-                hubField.SetValue(null, previousHub);
+                UnitTestFixture.BindComponentHub(previousHub);
             }
         }
 

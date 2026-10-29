@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the HtmlElementTextContentDd class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlElementTextContentDd
     {
         /// <summary>

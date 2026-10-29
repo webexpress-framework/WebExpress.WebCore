@@ -27,7 +27,12 @@ namespace WebExpress.WebCore.Internationalization
         /// <summary>
         /// Gets the directory by listing the internationalization key-value pairs.
         /// </summary>
-        private static InternationalizationDictionary Dictionary { get; } = [];
+        /// <remarks>
+        /// The directory is shared by every hub of the process and is filled while it is read - a
+        /// plugin loaded at runtime registers its texts while requests translate - so it has to
+        /// tolerate concurrent writers and readers.
+        /// </remarks>
+        private static InternationalizationDictionary Dictionary { get; } = new();
 
         /// <summary>
         /// Gets or sets the reference to the context of the host.
@@ -104,13 +109,7 @@ namespace WebExpress.WebCore.Internationalization
             {
                 var language = languageResource.Split('.').LastOrDefault()?.ToLower();
 
-                if (!Dictionary.TryGetValue(language, out InternationalizationItem value))
-                {
-                    value = ([]);
-                    Dictionary.Add(language, value);
-                }
-
-                var dictItem = value;
+                var dictItem = Dictionary.GetOrAdd(language, _ => new());
 
                 using var stream = assembly.GetManifestResourceStream(languageResource);
                 using var streamReader = new StreamReader(stream);
@@ -122,10 +121,7 @@ namespace WebExpress.WebCore.Internationalization
                         var split = line.Split('=');
                         var key = pluginId?.ToLower() + ":" + split[0]?.Trim().ToLower();
 
-                        if (!dictItem.ContainsKey(key))
-                        {
-                            dictItem.Add(key, string.Join("=", split.Skip(1)));
-                        }
+                        dictItem.TryAdd(key, string.Join("=", split.Skip(1)));
                     }
                 }
             }
@@ -150,7 +146,7 @@ namespace WebExpress.WebCore.Internationalization
 
                 foreach (var key in keysToRemove)
                 {
-                    dictionary.Remove(key);
+                    dictionary.TryRemove(key, out _);
                 }
             }
 

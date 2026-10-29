@@ -9,7 +9,6 @@ namespace WebExpress.WebCore.Test.Server
     /// Tests the answer to a refused request (<c>HttpServer.CreateAccessDeniedResponse</c>), which
     /// a policy refusal and a <see cref="ForbiddenException"/> share: in place, never a redirect.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHttpServerAccessDenied
     {
         /// <summary>

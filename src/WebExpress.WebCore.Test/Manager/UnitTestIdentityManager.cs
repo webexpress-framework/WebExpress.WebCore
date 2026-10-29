@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the identity manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestIdentityManager
     {
         /// <summary>

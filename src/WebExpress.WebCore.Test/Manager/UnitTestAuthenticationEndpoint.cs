@@ -269,16 +269,15 @@ namespace WebExpress.WebCore.Test.Manager
             context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpResponseFeature>(head);
             context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>(
                 new Microsoft.AspNetCore.Http.StreamResponseBodyFeature(output));
-            var hubField = typeof(WebEx).GetField("_componentHub", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
             HttpServer server;
             try
             {
-                if (!hubAvailableAtConstruction) { hubField.SetValue(null, null); }
+                if (!hubAvailableAtConstruction) { UnitTestFixture.BindComponentHub(null); }
                 server = new HttpServer(fixture.Server);
             }
             finally
             {
-                hubField.SetValue(null, fixture.Hub);
+                UnitTestFixture.BindComponentHub(fixture.Hub);
             }
             await server.ProcessRequestAsync(context);
             Assert.Equal(200, head.StatusCode);

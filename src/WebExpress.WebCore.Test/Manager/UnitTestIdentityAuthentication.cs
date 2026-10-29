@@ -11,7 +11,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Exercises credential trust boundaries independently of any server-side identity session.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestIdentityAuthentication
     {
         /// <summary>

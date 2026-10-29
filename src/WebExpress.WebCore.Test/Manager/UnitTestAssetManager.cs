@@ -10,7 +10,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the asset manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestAssetManager
     {
         /// <summary>

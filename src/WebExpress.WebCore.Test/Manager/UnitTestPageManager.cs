@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the page manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestPageManager
     {
         /// <summary>

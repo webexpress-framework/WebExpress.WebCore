@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.WebSettingPage
     /// Tests the converter that formats a time span for the setting pages and reads the
     /// formatted string back.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestTimeSpanConverter
     {
         /// <summary>

@@ -12,7 +12,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the sitemap manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestSitemapManager
     {
         /// <summary>

@@ -14,7 +14,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Exercises real discovery, JWKS, code exchange, and JWT validation over a deterministic backchannel.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestOpenIdConnectIdentityProvider
     {
         /// <summary>

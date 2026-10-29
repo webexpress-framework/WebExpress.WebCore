@@ -7,6 +7,7 @@ namespace WebExpress.WebCore.Test.WebSetting
     /// Unit tests for the settings directory: how the files of the directory are merged into one
     /// configuration, which file wins, and how a plugin sees its own section.
     /// </summary>
+    [Collection("NonParallelTests")]
     public class UnitTestSettingsDirectory : IDisposable
     {
         private readonly string _directory = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());

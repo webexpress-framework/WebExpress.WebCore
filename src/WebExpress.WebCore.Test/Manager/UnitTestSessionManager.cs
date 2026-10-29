@@ -9,7 +9,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the session manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestSessionManager
     {
         /// <summary>

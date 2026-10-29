@@ -63,14 +63,13 @@ namespace WebExpress.WebCore.Test.Server
         {
             // arrange
             var previous = WebEx.ComponentHub;
-            var hubField = typeof(WebEx).GetField("_componentHub", BindingFlags.Static | BindingFlags.NonPublic);
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
             var context = UnitTestFixture.CreateHttpContextMock($"{method} /health HTTP/1.1\r\nCookie:\r\n\r\n");
             var response = new HttpResponseFeature();
             using var output = new MemoryStream();
             context.Features.Set<IHttpResponseFeature>(response);
             context.Features.Set<IHttpResponseBodyFeature>(new StreamResponseBodyFeature(output));
-            hubField.SetValue(null, null);
+            UnitTestFixture.BindComponentHub(null);
 
             try
             {
@@ -88,7 +87,7 @@ namespace WebExpress.WebCore.Test.Server
             }
             finally
             {
-                hubField.SetValue(null, previous);
+                UnitTestFixture.BindComponentHub(previous);
             }
         }
 

@@ -9,7 +9,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the job manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestJobManager
     {
         /// <summary>

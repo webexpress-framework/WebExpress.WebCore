@@ -10,7 +10,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the application manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestApplicationManager
     {
         /// <summary>

@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the HtmlElementEmbeddedObject class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlElementEmbeddedObject
     {
         /// <summary>

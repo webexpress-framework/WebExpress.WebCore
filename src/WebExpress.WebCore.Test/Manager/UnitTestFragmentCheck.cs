@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// Guards the visibility check every fragment runs before it renders, so a link to a
     /// protected page is not offered to identities the server would turn away.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestFragmentCheck
     {
         /// <summary>

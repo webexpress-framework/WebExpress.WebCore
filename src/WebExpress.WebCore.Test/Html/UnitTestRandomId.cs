@@ -6,7 +6,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the RandomId class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestRandomId
     {
         /// <summary>

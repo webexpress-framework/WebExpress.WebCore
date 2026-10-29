@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
 
 namespace WebExpress.WebCore.Internationalization.Model
 {
@@ -6,7 +6,7 @@ namespace WebExpress.WebCore.Internationalization.Model
     /// Holds the translations for a single language as a map from translation key to translated
     /// text. The internationalization manager keeps one of these per culture to look up localized strings.
     /// </summary>
-    internal class InternationalizationItem : Dictionary<string, string>
+    internal class InternationalizationItem : ConcurrentDictionary<string, string>
     {
     }
 }

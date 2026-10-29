@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the HtmlElementTextSemanticsDfn class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlElementTextSemanticsDfn
     {
         /// <summary>

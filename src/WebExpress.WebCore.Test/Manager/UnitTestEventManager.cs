@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the event manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestEventManager
     {
         /// <summary>

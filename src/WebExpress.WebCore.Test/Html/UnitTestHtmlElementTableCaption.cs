@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the HtmlElementTableCaption class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlElementTableCaption
     {
         /// <summary>

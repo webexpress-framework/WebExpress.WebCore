@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the HtmlElementWebFragmentsTemplate class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlElementWebFragmentsTemplate
     {
         /// <summary>

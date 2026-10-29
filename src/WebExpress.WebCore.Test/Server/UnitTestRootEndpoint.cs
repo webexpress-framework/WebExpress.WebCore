@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Configuration;
-using System.Reflection;
 using System.Text;
 using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebApplication;
@@ -27,7 +26,7 @@ namespace WebExpress.WebCore.Test.Server
         public void Dispose()
         {
             _hub.IdentityProviderManager.Dispose();
-            typeof(WebEx).GetField("_componentHub", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, _previousHub);
+            UnitTestFixture.BindComponentHub(_previousHub);
             GC.SuppressFinalize(this);
         }
 

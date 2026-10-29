@@ -6,7 +6,6 @@ namespace WebExpress.WebCore.Test.Server
     /// <summary>
     /// Tests the server side of a WebSocket connection.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestSocketConnection
     {
         /// <summary>

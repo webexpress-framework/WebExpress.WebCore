@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
 
 namespace WebExpress.WebCore.Internationalization.Model
 {
@@ -6,7 +6,7 @@ namespace WebExpress.WebCore.Internationalization.Model
     /// key = language (ISO 639-1 two-letter)
     /// value = { key = , value = }
     /// </summary>
-    internal class InternationalizationDictionary : Dictionary<string, InternationalizationItem>
+    internal class InternationalizationDictionary : ConcurrentDictionary<string, InternationalizationItem>
     {
     }
 }

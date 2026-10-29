@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the include manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestIncludeManager
     {
         /// <summary>

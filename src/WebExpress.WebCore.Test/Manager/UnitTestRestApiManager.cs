@@ -12,7 +12,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the rest api manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestRestApiManager
     {
         /// <summary>

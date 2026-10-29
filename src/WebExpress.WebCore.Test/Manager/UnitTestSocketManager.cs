@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the websocket manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestSocketManager
     {
         /// <summary>

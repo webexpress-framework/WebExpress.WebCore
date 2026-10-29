@@ -121,7 +121,6 @@ namespace WebExpress.WebCore.Test.Server
             // arrange
             const string externalUri = "http://localhost:8080/";
             var previousHub = WebEx.ComponentHub;
-            var hubField = typeof(WebEx).GetField("_componentHub", BindingFlags.Static | BindingFlags.NonPublic);
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock(externalUri: externalUri))
             {
                 Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }] }
@@ -160,7 +159,7 @@ namespace WebExpress.WebCore.Test.Server
                 client.Abort();
                 server.Stop();
                 componentHub.IdentityProviderManager.Dispose();
-                hubField.SetValue(null, previousHub);
+                UnitTestFixture.BindComponentHub(previousHub);
             }
         }
     }

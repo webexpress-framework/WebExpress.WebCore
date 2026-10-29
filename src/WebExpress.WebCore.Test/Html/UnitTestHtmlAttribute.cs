@@ -11,7 +11,6 @@ namespace WebExpress.WebCore.Test.Html
     /// worked around it by encoding before handing the value over; the escaping belongs to the
     /// writer, and these tests pin it there.
     /// </remarks>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlAttribute
     {
         /// <summary>

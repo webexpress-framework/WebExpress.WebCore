@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the HtmlElementSectionH3 class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlElementSectionH3
     {
         /// <summary>

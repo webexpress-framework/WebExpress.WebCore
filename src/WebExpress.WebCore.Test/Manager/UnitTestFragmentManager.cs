@@ -10,7 +10,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the fragment manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestFragmentManager
     {
         /// <summary>

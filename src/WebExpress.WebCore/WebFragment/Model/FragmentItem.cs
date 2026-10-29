@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -20,7 +21,7 @@ namespace WebExpress.WebCore.WebFragment.Model
         private IFragmentBase _instance;
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
-        private static readonly Dictionary<Type, Delegate> _delegateCache = [];
+        private static readonly ConcurrentDictionary<Type, Delegate> _delegateCache = new();
 
         /// <summary>
         /// Gets or sets the context of the associated plugin.

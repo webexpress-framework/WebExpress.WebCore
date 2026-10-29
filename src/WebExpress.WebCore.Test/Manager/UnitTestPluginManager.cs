@@ -9,7 +9,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the plugin manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestPluginManager
     {
         /// <summary>

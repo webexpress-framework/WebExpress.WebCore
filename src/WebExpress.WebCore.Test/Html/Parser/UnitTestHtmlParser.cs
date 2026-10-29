@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Html.Parser
     /// <summary>
     /// Unit tests for the <see cref="HtmlParser"/> class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlParser
     {
         private static readonly HtmlParser Parser = new();

@@ -70,7 +70,22 @@ namespace WebExpress.WebCore
         /// <summary>
         /// Gets the component hub.
         /// </summary>
-        public static IComponentHub ComponentHub => _componentHub;
+        /// <remarks>
+        /// A hub bound to the current call chain wins over the process-wide one, so several hubs
+        /// can live side by side in one process - each test of a parallel run boots its own -
+        /// without one call chain reaching into another's hub. The server never binds one and
+        /// always answers with the process-wide hub.
+        /// </remarks>
+        public static IComponentHub ComponentHub => _scopedComponentHub.Value ?? _componentHub;
+
+        /// <summary>
+        /// The hub bound to the current call chain, see <see cref="ComponentHub"/>.
+        /// </summary>
+        /// <remarks>
+        /// It is an async local, so a hub bound in a test flows into everything that test starts
+        /// and is never seen by a test running beside it.
+        /// </remarks>
+        private static readonly AsyncLocal<IComponentHub> _scopedComponentHub = new();
 
         /// <summary>
         /// Gets the request currently being served on this call chain, or <see langword="null"/>
@@ -488,7 +503,7 @@ namespace WebExpress.WebCore
         /// <returns>The instance of the component or null.</returns>
         public static IComponentManager GetComponent(string id)
         {
-            return _componentHub?.GetComponentManager(id);
+            return ComponentHub?.GetComponentManager(id);
         }
 
         /// <summary>
@@ -498,7 +513,7 @@ namespace WebExpress.WebCore
         /// <returns>The instance of the component or null.</returns>
         public static T GetComponent<T>() where T : IComponentManager
         {
-            return _componentHub.GetComponentManager<T>();
+            return ComponentHub.GetComponentManager<T>();
         }
     }
 }

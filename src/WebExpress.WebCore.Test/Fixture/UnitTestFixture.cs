@@ -78,13 +78,28 @@ namespace WebExpress.WebCore.Test.Fixture
                 httpServerContext ?? CreateHttpServerContextMock()
             ]);
 
-            // set static field in the webex class
-            var type = typeof(WebEx);
-            var field = type.GetField("_componentHub", BindingFlags.Static | BindingFlags.NonPublic);
-
-            field.SetValue(null, componentHub);
+            BindComponentHub(componentHub);
 
             return componentHub;
+        }
+
+        /// <summary>
+        /// Makes a component hub the one <see cref="WebEx.ComponentHub"/> answers with, or none
+        /// at all with null - the way a test simulates the startup phase before a hub exists.
+        /// </summary>
+        /// <remarks>
+        /// The hub is bound to the calling test, so tests running side by side keep their own,
+        /// and set process-wide as well for the serial tests whose hub is created outside the
+        /// test's own call chain, such as in the test class constructor.
+        /// </remarks>
+        /// <param name="componentHub">The hub, or null for none.</param>
+        public static void BindComponentHub(IComponentHub componentHub)
+        {
+            var type = typeof(WebEx);
+            var scoped = (AsyncLocal<IComponentHub>)type.GetField("_scopedComponentHub", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+
+            scoped.Value = componentHub;
+            type.GetField("_componentHub", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, componentHub);
         }
 
         /// <summary>

@@ -6,7 +6,6 @@ namespace WebExpress.WebCore.Test.Html.Parser
     /// <summary>
     /// Unit tests for the <see cref="HtmlTokenizer"/> class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlTokenizer
     {
         // ------------------------------------------------------------------

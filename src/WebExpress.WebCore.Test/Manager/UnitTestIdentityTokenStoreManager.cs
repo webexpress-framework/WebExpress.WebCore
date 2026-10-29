@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// Verifies that replay and revocation markers always reach exactly one store per application,
     /// and that the credential logic in the identity manager follows the store bound at call time.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestIdentityTokenStoreManager
     {
         /// <summary>

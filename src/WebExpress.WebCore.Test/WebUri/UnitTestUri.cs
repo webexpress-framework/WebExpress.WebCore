@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.WebUri
     /// <summary>
     /// Tests an uri.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestUri
     {
         /// <summary>

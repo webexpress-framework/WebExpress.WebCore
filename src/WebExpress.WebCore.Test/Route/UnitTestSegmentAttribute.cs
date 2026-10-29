@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Route
     /// <summary>
     /// Tests the segment attribute.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestSegmentAttribute
     {
         /// <summary>
