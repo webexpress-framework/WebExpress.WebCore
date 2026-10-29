@@ -166,6 +166,11 @@ namespace WebExpress.WebCore.WebAsset
             var assemblName = assembly.GetName().Name;
             var embeddedResources = assembly.GetManifestResourceNames();
 
+            // a plugin embeds thousands of assets, all mounted under the same route per application
+            var prefixes = applicationContexts
+                .Select(x => (ApplicationContext: x, Prefix: GetPluginRoute(x, pluginContext).Concat(new UriPathSegmentConstant("assets"))))
+                .ToArray();
+
             foreach (var resource in embeddedResources)
             {
                 if (resource.StartsWith(assemblName + ".Assets.", StringComparison.OrdinalIgnoreCase))
@@ -173,11 +178,8 @@ namespace WebExpress.WebCore.WebAsset
                     var id = resource[(assemblName.Length + 8)..]?.Replace('\\', '/');
 
                     // assign the asset to existing applications
-                    foreach (var applicationContext in applicationContexts)
+                    foreach (var (applicationContext, prefix) in prefixes)
                     {
-                        var prefix = GetPluginRoute(applicationContext, pluginContext)
-                            .Concat(new UriPathSegmentConstant("assets"));
-
                         var assetContext = new AssetContext()
                         {
                             EndpointId = new ComponentId($"{pluginContext.PluginId}.{id.Replace('/', '.')}"),

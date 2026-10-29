@@ -19,10 +19,22 @@ namespace WebExpress.WebCore.WebEndpoint
     /// </summary>
     public partial class RouteEndpoint : IRoute
     {
+        private IUriPathSegment[] _pathSegments = [new UriPathSegmentRoot()];
+
         /// <summary>
         /// The segments of the route (e.g., /over/there).
         /// </summary>
-        public IEnumerable<IUriPathSegment> PathSegments { get; private set; } = [new UriPathSegmentRoot()];
+        /// <remarks>
+        /// The segments are taken in once, when the route is built. A route is built from other
+        /// routes - copied, concatenated, combined - and kept as a deferred query it would copy
+        /// every segment of every route it derives from again on each read, which every
+        /// comparison and string conversion of a route is.
+        /// </remarks>
+        public IEnumerable<IUriPathSegment> PathSegments
+        {
+            get => _pathSegments;
+            private set => _pathSegments = [.. value];
+        }
 
         /// <summary>
         /// Gets or sets a string representation of the route.

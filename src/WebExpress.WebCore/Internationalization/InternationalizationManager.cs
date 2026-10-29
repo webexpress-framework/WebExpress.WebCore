@@ -103,7 +103,9 @@ namespace WebExpress.WebCore.Internationalization
         {
             var assemblyName = assembly.GetName().Name.ToLower();
             var name = assemblyName + ".internationalization.";
-            var resources = assembly.GetManifestResourceNames().Where(x => x.Contains(name, System.StringComparison.CurrentCultureIgnoreCase));
+            // resource names are identifiers, not text: a culture-aware comparison would be slow
+            // over the thousands of names a plugin embeds, and wrong under e.g. a turkish culture
+            var resources = assembly.GetManifestResourceNames().Where(x => x.Contains(name, System.StringComparison.OrdinalIgnoreCase));
 
             foreach (var languageResource in resources)
             {
