@@ -1551,6 +1551,119 @@ namespace WebExpress.WebCore.Test.Manager
             }
         }
 
+
+        /// <summary>
+        /// A package cannot claim an existing configuration file merely by naming it in its archive.
+        /// </summary>
+        /// <param name="fileName">The pre-existing configuration file claimed by the archive.</param>
+        [Theory]
+        [InlineData("webexpress.settings.json")]
+        [InlineData("other.settings.json")]
+        public void UninstallPreservesSettingsNotDeployedByPackage(string fileName)
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            Directory.CreateDirectory(settingsPath);
+            var settingsFile = Path.Combine(settingsPath, fileName);
+            const string original = """{ "Plugins": { "other": { "Value": "keep" } } }""";
+            File.WriteAllText(settingsFile, original);
+            var context = UnitTestFixture.CreateHttpServerContextMock(settingsPath);
+            var manager = UnitTestFixture.CreateComponentHubMock(context).PackageManager;
+            Directory.CreateDirectory(context.PackagePath);
+            var archive = Path.Combine(context.PackagePath, "claim.wxp");
+            CreatePackageArchive(archive, "claim", "1.0.0", "{}", $"settings/{fileName}");
+
+            try
+            {
+                // act
+                Assert.True(manager.InstallPackage(archive).Success);
+                var result = manager.UninstallPackage("claim", removeSettings: true);
+
+                // validation
+                Assert.True(result.Success);
+                Assert.True(File.Exists(settingsFile));
+                Assert.Equal(original, File.ReadAllText(settingsFile));
+            }
+            finally
+            {
+                Directory.Delete(context.PackagePath, true);
+                Directory.Delete(settingsPath, true);
+            }
+        }
+
+        /// <summary>
+        /// Settings ownership survives loading the catalog after a restart.
+        /// </summary>
+        [Fact]
+        public void SettingsOwnershipSurvivesCatalogReload()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var context = UnitTestFixture.CreateHttpServerContextMock(settingsPath);
+            var manager = (PackageManager)UnitTestFixture.CreateComponentHubMock(context).PackageManager;
+            Directory.CreateDirectory(context.PackagePath);
+            var archive = Path.Combine(context.PackagePath, "owned.wxp");
+            CreatePackageArchive(archive, "owned", "1.0.0", """{ "Plugins": { "owned": { "Value": "hello" } } }""");
+
+            try
+            {
+                Assert.True(manager.InstallPackage(archive).Success);
+                var reloaded = (PackageManager)UnitTestFixture.CreateComponentHubMock(context).PackageManager;
+
+                // act
+                typeof(PackageManager).GetMethod("LoadCatalog", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(reloaded, null);
+                var result = reloaded.UninstallPackage("owned", removeSettings: true);
+
+                // validation
+                Assert.True(result.Success);
+                Assert.False(File.Exists(Path.Combine(settingsPath, "owned.settings.json")));
+            }
+            finally
+            {
+                Directory.Delete(context.PackagePath, true);
+                Directory.Delete(settingsPath, true);
+            }
+        }
+
+        /// <summary>
+        /// An operation on a delayed instance preserves packages it has not scanned yet.
+        /// </summary>
+        [Fact]
+        public void ClusterOperationPreservesUnseenDisabledPackage()
+        {
+            // arrange
+            var root = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var packages = Path.Combine(root, "packages");
+            var state = Path.Combine(root, "state");
+            Directory.CreateDirectory(packages);
+            var a = CreateClusterInstance(packages, state);
+            var b = CreateClusterInstance(packages, state);
+            var first = Path.Combine(root, "first.wxp");
+            var second = Path.Combine(root, "second.wxp");
+            CreatePackageArchive(first, "first", "1.0.0");
+            CreatePackageArchive(second, "second", "1.0.0");
+
+            try
+            {
+                Assert.True(a.InstallPackage(first, activate: false).Success);
+
+                // act
+                Assert.True(b.InstallPackage(second, activate: false).Success);
+                b.Scan();
+                a.Scan();
+
+                // validation
+                Assert.Equal(PackageCatalogItemState.Disable, a.GetPackage("first").State);
+                Assert.Equal(PackageCatalogItemState.Disable, b.GetPackage("first").State);
+                Assert.Equal(PackageCatalogItemState.Disable, a.GetPackage("second").State);
+            }
+            finally
+            {
+                Directory.Delete(root, true);
+            }
+        }
+
         /// <summary>
         /// Creates a simple package archive for tests.
         /// </summary>

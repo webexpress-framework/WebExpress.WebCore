@@ -35,6 +35,14 @@ namespace WebExpress.WebCore.WebSession
         Session GetSession(IRequest request);
 
         /// <summary>
+        /// Loads the current state of an existing session for a long-lived connection.
+        /// Unknown and expired ids never create a replacement session.
+        /// </summary>
+        /// <param name="id">The server-issued session id.</param>
+        /// <returns>The current session, or null when it no longer exists.</returns>
+        Session FindSession(Guid id);
+
+        /// <summary>
         /// Replaces the id of a session while keeping its state.
         /// </summary>
         /// <remarks>

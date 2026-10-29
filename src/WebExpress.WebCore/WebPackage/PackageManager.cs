@@ -237,151 +237,168 @@ namespace WebExpress.WebCore.WebPackage
                     return;
                 }
 
-                var packagePath = _httpServerContext?.PackagePath;
+                ScanCore();
+            }
+        }
+
+        /// <summary>
+        /// Reconciles the complete package set while the local and cluster locks are held.
+        /// Operations must see new and removed packages before saving the shared catalog.
+        /// </summary>
+        /// <param name="sharedOnly">True to discover only packages already recorded by another instance.</param>
+        private void ScanCore(bool sharedOnly = false)
+        {
+            var packagePath = _httpServerContext?.PackagePath;
+
+            _httpServerContext?.Log?.Debug
+            (
+                I18N.Translate
+                (
+                    "webexpress.webcore:packagemanager.scan",
+                    packagePath
+                )
+            );
+
+            // a missing directory - a share that is not mounted for a moment - says nothing
+            // about the packages; reading it as empty would unload every one of them
+            if (!Directory.Exists(packagePath))
+            {
+                return;
+            }
+
+            var shared = Cluster is not null ? ReadSharedStates() : null;
+            var changed = AdoptSharedStates(shared);
+
+            // determine all WebExpress packages from the file system
+            var packageFiles = Directory.GetFiles(packagePath, "*.wxp").Select(x => Path.GetFileName(x)).ToList();
+            var known = Catalog.Packages.Where(x => x is not null).ToList();
+
+            // all packages that are not yet installed
+            var newPackages = packageFiles.Except(known.Select(x => x.File), StringComparer.OrdinalIgnoreCase)
+                .Where(file => !sharedOnly || shared?.Packages.ContainsKey(file) == true)
+                .ToList();
+
+            // all packages that are no longer available
+            var removePackages = known.Where(x => !packageFiles.Contains(x.File, StringComparer.OrdinalIgnoreCase)).ToList();
+
+            foreach (var file in _refusedFiles.Keys.Except(packageFiles, StringComparer.OrdinalIgnoreCase).ToList())
+            {
+                _refusedFiles.Remove(file);
+            }
+
+            // determine changed packages by comparing spec version and relevant metadata
+            foreach (var existing in known.Except(removePackages))
+            {
+                var fromFile = LoadPackage(Path.Combine(packagePath, existing.File));
+                if (!HasPackageChanged(existing, fromFile))
+                {
+                    continue;
+                }
+
+                _httpServerContext?.Log?.Info(I18N.Translate("webexpress.webcore:packagemanager.changed", existing.File));
+
+                // respect disabled state; only update metadata without activating
+                if (existing.State != PackageCatalogItemState.Disable)
+                {
+                    UnloadDependents(existing);
+                    Unload(existing);
+
+                    existing.State = PackageCatalogItemState.Available;
+                }
+
+                existing.Id = fromFile.Id;
+                existing.Metadata = fromFile.Metadata;
+                existing.Faulted = false;
+                existing.ProblemText = null;
+                changed = true;
+            }
+
+            foreach (var file in newPackages)
+            {
+                var fullPath = Path.Combine(packagePath, file);
+                var writeTime = File.GetLastWriteTimeUtc(fullPath);
+
+                if (_refusedFiles.TryGetValue(file, out var refusedAt) && refusedAt == writeTime)
+                {
+                    continue;
+                }
+
+                var packagesFromFile = LoadPackage(fullPath);
+                if (packagesFromFile is null)
+                {
+                    _refusedFiles[file] = writeTime;
+
+                    continue;
+                }
+
+                // a second file with the id of an installed package is a copy, not a package of
+                // its own; taking it in would register the same plugins a second time
+                if (Catalog.Packages.Any(x => x is not null && string.Equals(x.Id, packagesFromFile.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.duplicate", file, packagesFromFile.Id));
+                    _refusedFiles[file] = writeTime;
+
+                    continue;
+                }
+
+                // a package another instance installed disabled stays disabled here too
+                packagesFromFile.State = shared is not null && shared.Packages.TryGetValue(file, out var state) && state == PackageCatalogItemState.Disable
+                    ? PackageCatalogItemState.Disable
+                    : PackageCatalogItemState.Available;
+
+                if (shared is not null && shared.InstalledSettings.TryGetValue(file, out var installedSettings))
+                {
+                    packagesFromFile.InstalledSettings = [.. installedSettings];
+                }
+
+                Catalog.Packages.Add(packagesFromFile);
+
+                // raise event for added package
+                OnAddPackage(packagesFromFile);
 
                 _httpServerContext?.Log?.Debug
                 (
                     I18N.Translate
                     (
-                        "webexpress.webcore:packagemanager.scan",
-                        packagePath
+                        "webexpress.webcore:packagemanager.add",
+                        file
                     )
                 );
 
-                // a missing directory - a share that is not mounted for a moment - says nothing
-                // about the packages; reading it as empty would unload every one of them
-                if (!Directory.Exists(packagePath))
-                {
-                    return;
-                }
+                changed = true;
+            }
 
-                var shared = cluster is not null ? ReadSharedStates() : null;
-                var changed = AdoptSharedStates(shared);
+            foreach (var existing in removePackages)
+            {
+                // the file is gone and cannot be asked for; what depends on it waits for it
+                UnloadDependents(existing);
+                Unload(existing);
 
-                // determine all WebExpress packages from the file system
-                var packageFiles = Directory.GetFiles(packagePath, "*.wxp").Select(x => Path.GetFileName(x)).ToList();
-                var known = Catalog.Packages.Where(x => x is not null).ToList();
+                // raise event before removing from catalog
+                OnRemovePackage(existing);
 
-                // all packages that are not yet installed
-                var newPackages = packageFiles.Except(known.Select(x => x.File), StringComparer.OrdinalIgnoreCase).ToList();
+                // remove package from catalog
+                Catalog.Packages.Remove(existing);
 
-                // all packages that are no longer available
-                var removePackages = known.Where(x => !packageFiles.Contains(x.File, StringComparer.OrdinalIgnoreCase)).ToList();
-
-                foreach (var file in _refusedFiles.Keys.Except(packageFiles, StringComparer.OrdinalIgnoreCase).ToList())
-                {
-                    _refusedFiles.Remove(file);
-                }
-
-                // determine changed packages by comparing spec version and relevant metadata
-                foreach (var existing in known.Except(removePackages))
-                {
-                    var fromFile = LoadPackage(Path.Combine(packagePath, existing.File));
-                    if (!HasPackageChanged(existing, fromFile))
-                    {
-                        continue;
-                    }
-
-                    _httpServerContext?.Log?.Info(I18N.Translate("webexpress.webcore:packagemanager.changed", existing.File));
-
-                    // respect disabled state; only update metadata without activating
-                    if (existing.State != PackageCatalogItemState.Disable)
-                    {
-                        UnloadDependents(existing);
-                        Unload(existing);
-
-                        existing.State = PackageCatalogItemState.Available;
-                    }
-
-                    existing.Id = fromFile.Id;
-                    existing.Metadata = fromFile.Metadata;
-                    existing.Faulted = false;
-                    existing.ProblemText = null;
-                    changed = true;
-                }
-
-                foreach (var file in newPackages)
-                {
-                    var fullPath = Path.Combine(packagePath, file);
-                    var writeTime = File.GetLastWriteTimeUtc(fullPath);
-
-                    if (_refusedFiles.TryGetValue(file, out var refusedAt) && refusedAt == writeTime)
-                    {
-                        continue;
-                    }
-
-                    var packagesFromFile = LoadPackage(fullPath);
-                    if (packagesFromFile is null)
-                    {
-                        _refusedFiles[file] = writeTime;
-
-                        continue;
-                    }
-
-                    // a second file with the id of an installed package is a copy, not a package of
-                    // its own; taking it in would register the same plugins a second time
-                    if (Catalog.Packages.Any(x => x is not null && string.Equals(x.Id, packagesFromFile.Id, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        _httpServerContext?.Log?.Warning(I18N.Translate("webexpress.webcore:packagemanager.duplicate", file, packagesFromFile.Id));
-                        _refusedFiles[file] = writeTime;
-
-                        continue;
-                    }
-
-                    // a package another instance installed disabled stays disabled here too
-                    packagesFromFile.State = shared is not null && shared.Packages.TryGetValue(file, out var state) && state == PackageCatalogItemState.Disable
-                        ? PackageCatalogItemState.Disable
-                        : PackageCatalogItemState.Available;
-
-                    Catalog.Packages.Add(packagesFromFile);
-
-                    // raise event for added package
-                    OnAddPackage(packagesFromFile);
-
-                    _httpServerContext?.Log?.Debug
+                _httpServerContext?.Log?.Debug
+                (
+                    I18N.Translate
                     (
-                        I18N.Translate
-                        (
-                            "webexpress.webcore:packagemanager.add",
-                            file
-                        )
-                    );
+                        "webexpress.webcore:packagemanager.remove",
+                        existing.File
+                    )
+                );
 
-                    changed = true;
-                }
+                changed = true;
+            }
 
-                foreach (var existing in removePackages)
-                {
-                    // the file is gone and cannot be asked for; what depends on it waits for it
-                    UnloadDependents(existing);
-                    Unload(existing);
+            if (LoadPending() || changed)
+            {
+                // build sitemap
+                _componentHub?.SitemapManager.Refresh();
 
-                    // raise event before removing from catalog
-                    OnRemovePackage(existing);
-
-                    // remove package from catalog
-                    Catalog.Packages.Remove(existing);
-
-                    _httpServerContext?.Log?.Debug
-                    (
-                        I18N.Translate
-                        (
-                            "webexpress.webcore:packagemanager.remove",
-                            existing.File
-                        )
-                    );
-
-                    changed = true;
-                }
-
-                if (LoadPending() || changed)
-                {
-                    // build sitemap
-                    _componentHub?.SitemapManager.Refresh();
-
-                    // save the catalog
-                    SaveCatalog();
-                }
+                // save the catalog
+                SaveCatalog();
             }
         }
 
@@ -1352,9 +1369,17 @@ namespace WebExpress.WebCore.WebPackage
                 return false;
             }
 
-            // the names were reduced to plain file names when the archive was read
-            foreach (var name in package.Metadata?.Settings ?? [])
+            // only files this package actually deployed may be removed
+            foreach (var name in package.InstalledSettings)
             {
+                // a damaged catalog must never turn an owned file name into an outside path
+                if (string.IsNullOrWhiteSpace(name) || Path.GetFileName(name) != name
+                    || !name.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("webexpress.settings.json", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 var file = Path.Combine(settingsPath, name);
 
                 try
@@ -1785,7 +1810,15 @@ namespace WebExpress.WebCore.WebPackage
 
                 if (normalized.StartsWith(PackageBuilder.SettingsDirectory + "/", StringComparison.OrdinalIgnoreCase))
                 {
-                    deployedSettings |= DeploySettings(entry, normalized, scopes);
+                    if (DeploySettings(entry, normalized, scopes))
+                    {
+                        var name = GetSettingsFileName(entry, normalized);
+                        if (!package.InstalledSettings.Contains(name, StringComparer.OrdinalIgnoreCase))
+                        {
+                            package.InstalledSettings.Add(name);
+                        }
+                        deployedSettings = true;
+                    }
 
                     continue;
                 }
@@ -2686,12 +2719,7 @@ namespace WebExpress.WebCore.WebPackage
 
                 // the change builds on what the other instances decided so far, not on this
                 // instance's possibly older view
-                var adopted = AdoptSharedStates(ReadSharedStates());
-
-                if (LoadPending() || adopted)
-                {
-                    _componentHub?.SitemapManager.Refresh();
-                }
+                ScanCore(sharedOnly: true);
 
                 var result = operation();
 
@@ -2727,6 +2755,7 @@ namespace WebExpress.WebCore.WebPackage
                 foreach (var item in catalog?.Packages?.Where(x => x?.File is not null) ?? [])
                 {
                     states.Packages[item.File] = item.State;
+                    states.InstalledSettings[item.File] = item.InstalledSettings;
                 }
 
                 states.DisabledPlugins.UnionWith(catalog?.DisabledPlugins?.Where(x => !string.IsNullOrWhiteSpace(x)) ?? []);
@@ -2761,6 +2790,11 @@ namespace WebExpress.WebCore.WebPackage
 
             foreach (var package in Catalog.Packages.Where(x => x?.File is not null).ToList())
             {
+                if (shared.InstalledSettings.TryGetValue(package.File, out var installedSettings))
+                {
+                    package.InstalledSettings = [.. installedSettings];
+                }
+
                 if (shared.Packages.TryGetValue(package.File, out var state) && state != package.State)
                 {
                     changed |= AdoptState(package, state == PackageCatalogItemState.Disable);
@@ -2829,6 +2863,11 @@ namespace WebExpress.WebCore.WebPackage
             /// Gets the state of each package, by package file.
             /// </summary>
             public Dictionary<string, PackageCatalogItemState> Packages { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            /// <summary>
+            /// Gets the settings files each package actually deployed.
+            /// </summary>
+            public Dictionary<string, List<string>> InstalledSettings { get; } = new(StringComparer.OrdinalIgnoreCase);
 
             /// <summary>
             /// Gets the ids of the deactivated built-in plugins.

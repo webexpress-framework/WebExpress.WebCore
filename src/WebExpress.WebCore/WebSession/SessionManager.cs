@@ -178,6 +178,28 @@ namespace WebExpress.WebCore.WebSession
         }
 
         /// <summary>
+        /// Loads the current state of an existing session for a long-lived connection.
+        /// Unknown and expired ids never create a replacement session.
+        /// </summary>
+        /// <param name="id">The server-issued session id.</param>
+        /// <returns>The current session, or null when it no longer exists.</returns>
+        public Session FindSession(Guid id)
+        {
+            if (SharedStore is { } store)
+            {
+                var session = Load(store, id);
+                return session is not null && !IsExpired(session, DateTime.Now) ? session : null;
+            }
+
+            lock (_sync)
+            {
+                return _dictionary.TryGetValue(id, out var session) && !IsExpired(session, DateTime.Now)
+                    ? session
+                    : null;
+            }
+        }
+
+        /// <summary>
         /// Determines whether a session has sat idle past its timeout.
         /// </summary>
         /// <param name="session">The session to test.</param>

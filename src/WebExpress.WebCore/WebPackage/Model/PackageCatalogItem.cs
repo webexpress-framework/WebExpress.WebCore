@@ -32,6 +32,13 @@ namespace WebExpress.WebCore.WebPackage.Model
         public PackageCatalogItemState State { get; set; }
 
         /// <summary>
+        /// Gets or sets the settings files created by this package. Persisted ownership prevents
+        /// an archive from claiming an existing host or foreign plugin configuration on removal.
+        /// </summary>
+        [XmlArray("installedSettings"), XmlArrayItem("file")]
+        public List<string> InstalledSettings { get; set; } = [];
+
+        /// <summary>
         /// Gets a value indicating whether the entry stands for a plugin that ships with the
         /// application rather than for an installed package.
         /// </summary>
