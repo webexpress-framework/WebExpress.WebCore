@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -651,11 +652,11 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
-        /// Tests that every lifecycle operation refuses a built-in plugin with a defined failure
-        /// rather than running half of its steps.
+        /// Tests that a built-in plugin cannot be updated - there is no package file to replace
+        /// it with - and that the refusal leaves it running.
         /// </summary>
         [Fact]
-        public void BuiltInPackageRefusesEveryLifecycleOperation()
+        public void BuiltInPackageRefusesUpdate()
         {
             // arrange
             var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
@@ -666,22 +667,156 @@ namespace WebExpress.WebCore.Test.Manager
             var pluginId = componentHub.PluginManager.Plugins.First().PluginId.ToString();
 
             // act
-            var results = new[]
-            {
-                packageManager.ActivatePackage(pluginId),
-                packageManager.DeactivatePackage(pluginId),
-                packageManager.UpdatePackage(pluginId, Path.Combine(httpServerContext.PackagePath, "missing.wxp")),
-                packageManager.UninstallPackage(pluginId)
-            };
+            var result = packageManager.UpdatePackage(pluginId, Path.Combine(httpServerContext.PackagePath, "missing.wxp"));
 
             // validation
-            Assert.All(results, x =>
-            {
-                Assert.False(x.Success);
-                Assert.Contains("ships with the application", x.Message, StringComparison.OrdinalIgnoreCase);
-            });
+            Assert.False(result.Success);
+            Assert.Contains("ships with the application", result.Message, StringComparison.OrdinalIgnoreCase);
 
             // the refusal has to leave the plugin exactly as it was
+            Assert.Contains(componentHub.PluginManager.Plugins, x => x.PluginId.ToString() == pluginId);
+            Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage(pluginId)?.State);
+        }
+
+        /// <summary>
+        /// Uninstalling a built-in plugin withdraws it at once and records its assembly, which is
+        /// locked while the process runs, for deletion on the next start.
+        /// </summary>
+        [Fact]
+        public void BuiltInPluginUninstallWithdrawsItAndRecordsItsFile()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var plugin = componentHub.PluginManager.Plugins.First();
+            var pluginId = plugin.PluginId.ToString();
+            var file = Path.GetFileName(plugin.Assembly.Location);
+            var packagePath = httpServerContext.PackagePath;
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+
+                // act
+                var result = packageManager.UninstallPackage(pluginId);
+
+                // validation
+                Assert.True(result.Success, result.Message);
+                Assert.DoesNotContain(componentHub.PluginManager.Plugins, x => x.PluginId.ToString() == pluginId);
+                Assert.Null(packageManager.GetPackage(pluginId));
+                Assert.Contains($"<removed>{file}</removed>", File.ReadAllText(Path.Combine(packagePath, "catalog.xml")), StringComparison.Ordinal);
+                Assert.True(File.Exists(plugin.Assembly.Location), "the file is only deleted on the next start");
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// On the next start the recorded assembly of an uninstalled built-in plugin is deleted
+        /// before the plugins are loaded, and its record goes with it.
+        /// </summary>
+        [Fact]
+        public void RemovedBuiltInFileIsDeletedOnStart()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var file = $"Removed.{Guid.NewGuid():N}.dll";
+            var path = Path.Combine(AppContext.BaseDirectory, file);
+            File.WriteAllText(path, "not an assembly");
+            packageManager.Catalog.RemovedPlugins.Add(file);
+
+            try
+            {
+                // act
+                typeof(PackageManager)
+                    .GetMethod("DeleteRemovedBuiltIns", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .Invoke(packageManager, null);
+
+                // validation
+                Assert.False(File.Exists(path));
+                Assert.DoesNotContain(file, packageManager.Catalog.RemovedPlugins);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        /// <summary>
+        /// A built-in plugin is deactivated by withdrawing its plugin and activated by registering
+        /// it again from its loaded assembly; it stays listed in between, and the decision is
+        /// recorded in the catalog so that it outlives the process.
+        /// </summary>
+        [Fact]
+        public void BuiltInPluginCanBeDeactivatedAndActivatedAgain()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var pluginId = componentHub.PluginManager.Plugins.First().PluginId.ToString();
+            var packagePath = httpServerContext.PackagePath;
+            var catalogFile = Path.Combine(packagePath, "catalog.xml");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+
+                // act + validation (deactivated: withdrawn, still listed, recorded)
+                var deactivated = packageManager.DeactivatePackage(pluginId);
+                Assert.True(deactivated.Success, deactivated.Message);
+                Assert.DoesNotContain(componentHub.PluginManager.Plugins, x => x.PluginId.ToString() == pluginId);
+                Assert.Equal(PackageCatalogItemState.Disable, packageManager.GetPackage(pluginId)?.State);
+                Assert.True(packageManager.GetPackage(pluginId)?.BuiltIn);
+                Assert.Contains($"<disabled>{pluginId}</disabled>", File.ReadAllText(catalogFile), StringComparison.Ordinal);
+
+                // act + validation (activated: registered again, no longer recorded)
+                var activated = packageManager.ActivatePackage(pluginId);
+                Assert.True(activated.Success, activated.Message);
+                Assert.Contains(componentHub.PluginManager.Plugins, x => x.PluginId.ToString() == pluginId);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage(pluginId)?.State);
+                Assert.DoesNotContain("<disabled>", File.ReadAllText(catalogFile), StringComparison.Ordinal);
+                Assert.Single(packageManager.GetPackages(), x => x.Id == pluginId);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// A system plugin carries the framework the applications - and the management surface -
+        /// are built on, so it is refused before anything of it is touched.
+        /// </summary>
+        [Fact]
+        public void SystemPluginCannotBeSwitched()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var pluginId = componentHub.PluginManager.Plugins.First().PluginId.ToString();
+            packageManager.GetPackage(pluginId).SystemPlugin = true;
+
+            // act
+            var deactivated = packageManager.DeactivatePackage(pluginId);
+            var activated = packageManager.ActivatePackage(pluginId);
+
+            // validation
+            Assert.False(deactivated.Success);
+            Assert.Contains("system plugin", deactivated.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(activated.Success);
             Assert.Contains(componentHub.PluginManager.Plugins, x => x.PluginId.ToString() == pluginId);
             Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage(pluginId)?.State);
         }
@@ -913,6 +1048,510 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A refused upload must not replace an installed package that has the same file name:
+        /// the upload is checked before it reaches the package directory.
+        /// </summary>
+        [Fact]
+        public void RefusedUploadKeepsTheInstalledPackageOfTheSameName()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "keep.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "keep", "1.0.0");
+                Assert.True(packageManager.InstallPackage(packageFile).Success);
+
+                // act
+                using var garbage = new MemoryStream("not-a-package"u8.ToArray());
+                var upload = packageManager.UploadPackage(garbage, "keep.wxp");
+
+                // validation
+                Assert.False(upload.Success);
+                Assert.True(packageManager.ValidatePackage(packageFile).IsValid, "the installed file must be untouched");
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("keep")?.State);
+                Assert.False(Directory.Exists(Path.Combine(packagePath, PackageManager.StagingDirectory)), "the staging directory is cleaned up");
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// Uploading a package under another file name than the installed one is an update of
+        /// that package, not a second package with the same id.
+        /// </summary>
+        [Fact]
+        public void UploadWithKnownIdReplacesThePackage()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var source = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                Directory.CreateDirectory(source);
+                CreatePackageArchive(Path.Combine(source, "same.1.0.0.wxp"), "same", "1.0.0");
+                CreatePackageArchive(Path.Combine(source, "same.2.0.0.wxp"), "same", "2.0.0");
+
+                // act
+                using (var first = File.OpenRead(Path.Combine(source, "same.1.0.0.wxp")))
+                {
+                    Assert.True(packageManager.UploadPackage(first, "same.1.0.0.wxp").Success);
+                }
+
+                using (var second = File.OpenRead(Path.Combine(source, "same.2.0.0.wxp")))
+                {
+                    Assert.True(packageManager.UploadPackage(second, "same.2.0.0.wxp").Success);
+                }
+
+                // validation
+                var package = Assert.Single(packageManager.Catalog.Packages, x => x.Id == "same");
+                Assert.Equal("same.2.0.0.wxp", package.File);
+                Assert.Equal("2.0.0", package.Metadata.Version);
+                Assert.False(File.Exists(Path.Combine(packagePath, "same.1.0.0.wxp")));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(source, true);
+            }
+        }
+
+        /// <summary>
+        /// A file the scan finds that carries the id of an installed package is a copy and is
+        /// not taken in as a second package.
+        /// </summary>
+        [Fact]
+        public void ScanIgnoresSecondFileWithInstalledId()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(Path.Combine(packagePath, "twin.1.0.0.wxp"), "twin", "1.0.0");
+                packageManager.Scan();
+                CreatePackageArchive(Path.Combine(packagePath, "twin-copy.wxp"), "twin", "1.0.0");
+
+                // act
+                packageManager.Scan();
+
+                // validation
+                Assert.Single(packageManager.Catalog.Packages, x => x.Id == "twin");
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// An update with the version of the installed package is carried out: the new content
+        /// is loaded instead of being taken for an unchanged file.
+        /// </summary>
+        [Fact]
+        public void UpdateWithSameVersionReloadsThePackage()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var source = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                Directory.CreateDirectory(source);
+                CreatePackageArchive(Path.Combine(packagePath, "reload.wxp"), "reload", "1.0.0");
+                CreatePackageArchive(Path.Combine(source, "reload.wxp"), "reload", "1.0.0", title: "rebuilt");
+                Assert.True(packageManager.InstallPackage(Path.Combine(packagePath, "reload.wxp")).Success);
+
+                // act
+                using var stream = File.OpenRead(Path.Combine(source, "reload.wxp"));
+                var update = packageManager.UpdatePackage("reload", stream, "reload.wxp");
+
+                // validation
+                Assert.True(update.Success, update.Message);
+                Assert.Equal("rebuilt", packageManager.GetPackage("reload")?.Metadata?.Title);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("reload")?.State);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(source, true);
+            }
+        }
+
+        /// <summary>
+        /// An update that cannot start leaves the running version in place instead of
+        /// unloading it first and failing afterwards.
+        /// </summary>
+        [Fact]
+        public void UpdateWithMissingDependencyKeepsTheRunningVersion()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var source = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                Directory.CreateDirectory(source);
+                CreatePackageArchive(Path.Combine(packagePath, "stable.1.0.0.wxp"), "stable", "1.0.0");
+                CreatePackageArchive(Path.Combine(source, "stable.2.0.0.wxp"), "stable", "2.0.0", dependencies: ["absent"]);
+                Assert.True(packageManager.InstallPackage(Path.Combine(packagePath, "stable.1.0.0.wxp")).Success);
+
+                // act
+                var update = packageManager.UpdatePackage("stable", Path.Combine(source, "stable.2.0.0.wxp"));
+
+                // validation
+                Assert.False(update.Success);
+                Assert.Contains("absent", update.Message, StringComparison.Ordinal);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("stable")?.State);
+                Assert.Equal("1.0.0", packageManager.GetPackage("stable")?.Metadata?.Version);
+                Assert.True(File.Exists(Path.Combine(packagePath, "stable.1.0.0.wxp")));
+                Assert.False(File.Exists(Path.Combine(packagePath, "stable.2.0.0.wxp")));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(source, true);
+            }
+        }
+
+        /// <summary>
+        /// A package installed before its dependency waits and starts as soon as the dependency
+        /// is installed; while it runs, the dependency cannot be removed. Deactivating the
+        /// dependency stops it along, and it starts again once the dependency is back.
+        /// </summary>
+        [Fact]
+        public void DependentPackageWaitsForItsDependencyAndHoldsIt()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(Path.Combine(packagePath, "child.wxp"), "child", "1.0.0", dependencies: ["parent>=1.0.0"]);
+                CreatePackageArchive(Path.Combine(packagePath, "parent.wxp"), "parent", "1.0.0");
+
+                // act + validation (the child waits)
+                var child = packageManager.InstallPackage(Path.Combine(packagePath, "child.wxp"));
+                Assert.True(child.Success, child.Message);
+                Assert.Equal(PackageCatalogItemState.Available, packageManager.GetPackage("child")?.State);
+                Assert.Contains("parent", packageManager.GetPackage("child")?.Problem, StringComparison.Ordinal);
+
+                // act + validation (the parent arrives, the child starts with it)
+                Assert.True(packageManager.InstallPackage(Path.Combine(packagePath, "parent.wxp")).Success);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("child")?.State);
+                Assert.Null(packageManager.GetPackage("child")?.Problem);
+
+                // act + validation (the parent cannot be removed under the running child)
+                Assert.Equal(new[] { "child" }, packageManager.GetDependentPackages("parent").Select(x => x.Id));
+                Assert.False(packageManager.UninstallPackage("parent").Success);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("parent")?.State);
+
+                // act + validation (deactivating the parent stops the child, which waits)
+                var deactivated = packageManager.DeactivatePackage("parent");
+                Assert.True(deactivated.Success, deactivated.Message);
+                Assert.Contains("child", deactivated.Message, StringComparison.Ordinal);
+                Assert.Equal(PackageCatalogItemState.Available, packageManager.GetPackage("child")?.State);
+                Assert.Contains("parent", packageManager.GetPackage("child")?.Problem, StringComparison.Ordinal);
+
+                // act + validation (the child comes back with the parent)
+                Assert.True(packageManager.ActivatePackage("parent").Success);
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("child")?.State);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// The reason a package waits and the messages of the operations are recorded without
+        /// a request, yet read in the language of whoever reads them rather than the server's.
+        /// </summary>
+        [Fact]
+        public void ProblemAndMessagesAreTranslatedForTheReader()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var german = CultureInfo.GetCultureInfo("de");
+            var english = CultureInfo.GetCultureInfo("en");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(Path.Combine(packagePath, "child.wxp"), "child", "1.0.0", dependencies: ["parent"]);
+                File.WriteAllText(Path.Combine(packagePath, "broken.wxp"), "no archive");
+
+                // act
+                packageManager.InstallPackage(Path.Combine(packagePath, "child.wxp"));
+                var child = packageManager.GetPackage("child");
+                var notFound = packageManager.ActivatePackage("unknown");
+                var invalid = packageManager.InstallPackage(Path.Combine(packagePath, "broken.wxp"));
+
+                // validation
+                Assert.Equal("Wartet auf: parent", child.GetProblem(german));
+                Assert.Equal("Waiting for: parent", child.GetProblem(english));
+                Assert.Contains("nicht gefunden", notFound.GetMessage(german), StringComparison.Ordinal);
+                Assert.Contains("not found", notFound.GetMessage(english), StringComparison.Ordinal);
+                Assert.NotEqual(invalid.GetMessage(english), invalid.GetMessage(german));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// When the file of a dependency disappears, its dependents are unloaded with it and
+        /// wait for it, rather than running on an assembly that is gone.
+        /// </summary>
+        [Fact]
+        public void RemovedDependencyUnloadsItsDependents()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(Path.Combine(packagePath, "base.wxp"), "base", "1.0.0");
+                CreatePackageArchive(Path.Combine(packagePath, "addon.wxp"), "addon", "1.0.0", dependencies: ["base"]);
+                packageManager.Scan();
+                Assert.Equal(PackageCatalogItemState.Active, packageManager.GetPackage("addon")?.State);
+
+                // act
+                File.Delete(Path.Combine(packagePath, "base.wxp"));
+                packageManager.Scan();
+
+                // validation
+                Assert.Null(packageManager.GetPackage("base"));
+                Assert.Equal(PackageCatalogItemState.Available, packageManager.GetPackage("addon")?.State);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// A catalog entry without a file name must not lead to the package directory being
+        /// removed: an empty name resolves to the directory itself.
+        /// </summary>
+        [Fact]
+        public void CatalogEntryWithoutFileNameLeavesThePackageDirectoryAlone()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var load = typeof(PackageManager).GetMethod("LoadCatalog", BindingFlags.NonPublic | BindingFlags.Instance);
+            var remove = typeof(PackageManager).GetMethod("RemoveExtractedDirectory", BindingFlags.NonPublic | BindingFlags.Instance);
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(Path.Combine(packagePath, "bystander.wxp"), "bystander", "1.0.0");
+                File.WriteAllText(Path.Combine(packagePath, "catalog.xml"), """<catalog><package id="broken" file="" state="Active" /></catalog>""");
+
+                // act
+                load.Invoke(packageManager, null);
+                packageManager.Scan();
+                remove.Invoke(packageManager, [new PackageCatalogItem() { Id = "broken", File = string.Empty }]);
+
+                // validation
+                Assert.DoesNotContain(packageManager.Catalog.Packages, x => x.Id == "broken");
+                Assert.True(File.Exists(Path.Combine(packagePath, "bystander.wxp")));
+                Assert.True(File.Exists(Path.Combine(packagePath, "catalog.xml")));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+            }
+        }
+
+        /// <summary>
+        /// A package whose plugin carries the id of a registered plugin is refused, and the
+        /// registered plugin survives the refusal - before, the package took over the id and
+        /// unloading the package removed the plugin it collided with.
+        /// </summary>
+        [Fact]
+        public void PackageWithTakenPluginIdLeavesTheRegisteredPluginAlone()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            (componentHub.PluginManager as PluginManager).Register();
+
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "intruder.wxp");
+            var assembly = typeof(UnitTestPackageManager).Assembly;
+            var assemblyName = assembly.GetName().Name;
+            var tfm = (string)typeof(PackageManager).GetMethod("GetTFM", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null);
+            var registered = componentHub.PluginManager.Plugins.Single(x => x.Assembly == assembly);
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "intruder", "1.0.0", plugins: [$"lib/{assemblyName}"], files: new Dictionary<string, string>
+                {
+                    [$"lib/{assemblyName}/{tfm}/{assemblyName}.dll"] = assembly.Location
+                });
+
+                // act
+                var install = packageManager.InstallPackage(packageFile);
+
+                // validation
+                Assert.False(install.Success);
+                Assert.Contains("could not be registered", install.Message, StringComparison.Ordinal);
+                Assert.Null(packageManager.GetPackage("intruder"));
+                Assert.Same(registered, componentHub.PluginManager.GetPlugin(registered.PluginId.ToString()));
+            }
+            finally
+            {
+                DeleteUnloadedDirectory(packagePath);
+            }
+        }
+
+        /// <summary>
+        /// Deletes a directory holding assemblies a collectible load context loaded. Windows
+        /// keeps such a file locked until the runtime has collected the unloaded context.
+        /// </summary>
+        /// <param name="directory">The directory.</param>
+        private static void DeleteUnloadedDirectory(string directory)
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+
+                try
+                {
+                    Directory.Delete(directory, true);
+
+                    return;
+                }
+                catch (UnauthorizedAccessException) when (attempt < 10)
+                {
+                    Thread.Sleep(50);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A package may configure its own plugins, which are named after their plugin sources,
+        /// even when the package id differs from them.
+        /// </summary>
+        [Fact]
+        public void InstallDeploysSettingsOfAPluginOfThePackage()
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "bundle.wxp");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "bundle", "1.0.0", """{ "Plugins": { "My.Plugin": { "Greeting": "hello" } } }""", plugins: ["lib/My.Plugin"]);
+
+                // act
+                var install = packageManager.InstallPackage(packageFile, true);
+
+                // validation
+                Assert.True(install.Success, install.Message);
+                Assert.Equal("hello", configuration.GetPluginSettings("my.plugin")["Greeting"]);
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+
+                if (Directory.Exists(settingsPath))
+                {
+                    Directory.Delete(settingsPath, true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The deployed settings file survives a plain uninstallation and is removed only when
+        /// that is asked for.
+        /// </summary>
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void UninstallRemovesSettingsOnlyWhenAsked(bool removeSettings)
+        {
+            // arrange
+            var settingsPath = Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString());
+            var configuration = new ConfigurationBuilder().AddSettingsDirectory(settingsPath, reloadOnChange: false).Build();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock(settingsPath, configuration);
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "withsettings.1.0.0.wxp");
+            var settingsFile = Path.Combine(settingsPath, "withsettings.settings.json");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(packageFile, "withsettings", "1.0.0", """{ "Plugins": { "withsettings": { "Greeting": "hello" } } }""");
+                Assert.True(packageManager.InstallPackage(packageFile, true).Success);
+                Assert.True(File.Exists(settingsFile));
+
+                // act
+                var uninstall = packageManager.UninstallPackage("withsettings", removeSettings);
+
+                // validation
+                Assert.True(uninstall.Success);
+                Assert.Equal(!removeSettings, File.Exists(settingsFile));
+            }
+            finally
+            {
+                Directory.Delete(packagePath, true);
+                Directory.Delete(settingsPath, true);
+            }
+        }
+
+        /// <summary>
         /// Creates a simple package archive for tests.
         /// </summary>
         /// <param name="file">The package file path.</param>
@@ -920,7 +1559,11 @@ namespace WebExpress.WebCore.Test.Manager
         /// <param name="version">The package version.</param>
         /// <param name="settings">The content of a settings file shipped as settings/{id}.settings.json, or null for none.</param>
         /// <param name="settingsEntry">The entry name of the settings file, if it is to differ from the default.</param>
-        private static void CreatePackageArchive(string file, string id, string version, string settings = null, string settingsEntry = null)
+        /// <param name="dependencies">The dependency expressions of the package.</param>
+        /// <param name="plugins">The plugin sources of the package.</param>
+        /// <param name="title">The title, if it is to differ from the default.</param>
+        /// <param name="files">Further entries, from entry name to the file they are copied from.</param>
+        private static void CreatePackageArchive(string file, string id, string version, string settings = null, string settingsEntry = null, string[] dependencies = null, string[] plugins = null, string title = null, IDictionary<string, string> files = null)
         {
             using var zip = ZipFile.Open(file, ZipArchiveMode.Create);
             var specEntry = zip.CreateEntry($"{id}.spec");
@@ -930,13 +1573,20 @@ namespace WebExpress.WebCore.Test.Manager
                     <package>
                         <id>{id}</id>
                         <version>{version}</version>
-                        <title>{id}-title</title>
+                        <title>{title ?? id + "-title"}</title>
                         <authors>UnitTest</authors>
+                        {string.Concat((plugins ?? []).Select(x => $"<plugin>{x}</plugin>"))}
+                        {string.Concat((dependencies ?? []).Select(x => $"<dependency>{x}</dependency>"))}
                     </package>");
             }
 
             // add minimal lib folder marker to resemble package layout
             zip.CreateEntry("lib/");
+
+            foreach (var (entry, source) in files ?? new Dictionary<string, string>())
+            {
+                zip.CreateEntryFromFile(source, entry);
+            }
 
             if (settings is not null || settingsEntry is not null)
             {

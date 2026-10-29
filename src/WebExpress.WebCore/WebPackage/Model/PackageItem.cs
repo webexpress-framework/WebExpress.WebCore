@@ -68,6 +68,12 @@ namespace WebExpress.WebCore.WebPackage.Model
         public IEnumerable<string> Dependencies { get; set; }
 
         /// <summary>
+        /// Gets or sets the names of the settings files the package ships, as they are deployed
+        /// to the settings directory of the server.
+        /// </summary>
+        public IEnumerable<string> Settings { get; set; } = [];
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         internal PackageItem()

@@ -26,6 +26,7 @@ namespace WebExpress.WebCore.WebPlugin
         private readonly IHttpServerContext _httpServerContext;
         private readonly PluginDictionary _dictionary = [];
         private readonly PluginDictionary _unfulfilledDependencies = [];
+        private readonly List<IPluginContext> _pendingBoots = [];
 
         /// <summary>
         /// An event that fires when an plugin is added.
@@ -66,14 +67,27 @@ namespace WebExpress.WebCore.WebPlugin
         /// <returns>A list of plugins created.</returns>
         internal void Register()
         {
+            Register([]);
+        }
+
+        /// <summary>
+        /// Loads and registers the plugins that are static, leaving out the assembly files an
+        /// administrator uninstalled - a file that could not be deleted yet, or one the host's
+        /// dependency manifest lists and that therefore has to stay, is not loaded at all.
+        /// </summary>
+        /// <param name="excludedFiles">The file names of the assemblies not to load.</param>
+        internal void Register(IEnumerable<string> excludedFiles)
+        {
             // the statically deployed plugins sit next to the host assembly. the working
             // directory is whatever the process happened to be started from - a service
             // launched from the system directory would find no plugin at all
             var path = AppContext.BaseDirectory;
             var assemblies = new List<Assembly>();
+            var excluded = new HashSet<string>(excludedFiles ?? [], StringComparer.OrdinalIgnoreCase);
 
             // create plugins
-            foreach (var assemblyFile in Directory.EnumerateFiles(path, "*.dll", SearchOption.TopDirectoryOnly))
+            foreach (var assemblyFile in Directory.EnumerateFiles(path, "*.dll", SearchOption.TopDirectoryOnly)
+                .Where(x => !excluded.Contains(Path.GetFileName(x))))
             {
                 try
                 {
@@ -156,6 +170,13 @@ namespace WebExpress.WebCore.WebPlugin
                 pluginContexts.AddRange(pluginContext);
             }
 
+            // nothing holds the load context of a file that yielded no plugin - a duplicate or no
+            // plugin at all - so it is released instead of keeping the assembly loaded for good
+            if (pluginContexts.Count == 0)
+            {
+                loadContext.Unload();
+            }
+
             Log();
 
             return pluginContexts;
@@ -164,10 +185,14 @@ namespace WebExpress.WebCore.WebPlugin
         /// <summary>
         /// Loads and registers the plugin from an assembly.
         /// </summary>
+        /// <remarks>
+        /// Also used to register a deactivated built-in plugin again: its assembly stays loaded in
+        /// the default context, so activating it creates a fresh plugin from the same assembly.
+        /// </remarks>
         /// <param name="assembly">The assembly where the plugin is located.</param>
         /// <param name="loadContext">The plugin load context for isolating and unloading the dependent libraries.</param>
         /// <returns>A collection of created plugin contexts.</returns>
-        private IEnumerable<IPluginContext> Register(Assembly assembly, PluginLoadContext loadContext = null)
+        internal IEnumerable<IPluginContext> Register(Assembly assembly, PluginLoadContext loadContext = null)
         {
             var plugins = new List<IPluginContext>();
 
@@ -194,10 +219,17 @@ namespace WebExpress.WebCore.WebPlugin
                         Settings = _httpServerContext?.Configuration?.GetPluginSettings(id)
                     };
 
-                    var hasUnfulfilledDependencies = HasUnfulfilledDependencies(id, dependencies.Select(x => new ComponentId(x)));
-
-                    if (!_dictionary.ContainsKey(id))
+                    if (IsRegistered(id))
                     {
+                        _httpServerContext?.Log?.Warning
+                        (
+                            I18N.Translate("webexpress.webcore:pluginmanager.duplicate", id)
+                        );
+                    }
+                    else
+                    {
+                        var hasUnfulfilledDependencies = HasUnfulfilledDependencies(id, dependencies.Select(x => new ComponentId(x)));
+
                         if (hasUnfulfilledDependencies)
                         {
                             _unfulfilledDependencies.Add(id, new PluginItem()
@@ -210,7 +242,7 @@ namespace WebExpress.WebCore.WebPlugin
                                 ApplicationTypes = [typeof(IApplication)]
                             });
                         }
-                        else if (!_dictionary.ContainsKey(id))
+                        else
                         {
                             _dictionary.Add(id, new PluginItem()
                             {
@@ -231,16 +263,9 @@ namespace WebExpress.WebCore.WebPlugin
 
                             CheckUnfulfilledDependencies();
                         }
-                    }
-                    else
-                    {
-                        _httpServerContext?.Log?.Warning
-                        (
-                            I18N.Translate("webexpress.webcore:pluginmanager.duplicate", id)
-                        );
-                    }
 
-                    plugins.Add(pluginContext);
+                        plugins.Add(pluginContext);
+                    }
                 }
 
                 foreach (var type in assembly
@@ -321,6 +346,19 @@ namespace WebExpress.WebCore.WebPlugin
                         Settings = _httpServerContext?.Configuration?.GetPluginSettings(id)
                     };
 
+                    // a second plugin with a taken id is refused before an instance of it exists;
+                    // handing its context out would let whoever unloads it remove the first one,
+                    // which is registered under the same id
+                    if (IsRegistered(id))
+                    {
+                        _httpServerContext?.Log?.Warning
+                        (
+                            I18N.Translate("webexpress.webcore:pluginmanager.duplicate", id)
+                        );
+
+                        break;
+                    }
+
                     hasUnfulfilledDependencies = HasUnfulfilledDependencies(id, dependencies.Select(x => new ComponentId(x)));
 
                     if (hasUnfulfilledDependencies)
@@ -331,10 +369,11 @@ namespace WebExpress.WebCore.WebPlugin
                             PluginClass = type,
                             PluginContext = pluginContext,
                             Plugin = ComponentActivator.CreateInstance<IPlugin, IPluginContext>(type, pluginContext, _httpServerContext, _componentHub),
-                            Dependencies = dependencies
+                            Dependencies = dependencies,
+                            ApplicationTypes = applicationTypes
                         });
                     }
-                    else if (!_dictionary.ContainsKey(id))
+                    else
                     {
                         _dictionary.Add(id, new PluginItem()
                         {
@@ -354,13 +393,6 @@ namespace WebExpress.WebCore.WebPlugin
                         OnAddPlugin(pluginContext);
 
                         CheckUnfulfilledDependencies();
-                    }
-                    else
-                    {
-                        _httpServerContext?.Log?.Warning
-                        (
-                            I18N.Translate("webexpress.webcore:pluginmanager.duplicate", id)
-                        );
                     }
 
                     plugins.Add(pluginContext);
@@ -395,6 +427,15 @@ namespace WebExpress.WebCore.WebPlugin
             // a plugin still waiting for its dependencies has an instance as well
             var pluginItem = _dictionary.GetValueOrDefault(pluginContext.PluginId)
                 ?? _unfulfilledDependencies.GetValueOrDefault(pluginContext.PluginId);
+
+            // the id is only the key; a context that is not the registered one belongs to a
+            // plugin that was never admitted, and removing by its id would remove another plugin
+            if (pluginItem is not null && !ReferenceEquals(pluginItem.PluginContext, pluginContext))
+            {
+                return;
+            }
+
+            _pendingBoots.Remove(pluginContext);
 
             // a still running Run() sees the cancellation before anything is torn down
             Cancel(pluginItem);
@@ -485,6 +526,11 @@ namespace WebExpress.WebCore.WebPlugin
 
                         OnAddPlugin(unfulfilledDependencies.Value.PluginContext);
 
+                        if (unfulfilledDependencies.Value.BootRequested)
+                        {
+                            _pendingBoots.Add(unfulfilledDependencies.Value.PluginContext);
+                        }
+
                         _httpServerContext?.Log?.Debug
                         (
                             I18N.Translate
@@ -496,6 +542,55 @@ namespace WebExpress.WebCore.WebPlugin
                     }
                 }
             } while (fulfilledDependencies);
+        }
+
+        /// <summary>
+        /// Checks whether a plugin id is taken, by a running plugin or by one that still waits
+        /// for its dependencies.
+        /// </summary>
+        /// <param name="id">The id of the plugin.</param>
+        /// <returns>True when the id is taken.</returns>
+        private bool IsRegistered(IComponentId id)
+        {
+            return _dictionary.ContainsKey(id) || _unfulfilledDependencies.ContainsKey(id);
+        }
+
+        /// <summary>
+        /// Returns the plugins that were asked to boot while they waited for their dependencies
+        /// and became ready since, and forgets them.
+        /// </summary>
+        /// <remarks>
+        /// The plugin manager cannot boot them itself: booting a plugin also boots its
+        /// applications and components, which is the component hub's business. The hub drains
+        /// this list after every boot, so a plugin whose dependency arrives with a later package
+        /// starts right after that package.
+        /// </remarks>
+        /// <returns>The plugins to boot now.</returns>
+        internal IReadOnlyList<IPluginContext> TakePendingBoots()
+        {
+            var pending = _pendingBoots.ToList();
+
+            _pendingBoots.Clear();
+
+            return pending;
+        }
+
+        /// <summary>
+        /// Returns the ids of the plugins a plugin declares as its dependencies.
+        /// </summary>
+        /// <param name="pluginContext">The context of the plugin.</param>
+        /// <returns>The dependency ids, empty when the plugin is unknown.</returns>
+        internal IEnumerable<string> GetDependencies(IPluginContext pluginContext)
+        {
+            if (pluginContext?.PluginId is null)
+            {
+                return [];
+            }
+
+            var pluginItem = _dictionary.GetValueOrDefault(pluginContext.PluginId)
+                ?? _unfulfilledDependencies.GetValueOrDefault(pluginContext.PluginId);
+
+            return pluginItem?.Dependencies?.Where(x => !string.IsNullOrWhiteSpace(x)).ToList() ?? [];
         }
 
         /// <summary>
@@ -658,6 +753,16 @@ namespace WebExpress.WebCore.WebPlugin
         /// <param name="pluginContext">The context of the plugin to run.</param>
         internal void Boot(IPluginContext pluginContext)
         {
+            // booted once its dependencies arrive, see TakePendingBoots
+            if (pluginContext?.PluginId is not null
+                && _unfulfilledDependencies.TryGetValue(pluginContext.PluginId, out var waiting)
+                && ReferenceEquals(waiting.PluginContext, pluginContext))
+            {
+                waiting.BootRequested = true;
+
+                return;
+            }
+
             var pluginItem = GetPluginItem(pluginContext);
             var token = pluginItem?.CancellationTokenSource.Token;
 

@@ -513,6 +513,12 @@ namespace WebExpress.WebCore.WebComponent
             {
                 component.Boot(pluginContext);
             }
+
+            // plugins that waited for this one are ready now and were not booted with their package
+            foreach (var pending in _pluginManager.TakePendingBoots())
+            {
+                BootComponent(pending);
+            }
         }
 
         /// <summary>
