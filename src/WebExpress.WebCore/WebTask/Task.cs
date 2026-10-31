@@ -14,6 +14,11 @@ namespace WebExpress.WebCore.WebTask
         private string _message;
 
         /// <summary>
+        /// Gets or sets the host lifetime assigned by the task manager before execution.
+        /// </summary>
+        internal ServerLifetime Lifetime { get; set; } = new(null);
+
+        /// <summary>
         /// Event is triggered when the task is executed.
         /// </summary>
         public event EventHandler<TaskEventArgs> Process;
@@ -136,8 +141,13 @@ namespace WebExpress.WebCore.WebTask
         /// </summary>
         public void Run()
         {
-            System.Threading.Tasks.Task.Factory.StartNew(() =>
+            if (!Lifetime.TryRun(() =>
             {
+                if (TokenSource.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 State = TaskState.Run;
 
                 Progress = 0;
@@ -150,11 +160,11 @@ namespace WebExpress.WebCore.WebTask
 
                 OnFinish();
 
-                var cts = new CancellationTokenSource();
-                _ = ScheduleRemovalAsync(cts.Token);
-
-
-            }, TokenSource.Token);
+                _ = ScheduleRemovalAsync(Lifetime.Stopping);
+            }))
+            {
+                State = TaskState.Canceled;
+            }
         }
 
         /// <summary>

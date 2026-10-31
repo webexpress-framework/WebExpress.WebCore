@@ -99,9 +99,15 @@ namespace WebExpress.WebCore.WebEvent.Model
 
             if (handlerType is not null)
             {
-                var genericArgument = handlerType.GetGenericArguments().First();
+                var genericArgument = handlerType.GetGenericArguments().FirstOrDefault();
+
+                if (genericArgument is null)
+                {
+                    return;
+                }
+
                 var method = handlerType.GetMethod("Process");
-                method.Invoke(_instance, [sender, eventArgument]);
+                method?.Invoke(_instance, [sender, eventArgument]);
             }
         }
 

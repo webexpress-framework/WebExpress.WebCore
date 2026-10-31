@@ -20,11 +20,11 @@ namespace WebExpress.WebCore.WebApplication.Model
             .Select(x => x.ApplicationContext);
 
         /// <summary>
-        /// Adds a application item to the dictionary.
+        /// Adds an application item to the dictionary.
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationItem">The application item.</param>
-        /// <returns>True if the application item was added successfully, false if an element with the same status code already exists.</returns>
+        /// <returns>True if the application item was added successfully, false if an element with the same key already exists.</returns>
         public bool AddApplication(IPluginContext pluginContext, ApplicationItem applicationItem)
         {
             if (!_dict.TryGetValue(pluginContext, out var applicationDict))
@@ -45,14 +45,32 @@ namespace WebExpress.WebCore.WebApplication.Model
         /// Removes applications from the dictionary.
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
-        /// <returns>An IEnumerable of application contexts that were removed.</returns>
-        public IEnumerable<IApplicationContext> RemoveApplications(IPluginContext pluginContext)
+        /// <returns>The items of the removed applications, so the caller can raise removal events and release the instances.</returns>
+        public IEnumerable<ApplicationItem> RemoveApplications(IPluginContext pluginContext)
         {
-            var applicationContexts = GetApplications(pluginContext);
+            // removal events need the contexts after the registry entry has been deleted
+            var applicationItems = GetApplicationItems(pluginContext).ToArray();
 
             _dict.Remove(pluginContext);
 
-            return applicationContexts;
+            return applicationItems;
+        }
+
+        /// <summary>
+        /// Returns the item carrying a given application context.
+        /// </summary>
+        /// <param name="applicationContext">The application context.</param>
+        /// <returns>The item, or null when the context belongs to no registered application.</returns>
+        public ApplicationItem GetApplicationItem(IApplicationContext applicationContext)
+        {
+            if (applicationContext is null)
+            {
+                return null;
+            }
+
+            return _dict
+                .Values.SelectMany(x => x.Values)
+                .FirstOrDefault(x => x.ApplicationContext == applicationContext);
         }
 
         /// <summary>

@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents a section of a document.
+    /// Renders an HTML <c>&lt;section&gt;</c> element, a thematic grouping of content that forms a
+    /// standalone part of the page outline, typically introduced by a heading.
     /// </summary>
     public class HtmlElementSectionSection : HtmlElement, IHtmlElementSection
     {

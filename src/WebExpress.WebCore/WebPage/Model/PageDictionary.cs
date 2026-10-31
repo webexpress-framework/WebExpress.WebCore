@@ -29,7 +29,7 @@ namespace WebExpress.WebCore.WebPage.Model
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContext">The application context.</param>
         /// <param name="pageItem">The page item.</param>
-        /// <returns>True if the page item was added successfully, false if an element with the same status code already exists.</returns>
+        /// <returns>True if the page item was added successfully, false if an element with the same key already exists.</returns>
         public bool AddPageItem(IPluginContext pluginContext, IApplicationContext applicationContext, PageItem pageItem)
         {
             var type = pageItem.PageClass;

@@ -49,7 +49,7 @@ namespace WebExpress.WebCore.WebHtml
                 {
                     Href = x.Url,
                     Rel = "icon",
-                    Type = x.Mediatype != TypeFavicon.Default ? x.GetMediatyp() : ""
+                    Type = x.Mediatype != TypeFavicon.Default ? x.GetMediaType() : ""
                 });
             }
         }

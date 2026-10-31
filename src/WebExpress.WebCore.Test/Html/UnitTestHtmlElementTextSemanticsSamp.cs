@@ -1,0 +1,22 @@
+﻿using WebExpress.WebCore.WebHtml;
+
+namespace WebExpress.WebCore.Test.Html
+{
+    /// <summary>
+    /// Unit tests for the HtmlElementTextSemanticsSamp class.
+    /// </summary>
+    public class UnitTestHtmlElementTextSemanticsSamp
+    {
+        /// <summary>
+        /// Tests an empty tag.
+        /// </summary>
+        [Fact]
+        public void Empty()
+        {
+            // act
+            var html = new HtmlElementTextSemanticsSamp();
+
+            Assert.Equal(@"<samp></samp>", html.Trim());
+        }
+    }
+}

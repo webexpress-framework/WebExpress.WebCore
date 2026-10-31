@@ -18,7 +18,7 @@ namespace WebExpress.WebCore.WebHtml
         /// </summary>
         public int Width
         {
-            get => Convert.ToInt32(GetAttribute("width"));
+            get => int.TryParse(GetAttribute("width"), out var width) ? width : 0;
             set => SetAttribute("width", value.ToString());
         }
 
@@ -27,7 +27,7 @@ namespace WebExpress.WebCore.WebHtml
         /// </summary>
         public int Height
         {
-            get => Convert.ToInt32(GetAttribute("height"));
+            get => int.TryParse(GetAttribute("height"), out var height) ? height : 0;
             set => SetAttribute("height", value.ToString());
         }
 

@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the component manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestComponentManager
     {
         /// <summary>

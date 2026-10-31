@@ -18,6 +18,7 @@ using WebExpress.WebCore.WebIdentity;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPlugin;
 using WebExpress.WebCore.WebSocket.Model;
+using WebExpress.WebCore.WebStatusPage;
 
 namespace WebExpress.WebCore.WebSocket
 {
@@ -67,7 +68,16 @@ namespace WebExpress.WebCore.WebSocket
                 EndpointResolver = (type, applicationContext) => applicationContext is not null
                     ? GetSockets(type, applicationContext)
                     : GetSockets(type),
-                EndpointsResolver = () => Sockets
+                EndpointsResolver = () => Sockets,
+                // a handshake is taken over before the endpoint dispatch, so only a plain http
+                // request reaches this point; it is told to upgrade instead of being answered
+                HandleRequest = (request, endpointContext) =>
+                {
+                    var response = new ResponseUpgradeRequired(new StatusMessage("This endpoint only accepts WebSocket connections."));
+                    response.Header.Upgrade = "websocket";
+
+                    return response;
+                }
             };
 
             AddSocket += (sender, e) => endpointRegistration.AddEndpoint?.Invoke(sender, e);
@@ -130,13 +140,16 @@ namespace WebExpress.WebCore.WebSocket
 
             // create application socket instance
             var instance = CreateSocketInstance(connectionId, socketContext, httpContext.Request);
-            var socketConnection = new SocketConnection(networkStream, socketContext);
-
-            await instance.OnConnectedAsync(socketConnection);
-
-            await socketConnection.ReceiveLoopAsync();
-
-            instance.Dispose();
+            using var socketConnection = new SocketConnection(networkStream, socketContext);
+            try
+            {
+                await instance.OnConnectedAsync(socketConnection);
+                await socketConnection.ReceiveLoopAsync(_httpServerContext.Lifetime.Stopping);
+            }
+            finally
+            {
+                instance.Dispose();
+            }
         }
 
         /// <summary>

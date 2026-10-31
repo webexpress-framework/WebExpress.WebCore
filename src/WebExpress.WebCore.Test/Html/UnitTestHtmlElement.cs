@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for the HtmlElement class.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestHtmlElement
     {
         /// <summary>
@@ -221,6 +220,56 @@ namespace WebExpress.WebCore.Test.Html
             // validation
             Assert.Contains("<b></b>", div.ToString());
             Assert.Contains("<i></i>", div.ToString());
+        }
+
+        /// <summary>
+        /// Tests that formatting inside running text is written without a blank around it,
+        /// so a word formatted in part stays one word, while block elements keep their line.
+        /// </summary>
+        [Fact]
+        public void BreakNeverTouchesText()
+        {
+            // arrange
+            var p = new HtmlElementTextContentP
+            (
+                new HtmlText("x"),
+                new HtmlElementTextSemanticsStrong(new HtmlText("b"), new HtmlElementTextSemanticsEm(new HtmlText("i"))),
+                new HtmlText("y "),
+                new HtmlElementTextSemanticsA(new HtmlText("link")) { Href = "/l" },
+                new HtmlText(", z"),
+                new HtmlElementTextSemanticsStrong(new HtmlElementTextSemanticsEm(new HtmlText("w"))),
+                new HtmlText(".")
+            );
+            var div = new HtmlElementTextContentDiv(p);
+
+            // act
+            var html = div.ToString();
+
+            // validation
+            Assert.Contains(@"<p>x<strong>b<em>i</em></strong>y ", html);
+            Assert.Contains(@"link</a>, z<strong><em>w</em></strong>.", html);
+            Assert.Matches(@"<div>\r?\n\s*<p>", html);
+        }
+
+        /// <summary>
+        /// Tests that two neighbouring elements keep the break between them, which renders as
+        /// the blank that controls rely on between an icon and its label.
+        /// </summary>
+        [Fact]
+        public void BreakBetweenElementsIsKept()
+        {
+            // arrange
+            var link = new HtmlElementTextSemanticsA
+            (
+                new HtmlElementTextSemanticsI() { Class = "icon" },
+                new HtmlElementTextSemanticsSpan(new HtmlText("Label"))
+            );
+
+            // act
+            var html = link.ToString();
+
+            // validation
+            Assert.Matches(@"<a><i class=""icon""></i>\r?\n\s*<span>Label</span></a>", html);
         }
 
     }

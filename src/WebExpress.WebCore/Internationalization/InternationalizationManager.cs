@@ -11,7 +11,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.Internationalization
 {
     /// <summary>
-    /// Internationalization
+    /// Central registry for translations (internationalization, i18n). It collects the language
+    /// files a plugin ships, and returns the text for a given key in the requested language so the
+    /// UI can be shown in different languages.
     /// </summary>
     public sealed class InternationalizationManager : IInternationalizationManager, IComponentManagerPlugin, ISystemComponent
     {
@@ -25,7 +27,12 @@ namespace WebExpress.WebCore.Internationalization
         /// <summary>
         /// Gets the directory by listing the internationalization key-value pairs.
         /// </summary>
-        private static InternationalizationDictionary Dictionary { get; } = [];
+        /// <remarks>
+        /// The directory is shared by every hub of the process and is filled while it is read - a
+        /// plugin loaded at runtime registers its texts while requests translate - so it has to
+        /// tolerate concurrent writers and readers.
+        /// </remarks>
+        private static InternationalizationDictionary Dictionary { get; } = new();
 
         /// <summary>
         /// Gets or sets the reference to the context of the host.
@@ -96,19 +103,15 @@ namespace WebExpress.WebCore.Internationalization
         {
             var assemblyName = assembly.GetName().Name.ToLower();
             var name = assemblyName + ".internationalization.";
-            var resources = assembly.GetManifestResourceNames().Where(x => x.Contains(name, System.StringComparison.CurrentCultureIgnoreCase));
+            // resource names are identifiers, not text: a culture-aware comparison would be slow
+            // over the thousands of names a plugin embeds, and wrong under e.g. a turkish culture
+            var resources = assembly.GetManifestResourceNames().Where(x => x.Contains(name, System.StringComparison.OrdinalIgnoreCase));
 
             foreach (var languageResource in resources)
             {
                 var language = languageResource.Split('.').LastOrDefault()?.ToLower();
 
-                if (!Dictionary.TryGetValue(language, out InternationalizationItem value))
-                {
-                    value = ([]);
-                    Dictionary.Add(language, value);
-                }
-
-                var dictItem = value;
+                var dictItem = Dictionary.GetOrAdd(language, _ => new());
 
                 using var stream = assembly.GetManifestResourceStream(languageResource);
                 using var streamReader = new StreamReader(stream);
@@ -120,10 +123,7 @@ namespace WebExpress.WebCore.Internationalization
                         var split = line.Split('=');
                         var key = pluginId?.ToLower() + ":" + split[0]?.Trim().ToLower();
 
-                        if (!dictItem.ContainsKey(key))
-                        {
-                            dictItem.Add(key, string.Join("=", split.Skip(1)));
-                        }
+                        dictItem.TryAdd(key, string.Join("=", split.Skip(1)));
                     }
                 }
             }
@@ -148,7 +148,7 @@ namespace WebExpress.WebCore.Internationalization
 
                 foreach (var key in keysToRemove)
                 {
-                    dictionary.Remove(key);
+                    dictionary.TryRemove(key, out _);
                 }
             }
 

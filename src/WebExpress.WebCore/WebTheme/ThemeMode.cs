@@ -1,8 +1,9 @@
 ﻿namespace WebExpress.WebCore.WebTheme
 {
-    /// <summary>  
-    /// Specifies the theme mode.  
-    /// </summary>  
+    /// <summary>
+    /// The visual appearance a theme is rendered in — light or dark — letting the UI switch between
+    /// a bright and a dark colour scheme.
+    /// </summary>
     public enum ThemeMode
     {
         /// <summary>  

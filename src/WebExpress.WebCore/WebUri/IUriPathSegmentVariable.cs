@@ -4,7 +4,9 @@ using WebExpress.WebCore.WebPage;
 namespace WebExpress.WebCore.WebUri
 {
     /// <summary>
-    /// The path segment of a uri.
+    /// A single part of a URI path (the pieces between the slashes) that is a placeholder rather than
+    /// a fixed literal, such as <c>:id</c> in <c>/user/:id</c>. It captures the actual value from the
+    /// request under a variable name and can restrict which values are accepted via a constraint expression.
     /// </summary>
     public interface IUriPathSegmentVariable : IUriPathSegment
     {

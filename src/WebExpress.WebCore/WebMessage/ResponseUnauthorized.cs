@@ -24,9 +24,18 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseUnauthorized(StatusMessage message)
         {
-            Reason = "OK";
+            Reason = "Unauthorized";
 
             Header.WWWAuthenticate = true;
+
+            // callers such as the json authentication endpoint and the metrics endpoint supply their own
+            // body and content type, so only an explicit message produces an html body
+            if (message?.Message is string content)
+            {
+                Header.ContentType = "text/html";
+                Header.ContentLength = content.Length;
+                Content = content;
+            }
         }
     }
 }

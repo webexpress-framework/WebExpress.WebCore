@@ -12,7 +12,9 @@ using WebExpress.WebCore.WebUri;
 namespace WebExpress.WebCore.WebRestApi
 {
     /// <summary>
-    /// Represents the context of a rest api resource.
+    /// Read-only descriptor of a registered REST API endpoint, handed to components so they can
+    /// learn about the API and the application and plugin it belongs to without referencing the
+    /// endpoint instance itself.
     /// </summary>
     public class RestApiContext : IRestApiContext
     {

@@ -15,10 +15,13 @@ namespace WebExpress.WebCore.WebPlugin.Model
         private AssemblyDependencyResolver Resolver { get; set; }
 
         /// <summary>
-        /// Initializes a new instance of the class.
+        /// Initializes a new instance of the class. The context is collectible, because a plugin
+        /// removed at runtime unloads it; a non-collectible context refuses to unload and would
+        /// keep the plugin's assemblies in the process until it ends.
         /// </summary>
         /// <param name="pluginPath">The base path of the plugin.</param>
         public PluginLoadContext(string pluginPath)
+            : base(isCollectible: true)
         {
             Resolver = new AssemblyDependencyResolver(pluginPath);
         }

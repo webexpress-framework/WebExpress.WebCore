@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebStatusPage;
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// Represents a response for a bad request (HTTP 400). See RFC 2616 Section 6
+    /// HTTP 400 (Bad Request): sent when the server cannot process the request because it is
+    /// malformed or invalid (for example, a broken body or missing required data).
     /// </summary>
     [StatusCode(400)]
     public class ResponseBadRequest : Response

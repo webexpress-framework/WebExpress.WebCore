@@ -5,7 +5,10 @@ using System.Net;
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// Represents the context for an HTTP exception, inheriting from <see cref="HttpContext"/>.
+    /// A fallback <see cref="HttpContext"/> used when a normal request context could not be built
+    /// (for example, the request was malformed). It still carries the basic connection details and
+    /// additionally holds the <see cref="Exception"/> that caused the failure, so an error response
+    /// can be produced.
     /// </summary>
     public class HttpExceptionContext : HttpContext
     {

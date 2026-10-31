@@ -7,7 +7,9 @@ using WebExpress.WebCore.WebPlugin;
 namespace WebExpress.WebCore.WebIdentity.Model
 {
     /// <summary>
-    /// The identity policy directory.
+    /// Internal lookup that stores the registered identity policies grouped first by plugin and then
+    /// by application, so the manager can quickly find, add, or remove the policies that apply to a
+    /// given application.
     /// </summary>
     internal class IdentityPolicyDictionary : Dictionary<IPluginContext, Dictionary<IApplicationContext, IList<IdentityPolicyItem>>>
     {

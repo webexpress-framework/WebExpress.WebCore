@@ -30,7 +30,7 @@ namespace WebExpress.WebCore.WebSocket.Model
         /// <param name="applicationContext">The application context.</param>
         /// <param name="socketItem">The socket item.</param>
         /// <returns>
-        /// True if the socket item was added successfully, false if an element with the same status code already exists.
+        /// True if the socket item was added successfully, false if an element with the same key already exists.
         /// </returns>
         public bool AddSocketItem(IPluginContext pluginContext, IApplicationContext applicationContext, SocketItem socketItem)
         {

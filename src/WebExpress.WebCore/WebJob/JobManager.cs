@@ -7,17 +7,32 @@ using System.Threading.Tasks;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
+using WebExpress.WebCore.WebCluster;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebJob.Model;
 using WebExpress.WebCore.WebPlugin;
 
 namespace WebExpress.WebCore.WebJob
 {
+    /// <summary>
+    /// Central registry and scheduler for jobs — recurring background tasks that run on a schedule
+    /// (similar to cron). It discovers the jobs a plugin provides, keeps track of them, and runs
+    /// them at their due times.
+    /// </summary>
     /// <remarks>
     /// This class manages the processing of cyclic jobs. It provides methods to register, remove, and execute jobs.
     /// </remarks>
     public sealed class JobManager : IJobManager, ISystemComponent, IExecutableElements
     {
+        /// <summary>
+        /// The scope job claims are kept under in the cluster store.
+        /// </summary>
+        internal const string ClaimScope = "job";
+
+        // a claim must outlive the clock skew between instances; an hour is far beyond any skew
+        // a cluster would tolerate and still keeps the claims few
+        private static readonly TimeSpan ClaimLifetime = TimeSpan.FromHours(1);
+
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly ScheduleDictionary _staticScheduleDictionary = [];
@@ -125,14 +140,34 @@ namespace WebExpress.WebCore.WebJob
                 var day = "*";
                 var month = "*";
                 var weekday = "*";
+                var name = default(string);
+                var description = default(string);
+                var scope = JobScope.Cluster;
 
-                foreach (var customAttribute in job.CustomAttributes.Where(x => x.AttributeType == typeof(JobAttribute)))
+                foreach (var customAttribute in job.CustomAttributes
+                    .Where(x => x.AttributeType.GetInterfaces().Contains(typeof(IJobAttribute))))
                 {
-                    minute = customAttribute.ConstructorArguments.FirstOrDefault().Value?.ToString();
-                    hour = customAttribute.ConstructorArguments.Skip(1).FirstOrDefault().Value?.ToString();
-                    day = customAttribute.ConstructorArguments.Skip(2).FirstOrDefault().Value?.ToString();
-                    month = customAttribute.ConstructorArguments.Skip(3).FirstOrDefault().Value?.ToString();
-                    weekday = customAttribute.ConstructorArguments.Skip(4).FirstOrDefault().Value?.ToString();
+                    if (customAttribute.AttributeType == typeof(JobAttribute))
+                    {
+                        minute = customAttribute.ConstructorArguments.FirstOrDefault().Value?.ToString();
+                        hour = customAttribute.ConstructorArguments.Skip(1).FirstOrDefault().Value?.ToString();
+                        day = customAttribute.ConstructorArguments.Skip(2).FirstOrDefault().Value?.ToString();
+                        month = customAttribute.ConstructorArguments.Skip(3).FirstOrDefault().Value?.ToString();
+                        weekday = customAttribute.ConstructorArguments.Skip(4).FirstOrDefault().Value?.ToString();
+                    }
+                    else if (customAttribute.AttributeType == typeof(NameAttribute))
+                    {
+                        name = customAttribute.ConstructorArguments.FirstOrDefault().Value?.ToString();
+                    }
+                    else if (customAttribute.AttributeType == typeof(DescriptionAttribute))
+                    {
+                        description = customAttribute.ConstructorArguments.FirstOrDefault().Value?.ToString();
+                    }
+                    else if (customAttribute.AttributeType == typeof(JobScopeAttribute)
+                        && customAttribute.ConstructorArguments.FirstOrDefault().Value is int value)
+                    {
+                        scope = (JobScope)value;
+                    }
                 }
 
                 // assign the job to existing applications
@@ -141,9 +176,12 @@ namespace WebExpress.WebCore.WebJob
                     var jobContext = new JobContext()
                     {
                         JobId = new ComponentId(job.FullName),
+                        JobName = name,
+                        Description = description,
                         PluginContext = pluginContext,
                         ApplicationContext = applicationContext,
                         Cron = new Cron(_httpServerContext, minute, hour, day, month, weekday),
+                        Scope = scope
                     };
 
                     if (job != default)
@@ -209,15 +247,18 @@ namespace WebExpress.WebCore.WebJob
             // the plugin has not been registered in the manager
             if (_staticScheduleDictionary.TryGetValue(pluginContext, out var value))
             {
-                foreach (var scheduleItem in value.Values
+                var scheduleItems = value.Values
                     .SelectMany(x => x.Values)
-                    .SelectMany(x => x))
-                {
-                    OnRemoveJob(scheduleItem.JobContext);
-                    scheduleItem.Dispose();
-                }
+                    .SelectMany(x => x)
+                    .ToList();
 
                 _staticScheduleDictionary.Remove(pluginContext);
+
+                foreach (var scheduleItem in scheduleItems)
+                {
+                    OnRemoveJob(scheduleItem.JobContext);
+                    Release(scheduleItem);
+                }
             }
         }
 
@@ -232,18 +273,20 @@ namespace WebExpress.WebCore.WebJob
                 return;
             }
 
+            var scheduleItems = new List<ScheduleItem>();
+
             foreach (var pluginDict in _staticScheduleDictionary.Values)
             {
-                foreach (var appDict in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
+                if (pluginDict.Remove(applicationContext, out var appDict))
                 {
-                    foreach (var scheduleItem in appDict.Values.SelectMany(x => x))
-                    {
-                        OnRemoveJob(scheduleItem.JobContext);
-                        scheduleItem.Dispose();
-                    }
+                    scheduleItems.AddRange(appDict.Values.SelectMany(x => x));
                 }
+            }
 
-                pluginDict.Remove(applicationContext);
+            foreach (var scheduleItem in scheduleItems)
+            {
+                OnRemoveJob(scheduleItem.JobContext);
+                Release(scheduleItem);
             }
         }
 
@@ -253,7 +296,35 @@ namespace WebExpress.WebCore.WebJob
         /// <param name="job">The job to remove.</param>
         public void Remove(IJob job)
         {
-            _dynamicScheduleList.RemoveAll(x => x == job);
+            var scheduleItems = _dynamicScheduleList
+                .Where(x => x.Instance == job)
+                .ToList();
+
+            _dynamicScheduleList.RemoveAll(scheduleItems.Contains);
+
+            foreach (var scheduleItem in scheduleItems)
+            {
+                OnRemoveJob(scheduleItem.JobContext);
+                Release(scheduleItem);
+            }
+        }
+
+        /// <summary>
+        /// Disposes a removed job. A job that fails to release its resources must not keep
+        /// the remaining jobs - or the other managers listening to the same plugin removal -
+        /// from being cleaned up.
+        /// </summary>
+        /// <param name="scheduleItem">The schedule entry of the removed job.</param>
+        private void Release(ScheduleItem scheduleItem)
+        {
+            try
+            {
+                scheduleItem.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _httpServerContext?.Log?.Exception(ex);
+            }
         }
 
         /// <summary>
@@ -319,17 +390,18 @@ namespace WebExpress.WebCore.WebJob
         /// </summary>
         internal void Execute()
         {
-            Task.Factory.StartNew(() =>
+            _httpServerContext.Lifetime.TryRun(async stopping =>
             {
-                while (!_tokenSource.IsCancellationRequested)
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stopping, _tokenSource.Token);
+                while (!linked.IsCancellationRequested)
                 {
                     Update();
 
-                    var secendsLeft = 60 - DateTime.Now.Second;
-                    Thread.Sleep(secendsLeft * 1000);
+                    var secondsLeft = 60 - DateTime.Now.Second;
+                    await Task.Delay(TimeSpan.FromSeconds(secondsLeft), linked.Token).ConfigureAwait(false);
                 }
 
-            }, _tokenSource.Token);
+            });
         }
 
         /// <summary>
@@ -345,7 +417,7 @@ namespace WebExpress.WebCore.WebJob
                     .SelectMany(x => x.Value)
                     .Union(_dynamicScheduleList.Select(x => x)))
                 {
-                    if (scheduleItemValue.JobContext.Cron.Matching(_clock))
+                    if (scheduleItemValue.JobContext.Cron.Matching(_clock) && Claim(scheduleItemValue.JobContext, _clock))
                     {
                         _httpServerContext?.Log?.Debug
                         (
@@ -356,33 +428,63 @@ namespace WebExpress.WebCore.WebJob
                             )
                         );
 
-                        Task.Factory.StartNew(() =>
+                        _httpServerContext.Lifetime.TryRun(() =>
                         {
-                            scheduleItemValue.Instance?.Process();
-                        }, _tokenSource.Token);
-                    }
-                }
+                            // the job may have been removed between scheduling and running
+                            if (scheduleItemValue.IsDisposed)
+                            {
+                                return;
+                            }
 
-                foreach (var scheduleItemValue in _dynamicScheduleList)
-                {
-                    if (scheduleItemValue.JobContext.Cron.Matching(_clock))
-                    {
-                        _httpServerContext?.Log?.Debug
-                        (
-                            I18N.Translate
-                            (
-                                "webexpress.webcore:jobmanager.job.process",
-                                scheduleItemValue.JobContext.JobId
-                            )
-                        );
-
-                        Task.Factory.StartNew(() =>
-                        {
                             scheduleItemValue.Instance?.Process();
-                        }, _tokenSource.Token);
+                        });
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Claims a due run of a job for this instance. Every instance evaluates the same cron
+        /// expression at the same minute; the atomic add in the shared store lets exactly one of
+        /// them win, so a cluster runs the job once instead of once per instance.
+        /// </summary>
+        /// <param name="jobContext">The job that is due.</param>
+        /// <param name="clock">The minute the job is due at.</param>
+        /// <returns>True when this instance runs the job.</returns>
+        internal bool Claim(IJobContext jobContext, Clock clock)
+        {
+            var cluster = _componentHub?.ClusterManager;
+
+            if (jobContext.Scope == JobScope.Node || cluster?.Store is not { IsShared: true } store)
+            {
+                return true;
+            }
+
+            // utc, so instances whose containers run in different time zones name the same run alike
+            var key = string.Join("|", jobContext.ApplicationContext?.ApplicationId, jobContext.JobId,
+                clock.Moment.ToUniversalTime().ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture));
+
+            try
+            {
+                if (store.TryAdd(ClaimScope, key, System.Text.Encoding.UTF8.GetBytes(cluster.NodeId), ClaimLifetime))
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                // without the store no instance can claim; skipping one run beats running it everywhere
+                _httpServerContext?.Log?.Exception(ex);
+
+                return false;
+            }
+
+            _httpServerContext?.Log?.Debug
+            (
+                I18N.Translate("webexpress.webcore:jobmanager.job.claimed", jobContext.JobId)
+            );
+
+            return false;
         }
 
         /// <summary>
@@ -412,6 +514,15 @@ namespace WebExpress.WebCore.WebJob
             _componentHub?.ApplicationManager.RemoveApplication -= OnRemoveApplication;
 
             _tokenSource.Cancel();
+
+            foreach (var item in _staticScheduleDictionary.Values.SelectMany(x => x.Values)
+                .SelectMany(x => x.Values).SelectMany(x => x).Concat(_dynamicScheduleList).Distinct())
+            {
+                Release(item);
+            }
+
+            _staticScheduleDictionary.Clear();
+            _dynamicScheduleList.Clear();
         }
     }
 }

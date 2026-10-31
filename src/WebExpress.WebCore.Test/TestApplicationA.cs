@@ -17,6 +17,12 @@ namespace WebExpress.WebCore.Test
     public sealed class TestApplicationA : IApplication
     {
         /// <summary>
+        /// Determines whether the application has been released, so a test can tell that
+        /// removing its plugin disposes this very instance.
+        /// </summary>
+        public bool IsDisposed { get; private set; }
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         /// <param name="applicationContext">The application context, for testing the injection.</param>
@@ -41,6 +47,7 @@ namespace WebExpress.WebCore.Test
         /// </summary>
         public void Dispose()
         {
+            IsDisposed = true;
         }
     }
 }

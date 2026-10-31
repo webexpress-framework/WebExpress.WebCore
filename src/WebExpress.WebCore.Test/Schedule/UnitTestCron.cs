@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Schedule
     /// <summary>
     /// Test the cron job of the scheduler.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestCron
     {
         /// <summary>

@@ -3,7 +3,8 @@
 namespace WebExpress.WebCore.WebAttribute
 {
     /// <summary>
-    /// Indicates that a segment is hidden.
+    /// Applied to an endpoint class to mark its URI path segment as hidden, so it is left out of
+    /// generated navigation such as menus and breadcrumbs while the endpoint itself stays reachable.
     /// </summary>
     /// <remarks>
     /// This attribute can be used to determine if the segment should not be displayed in user

@@ -4,7 +4,11 @@ using WebExpress.WebCore.WebAttribute;
 namespace WebExpress.WebCore.WebMessage
 {
     /// <summary>
-    /// Represents a response according to RFC 2616 Section 6.
+    /// Common base class for the message a server sends back to the client (see RFC 2616).
+    /// It holds the response header fields, the content (body), and the reason phrase. The numeric
+    /// HTTP status code is taken from the <c>StatusCode</c> attribute on each concrete response
+    /// type, so subclasses such as <see cref="ResponseOK"/> or <see cref="ResponseNotFound"/> only
+    /// need to declare their status and fill in the content.
     /// </summary>
     public abstract class Response : IResponse
     {

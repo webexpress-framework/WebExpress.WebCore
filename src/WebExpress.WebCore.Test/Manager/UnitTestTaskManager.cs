@@ -6,7 +6,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the task manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestTaskManager
     {
         /// <summary>

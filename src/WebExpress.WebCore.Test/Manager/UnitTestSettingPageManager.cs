@@ -8,7 +8,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the setting page manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestSettingPageManager
     {
         /// <summary>

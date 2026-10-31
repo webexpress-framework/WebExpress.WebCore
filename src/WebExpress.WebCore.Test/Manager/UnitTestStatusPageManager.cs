@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Manager
     /// <summary>
     /// Test the status page manager.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestStatusPageManager
     {
         /// <summary>

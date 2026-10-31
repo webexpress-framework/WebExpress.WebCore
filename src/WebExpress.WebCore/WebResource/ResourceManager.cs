@@ -82,7 +82,7 @@ namespace WebExpress.WebCore.WebResource
                 EndpointResolver = (type, applicationContext) =>
                 {
                     // return appropriate endpoints based on applicationContext
-                    return applicationContext is not null ? GetResorces(type, applicationContext) : GetResorces(type);
+                    return applicationContext is not null ? GetResources(type, applicationContext) : GetResources(type);
                 },
                 EndpointsResolver = () =>
                 {
@@ -371,7 +371,7 @@ namespace WebExpress.WebCore.WebResource
         /// </summary>
         /// <param name="pluginContext">A context of a plugin whose resources are to be registered.</param>
         /// <returns>An enumeration of resource contexts.</returns>
-        public IEnumerable<IResourceContext> GetResorces(IPluginContext pluginContext)
+        public IEnumerable<IResourceContext> GetResources(IPluginContext pluginContext)
         {
             lock (_guard)
             {
@@ -392,9 +392,9 @@ namespace WebExpress.WebCore.WebResource
         /// </summary>
         /// <typeparam name="T">The resource type.</typeparam>
         /// <returns>An enumeration of resource contexts.</returns>
-        public IEnumerable<IResourceContext> GetResorces<T>() where T : IResource
+        public IEnumerable<IResourceContext> GetResources<T>() where T : IResource
         {
-            return GetResorces(typeof(T));
+            return GetResources(typeof(T));
         }
 
         /// <summary>
@@ -402,7 +402,7 @@ namespace WebExpress.WebCore.WebResource
         /// </summary>
         /// <param name="resourceType">The resource type.</param>
         /// <returns>An enumeration of resource contexts.</returns>
-        public IEnumerable<IResourceContext> GetResorces(Type resourceType)
+        public IEnumerable<IResourceContext> GetResources(Type resourceType)
         {
             lock (_guard)
             {
@@ -421,7 +421,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="resourceType">The resource type.</param>
         /// <param name="applicationContext">The context of the application.</param>
         /// <returns>An enumeration of resource contexts.</returns>
-        public IEnumerable<IResourceContext> GetResorces(Type resourceType, IApplicationContext applicationContext)
+        public IEnumerable<IResourceContext> GetResources(Type resourceType, IApplicationContext applicationContext)
         {
             lock (_guard)
             {
@@ -441,7 +441,7 @@ namespace WebExpress.WebCore.WebResource
         /// <typeparam name="T">The resource type.</typeparam>
         /// <param name="applicationContext">The context of the application.</param>
         /// <returns>An enumeration of resource contexts.</returns>
-        public IEnumerable<IResourceContext> GetResorces<T>(IApplicationContext applicationContext) where T : IResource
+        public IEnumerable<IResourceContext> GetResources<T>(IApplicationContext applicationContext) where T : IResource
         {
             lock (_guard)
             {
@@ -461,7 +461,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationContext">The context of the application.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        public IResourceContext GetResorce(IApplicationContext applicationContext, string resourceId)
+        public IResourceContext GetResource(IApplicationContext applicationContext, string resourceId)
         {
             lock (_guard)
             {
@@ -481,7 +481,7 @@ namespace WebExpress.WebCore.WebResource
         /// <param name="applicationId">The application id.</param>
         /// <param name="resourceId">The resource id.</param>
         /// <returns>An resource context or null.</returns>
-        public IResourceContext GetResorce(string applicationId, string resourceId)
+        public IResourceContext GetResource(string applicationId, string resourceId)
         {
             lock (_guard)
             {

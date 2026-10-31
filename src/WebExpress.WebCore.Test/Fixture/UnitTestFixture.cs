@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Configuration;
 using System.Globalization;
 using System.Net;
 using System.Reflection;
@@ -32,8 +33,14 @@ namespace WebExpress.WebCore.Test.Fixture
         /// <summary>
         /// Create a fake server context.
         /// </summary>
+        /// <param name="settingsPath">
+        /// The settings directory. Defaults to a directory of its own, so a test that deploys a
+        /// settings file never sees one left behind by another.
+        /// </param>
+        /// <param name="configuration">The configuration. Defaults to an empty one.</param>
+        /// <param name="externalUri">The optional public base URI.</param>
         /// <returns>The server context.</returns>
-        public static IHttpServerContext CreateHttpServerContextMock()
+        public static IHttpServerContext CreateHttpServerContextMock(string settingsPath = null, IConfigurationRoot configuration = null, string externalUri = null)
         {
             return new HttpServerContext
             (
@@ -42,10 +49,12 @@ namespace WebExpress.WebCore.Test.Fixture
                 Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString()),
                 Environment.CurrentDirectory,
                 Environment.CurrentDirectory,
-                Environment.CurrentDirectory,
+                settingsPath ?? Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString()),
+                configuration ?? new ConfigurationBuilder().Build(),
                 CultureInfo.GetCultureInfo("en"),
                 new Log() { LogMode = LogMode.Off },
-                null
+                null,
+                externalUri: externalUri
             );
         }
 
@@ -69,22 +78,37 @@ namespace WebExpress.WebCore.Test.Fixture
                 httpServerContext ?? CreateHttpServerContextMock()
             ]);
 
-            // set static field in the webex class
-            var type = typeof(WebEx);
-            var field = type.GetField("_componentHub", BindingFlags.Static | BindingFlags.NonPublic);
-
-            field.SetValue(null, componentHub);
+            BindComponentHub(componentHub);
 
             return componentHub;
+        }
+
+        /// <summary>
+        /// Makes a component hub the one <see cref="WebEx.ComponentHub"/> answers with, or none
+        /// at all with null - the way a test simulates the startup phase before a hub exists.
+        /// </summary>
+        /// <remarks>
+        /// The hub is bound to the calling test, so tests running side by side keep their own,
+        /// and set process-wide as well for the serial tests whose hub is created outside the
+        /// test's own call chain, such as in the test class constructor.
+        /// </remarks>
+        /// <param name="componentHub">The hub, or null for none.</param>
+        public static void BindComponentHub(IComponentHub componentHub)
+        {
+            var type = typeof(WebEx);
+            var scoped = (AsyncLocal<IComponentHub>)type.GetField("_scopedComponentHub", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+
+            scoped.Value = componentHub;
+            type.GetField("_componentHub", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, componentHub);
         }
 
         /// <summary>
         /// Create a component hub and register the plugins.
         /// </summary>
         /// <returns>The component hub.</returns>
-        public static ComponentHub CreateAndRegisterComponentHubMock()
+        public static ComponentHub CreateAndRegisterComponentHubMock(IHttpServerContext httpServerContext = null)
         {
-            var componentHub = CreateComponentHubMock();
+            var componentHub = CreateComponentHubMock(httpServerContext);
             var pluginManager = componentHub.PluginManager as PluginManager;
 
             pluginManager.Register();
@@ -196,8 +220,10 @@ namespace WebExpress.WebCore.Test.Fixture
 
             foreach (var line in filteredLines)
             {
-                var key = line.Split(':').FirstOrDefault().Trim();
-                var value = line.Split(':').Skip(1).FirstOrDefault().Trim();
+                // split at the first colon only: values such as an origin contain further ones
+                var colon = line.IndexOf(':');
+                var key = (colon < 0 ? line : line[..colon]).Trim();
+                var value = colon < 0 ? "" : line[(colon + 1)..].Trim();
                 requestFeature.Headers[key] = value;
             }
 

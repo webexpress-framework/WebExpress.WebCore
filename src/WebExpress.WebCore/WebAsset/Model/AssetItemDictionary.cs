@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using WebExpress.WebCore.WebApplication;
+using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebPlugin;
 
 namespace WebExpress.WebCore.WebAsset.Model
@@ -12,22 +13,63 @@ namespace WebExpress.WebCore.WebAsset.Model
     /// </summary>
     internal class AssetItemDictionary
     {
-        private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, List<AssetItem>>> _dictionary = [];
+        private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, OrderedDictionary<IComponentId, AssetItem>>> _dictionary = [];
 
         /// <summary>
         /// Gets all asset items.
         /// </summary>
         public IEnumerable<AssetItem> All => _dictionary.Values
             .SelectMany(x => x.Values)
-            .SelectMany(x => x);
+            .SelectMany(x => x.Values);
 
         /// <summary>
-        /// Adds a asset item to the dictionary.
+        /// Returns the asset item that matches the given asset context (by endpoint id).
+        /// Callers must synchronize access to this collection.
+        /// </summary>
+        /// <param name="assetContext">The asset context resolved by the sitemap.</param>
+        /// <returns>The matching asset item, or null when none matches.</returns>
+        public AssetItem GetByContext(IAssetContext assetContext)
+        {
+            if (assetContext is null)
+            {
+                return null;
+            }
+
+            return _dictionary.Values
+                .SelectMany(x => x.Values)
+                .SelectMany(x => x.Values)
+                .FirstOrDefault(x => x.AssetContext?.EndpointId?.Equals(assetContext.EndpointId) ?? false);
+        }
+
+        /// <summary>
+        /// Returns the asset item whose route matches the end of the given request uri.
+        /// This is a fallback for the rare case that the resolved endpoint context is
+        /// not an asset context. Callers must synchronize access to this collection.
+        /// </summary>
+        /// <param name="requestUri">The request uri.</param>
+        /// <returns>The matching asset item, or null when none matches.</returns>
+        public AssetItem FindByRoute(string requestUri)
+        {
+            if (string.IsNullOrEmpty(requestUri))
+            {
+                return null;
+            }
+
+            var normalized = requestUri.ToLower().Replace("/", ".");
+
+            return _dictionary.Values
+                .SelectMany(x => x.Values)
+                .SelectMany(x => x.Values)
+                .FirstOrDefault(x => normalized.EndsWith(x.AssetContext.Route.ToString().Replace("/", ".")));
+        }
+
+        /// <summary>
+        /// Adds an asset item to the dictionary.
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContext">The application context.</param>
         /// <param name="assetItem">The resource item.</param>
-        /// <returns>True if the resource item was added successfully, false if an element with the same status code already exists.</returns>
+        /// <returns>True if the resource item was added successfully, false if an element with the same key already exists.</returns>
         public bool AddAssetItem(IPluginContext pluginContext, IApplicationContext applicationContext, AssetItem assetItem)
         {
             var type = assetItem.AssetClass;
@@ -44,16 +86,17 @@ namespace WebExpress.WebCore.WebAsset.Model
 
             var appContextDict = _dictionary[pluginContext];
 
-            if (!appContextDict.TryGetValue(applicationContext, out List<AssetItem> value))
+            if (!appContextDict.TryGetValue(applicationContext, out var value))
             {
-                value = ([]);
+                value = new();
                 appContextDict[applicationContext] = value;
             }
 
             var assetList = value;
 
-            assetList.RemoveAll(x => x.AssetContext?.EndpointId == assetItem.AssetContext.EndpointId);
-            assetList.Add(assetItem);
+            // a later asset of the same endpoint replaces the earlier one and is listed last
+            assetList.Remove(assetItem.AssetContext.EndpointId);
+            assetList.Add(assetItem.AssetContext.EndpointId, assetItem);
 
             return true;
         }
@@ -74,7 +117,7 @@ namespace WebExpress.WebCore.WebAsset.Model
             if (_dictionary.TryGetValue(pluginContext, out var value))
             {
                 var items = value.Values
-                    .SelectMany(x => x)
+                    .SelectMany(x => x.Values)
                     .ToList();
 
                 foreach (var assetItem in items)
@@ -108,7 +151,7 @@ namespace WebExpress.WebCore.WebAsset.Model
             {
                 foreach (var assetList in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
                 {
-                    foreach (var assetItem in assetList)
+                    foreach (var assetItem in assetList.Values)
                     {
                         removedAssets.Add(assetItem.AssetContext);
                         assetItem.Dispose();
@@ -158,11 +201,9 @@ namespace WebExpress.WebCore.WebAsset.Model
             {
                 var appContextDict = _dictionary[applicationContext?.PluginContext];
 
-                if (appContextDict.TryGetValue(applicationContext, out List<AssetItem> value))
+                if (appContextDict.TryGetValue(applicationContext, out var value))
                 {
-                    var assetList = value;
-
-                    return assetList;
+                    return value.Values;
                 }
             }
 
@@ -179,7 +220,7 @@ namespace WebExpress.WebCore.WebAsset.Model
             if (_dictionary.TryGetValue(pluginContext, out var pluginResources))
             {
                 return pluginResources
-                    .SelectMany(x => x.Value)
+                    .SelectMany(x => x.Value.Values)
                     .Select(x => x.AssetContext);
             }
 
@@ -195,7 +236,7 @@ namespace WebExpress.WebCore.WebAsset.Model
         {
             return _dictionary.Values
                 .SelectMany(x => x.Values)
-                .SelectMany(x => x)
+                .SelectMany(x => x.Values)
                 .Where(x => x.AssetContext.ApplicationContext.Equals(applicationContext))
                 .Select(x => x.AssetContext);
         }

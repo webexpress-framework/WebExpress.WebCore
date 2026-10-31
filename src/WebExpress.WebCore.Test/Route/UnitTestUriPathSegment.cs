@@ -6,7 +6,6 @@ namespace WebExpress.WebCore.Test.Route
     /// <summary>
     /// Tests the path segment.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestUriPathSegment
     {
         /// <summary>

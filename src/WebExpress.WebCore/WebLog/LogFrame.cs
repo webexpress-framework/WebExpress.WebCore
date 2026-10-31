@@ -45,6 +45,8 @@ namespace WebExpress.WebCore.WebLog
         public LogFrame(ILog log, string name, string additionalHeading = null, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
         {
             Instance = instance;
+            Line = line ?? 0;
+            File = file;
             Status = string.Format("{0} completed. ", name);
 
             Log = log;

@@ -4,7 +4,8 @@ using WebExpress.WebCore.WebPage;
 namespace WebExpress.WebCore.WebStatusPage
 {
     /// <summary>
-    /// Interface of the status pages.
+    /// A component that renders the page shown for an HTTP status (for example the 404 or 500
+    /// error page). Implement it to customize how a given status is presented to the user.
     /// </summary>
     public interface IStatusPage : IStatusPage<VisualTree>
     {

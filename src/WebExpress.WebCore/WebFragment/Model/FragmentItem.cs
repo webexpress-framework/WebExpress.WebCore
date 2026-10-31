@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -20,7 +21,7 @@ namespace WebExpress.WebCore.WebFragment.Model
         private IFragmentBase _instance;
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
-        private static readonly Dictionary<Type, Delegate> _delegateCache = [];
+        private static readonly ConcurrentDictionary<Type, Delegate> _delegateCache = new();
 
         /// <summary>
         /// Gets or sets the context of the associated plugin.
@@ -117,10 +118,10 @@ namespace WebExpress.WebCore.WebFragment.Model
             where TRenderContext : IRenderContext
             where TVisualTree : IVisualTree
         {
-            var instance = CreateInstance<IFragmentBase>();
-
-            if (CheckConditions(renderContext?.Request))
+            if (FragmentContext.Check(renderContext?.Request))
             {
+                var instance = CreateInstance<IFragmentBase>();
+
                 if (!_delegateCache.TryGetValue(FragmentClass, out var del))
                 {
                     // create and compile the expression
@@ -150,16 +151,6 @@ namespace WebExpress.WebCore.WebFragment.Model
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Checks the component to see if they are displayed or disabled.
-        /// </summary>
-        /// <param name="request">The request.</param>
-        /// <returns>True if the fragment is active, false otherwise.</returns>
-        public bool CheckConditions(IRequest request)
-        {
-            return !FragmentContext.Conditions.Any() || FragmentContext.Conditions.All(x => x.Fulfillment(request));
         }
 
         /// <summary>

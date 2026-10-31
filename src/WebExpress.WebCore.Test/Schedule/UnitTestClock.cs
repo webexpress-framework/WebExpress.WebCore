@@ -6,7 +6,6 @@ namespace WebExpress.WebCore.Test.Schedule
     /// <summary>
     /// Tests the scheduler's clock.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestClock
     {
         /// <summary>

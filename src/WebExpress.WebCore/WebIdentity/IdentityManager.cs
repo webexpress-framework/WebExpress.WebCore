@@ -1,10 +1,8 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Identity;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Security;
-using System.Security.Cryptography;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
@@ -14,20 +12,18 @@ using WebExpress.WebCore.WebIdentity.Model;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
-using WebExpress.WebCore.WebSession.Model;
 
 namespace WebExpress.WebCore.WebIdentity
 {
     /// <summary>
     /// Management of identities (users).
     /// </summary>
-    public class IdentityManager : IIdentityManager
+    public partial class IdentityManager : IIdentityManager
     {
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly IdentityPermissionDictionary _permissionDictionary = [];
         private readonly IdentityPolicyDictionary _policyDictionary = [];
-        private readonly Dictionary<IApplicationContext, List<IIdentityProvider>> _identityProviders = [];
 
         /// <summary>
         /// Gets all permissions.
@@ -388,9 +384,9 @@ namespace WebExpress.WebCore.WebIdentity
         /// </returns>
         public IResponse CreateAuthenticationPrompt(IRequest request, IPageContext initiator, IIdentity identity = null)
         {
-            if (_identityProviders.TryGetValue(initiator?.ApplicationContext, out var list))
+            if (initiator?.ApplicationContext is not null)
             {
-                foreach (var provider in list)
+                foreach (var provider in GetProviders(initiator.ApplicationContext))
                 {
                     var response = provider.CreateAuthenticationPrompt(request, initiator, identity);
 
@@ -418,11 +414,11 @@ namespace WebExpress.WebCore.WebIdentity
         /// </returns>
         public IResponse CreateForbiddenResponse(IRequest request, IPageContext initiator, IIdentity identity)
         {
-            if (_identityProviders.TryGetValue(initiator?.ApplicationContext, out var list))
+            if (initiator?.ApplicationContext is not null)
             {
-                foreach (var provider in list)
+                foreach (var provider in GetProviders(initiator.ApplicationContext))
                 {
-                    var response = provider.CreateForbiddenPage(request, initiator, identity);
+                    var response = provider.CreateForbiddenResponse(request, initiator, identity);
 
                     if (response is not null)
                     {
@@ -433,54 +429,6 @@ namespace WebExpress.WebCore.WebIdentity
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Login an identity.
-        /// </summary>
-        /// <param name="identity">The identity.</param>
-        /// <param name="request">The request.</param>
-        /// <returns>The session of the logged-in identity, or null if the login process failed.</returns>
-        public Session Login(IIdentity identity, IRequest request)
-        {
-            if (identity is null)
-            {
-                return null;
-            }
-
-            var session = _componentHub?.SessionManager.GetSession(request);
-            var authentification = session.GetOrCreateProperty<SessionPropertyAuthentification>(identity);
-
-            // verify that the identity was correctly bound to the session
-            if (authentification.Identity != identity)
-            {
-                return null;
-            }
-
-            return session;
-        }
-
-        /// <summary>
-        /// Logout an identity.
-        /// </summary>
-        /// <param name="request">The request.</param>
-        public void Logout(IRequest request)
-        {
-            var session = _componentHub?.SessionManager.GetSession(request);
-            session.RemoveProperty<SessionPropertyAuthentification>();
-        }
-
-        /// <summary>
-        /// Returns the current signed-in identity based on the provided request.
-        /// </summary>
-        /// <param name="request">The request to get the current identity for.</param>
-        /// <returns>The current signed-in identity.</returns>
-        public IIdentity GetCurrentIdentity(IRequest request)
-        {
-            var session = _componentHub?.SessionManager.GetSession(request);
-            var authentification = session.GetProperty<SessionPropertyAuthentification>();
-
-            return authentification?.Identity;
         }
 
         /// <summary>
@@ -509,8 +457,7 @@ namespace WebExpress.WebCore.WebIdentity
                 return false;
             }
 
-            // evaluate all associated groups using linq
-            return identity.Groups?.Any(group => CheckAccess(group, policy)) ?? false;
+            return policy is WebPolicies.AuthenticatedAccessPolicy || identity.PolicyNames.Contains(policy.GetType().FullName, StringComparer.Ordinal);
         }
 
         /// <summary>
@@ -526,8 +473,8 @@ namespace WebExpress.WebCore.WebIdentity
                 return false;
             }
 
-            // check if any string policy matches the full name of the required policy
-            return group.Policies?.Any(currentPolicy => string.Equals(currentPolicy, policy.GetType().FullName, StringComparison.OrdinalIgnoreCase)) ?? false;
+            // a group carries policy instances; the required policy matches by type
+            return group.Policies?.Any(currentPolicy => currentPolicy?.GetType() == policy.GetType()) ?? false;
         }
 
         /// <summary>
@@ -555,7 +502,8 @@ namespace WebExpress.WebCore.WebIdentity
         {
             var groups = identity?.Groups ?? [];
 
-            return groups.Any(group => CheckAccess(applicationContext, group, permission));
+            return identity?.Permissions.Contains(permission.FullName, StringComparer.Ordinal) == true ||
+                groups.Any(group => CheckAccess(applicationContext, group, permission));
         }
 
         /// <summary>
@@ -580,7 +528,7 @@ namespace WebExpress.WebCore.WebIdentity
         /// <returns>True if the identity group has the permission, false otherwise.</returns>
         public bool CheckAccess(IApplicationContext applicationContext, IIdentityGroup group, Type permission)
         {
-            return (group?.Policies ?? []).Any(policy => CheckAccess(applicationContext, policy, permission));
+            return (group?.Policies ?? []).Any(policy => CheckAccess(applicationContext, policy.GetType(), permission));
         }
 
         /// <summary>
@@ -647,80 +595,17 @@ namespace WebExpress.WebCore.WebIdentity
         }
 
         /// <summary>
-        /// Computes the SHA-256 hash of the input string.
+        /// Hashes a password for <see cref="IIdentity.PasswordHash"/>, in the format the sign-in
+        /// (<see cref="LocalIdentityProvider"/>) verifies. The hash is salted and deliberately slow,
+        /// so a leaked user store does not yield its passwords to a quick dictionary attack.
         /// </summary>
-        /// <param name="input">The input string to hash.</param>
-        /// <returns>The computed hash as a hexadecimal string.</returns>
-        public static string ComputeHash(SecureString input)
+        /// <param name="password">The password to hash.</param>
+        /// <returns>The hash to store with the identity.</returns>
+        public static string HashPassword(string password)
         {
-            if (input is null)
-            {
-                return string.Empty;
-            }
+            ArgumentNullException.ThrowIfNull(password);
 
-            var bstr = IntPtr.Zero;
-            try
-            {
-                bstr = Marshal.SecureStringToBSTR(input);
-                var length = Marshal.ReadInt32(bstr, -4);
-                var bytes = new byte[length];
-
-                // copy unmanaged string memory to a managed byte array
-                Marshal.Copy(bstr, bytes, 0, length);
-
-                // compute sha256 hash and convert to lower-case hex string
-                var hashBytes = SHA256.HashData(bytes);
-
-                return Convert.ToHexString(hashBytes).ToLowerInvariant();
-            }
-            finally
-            {
-                if (bstr != IntPtr.Zero)
-                {
-                    // safely free the unmanaged memory
-                    Marshal.ZeroFreeBSTR(bstr);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Registers an identity provider for use within the application context.
-        /// </summary>
-        /// <param name="identityProvider">The identity provider to register. Cannot be null.</param>
-        /// <param name="applicationContext">The application context in which the identity provider will be used.</param>
-        /// <exception cref="ArgumentNullException">Thrown if identityProvider or applicationContext is null.</exception>
-        public void RegisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext)
-        {
-            ArgumentNullException.ThrowIfNull(identityProvider);
-            ArgumentNullException.ThrowIfNull(applicationContext);
-
-            if (!_identityProviders.TryGetValue(applicationContext, out var list))
-            {
-                list = [];
-                _identityProviders[applicationContext] = list;
-            }
-
-            list.Add(identityProvider);
-        }
-
-        /// <summary>
-        /// Unregisters a previously registered identity provider from the given application context.
-        /// </summary>
-        /// <param name="identityProvider">The identity provider to unregister. Cannot be null.</param>
-        /// <param name="applicationContext">The application context from which the identity provider will be removed.</param>
-        /// <exception cref="ArgumentNullException">Thrown if identityProvider or applicationContext is null.</exception>
-        /// <returns>True if the provider was successfully removed; false if it was not registered.</returns>
-        public bool UnregisterIdentityProvider(IIdentityProvider identityProvider, IApplicationContext applicationContext)
-        {
-            ArgumentNullException.ThrowIfNull(identityProvider);
-            ArgumentNullException.ThrowIfNull(applicationContext);
-
-            if (_identityProviders.TryGetValue(applicationContext, out var list))
-            {
-                return list.Remove(identityProvider);
-            }
-
-            return false;
+            return new PasswordHasher<IIdentity>().HashPassword(null, password);
         }
 
         /// <summary>
@@ -769,12 +654,7 @@ namespace WebExpress.WebCore.WebIdentity
         /// </returns>
         private IEnumerable<IIdentityProvider> GetProviders(IApplicationContext applicationContext)
         {
-            if (_identityProviders.TryGetValue(applicationContext, out var list))
-            {
-                return list;
-            }
-
-            return [];
+            return _componentHub.IdentityProviderManager.GetProviders(applicationContext);
         }
 
         /// <summary>

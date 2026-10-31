@@ -1,7 +1,8 @@
 ﻿namespace WebExpress.WebCore.WebIdentity
 {
     /// <summary>
-    /// Interface for identity resources.
+    /// Marks something as a protected resource in the identity system — an object whose access can
+    /// be guarded by permissions and policies.
     /// </summary>
     public interface IIdentityResource
     {

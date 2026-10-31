@@ -3,8 +3,8 @@
 	<PropertyGroup>
 		<OutputType>Library</OutputType>
 		<Title>WebExpress.WebCore</Title>
-		<Version>0.0.11.0</Version>
-		<AssemblyVersion>0.0.11.0</AssemblyVersion>
+		<Version>2.0.0.0</Version>
+		<AssemblyVersion>2.0.0.0</AssemblyVersion>
 		<TargetFramework>net10.0</TargetFramework>
 		<RuntimeIdentifiers>any</RuntimeIdentifiers>
 		<RepositoryUrl>https://github.com/webexpress-framework/WebExpress.git</RepositoryUrl>
@@ -14,7 +14,7 @@
 		<EnableDynamicLoading>true</EnableDynamicLoading>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<Description>Core library of the WebExpress web server.</Description>
-		<PackageVersion>0.0.11-alpha</PackageVersion>
+		<PackageVersion>2.0.0-alpha</PackageVersion>
 		<PackageProjectUrl>https://github.com/webexpress-framework/WebExpress</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -26,6 +26,23 @@
 		<Configurations>Debug;Release;DebugLocal</Configurations>
 		<DisableImplicitStaticWebAssets>true</DisableImplicitStaticWebAssets>
 	</PropertyGroup>
+
+	<PropertyGroup>
+		<!-- under Visual Studio the package would start its sbom-tool.exe, which requires the .NET 8 runtime; GenerateSbomWithDotnet hands the work to the dotnet msbuild instead -->
+		<GenerateSbom Condition="'$(MSBuildRuntimeType)' == 'Core' AND '$(Configuration)' == 'Release'">true</GenerateSbom>
+		<SbomGenerationPackageVersion>$(PackageVersion)</SbomGenerationPackageVersion>
+		<!-- scan only the restore graph, otherwise older packages lying in bin end up as dependencies -->
+		<SbomGenerationBuildComponentPath>$(MSBuildProjectDirectory)\$(BaseIntermediateOutputPath)</SbomGenerationBuildComponentPath>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Sbom.Targets" Version="4.1.13" PrivateAssets="all" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
+		<PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<EmbeddedResource Include="Internationalization\de" />
@@ -53,5 +70,26 @@
 	<ItemGroup>
 	  <Folder Include="WebPermissions\" />
 	</ItemGroup>
+
+	<Target Name="GenerateSbomWithDotnet" AfterTargets="Pack" Condition="'$(MSBuildRuntimeType)' != 'Core' AND '$(IsPackable)' == 'true' AND '$(Configuration)' == 'Release'">
+		<Exec Command="dotnet msbuild &quot;$(MSBuildProjectFullPath)&quot; -nologo -v:m -t:GenerateSbomTarget -p:Configuration=$(Configuration)" />
+	</Target>
+
+	<!-- Microsoft.Sbom.Targets only embeds the manifest in the nupkg; copy it next to the package as well -->
+	<Target Name="CopySbomToPackageOutput" AfterTargets="GenerateSbomTarget" Condition="'$(IsPackable)' == 'true' AND '$(GenerateSbom)' == 'true'">
+		<!-- set inside the target because PackageId and PackageOutputPath are only defined after the project file is evaluated -->
+		<PropertyGroup>
+			<SbomUnzipPath>$(IntermediateOutputPath)sbom</SbomUnzipPath>
+			<SbomFileName>$(PackageId.ToLowerInvariant())</SbomFileName>
+		</PropertyGroup>
+		<RemoveDir Directories="$(SbomUnzipPath)" />
+		<Unzip SourceFiles="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" DestinationFolder="$(SbomUnzipPath)" />
+		<ItemGroup>
+			<SbomFile Include="$(SbomUnzipPath)\_manifest\$(SbomSpecification)\manifest.spdx.json" TargetPath="$(PackageOutputPath)$(SbomFileName).spdx.json" />
+			<SbomFile Include="$(SbomUnzipPath)\_manifest\$(SbomSpecification)\manifest.spdx.json.sha256" TargetPath="$(PackageOutputPath)$(SbomFileName).spdx.json.sha256" />
+		</ItemGroup>
+		<Copy SourceFiles="@(SbomFile)" DestinationFiles="@(SbomFile->'%(TargetPath)')" />
+		<RemoveDir Directories="$(SbomUnzipPath)" />
+	</Target>
 
 </Project>

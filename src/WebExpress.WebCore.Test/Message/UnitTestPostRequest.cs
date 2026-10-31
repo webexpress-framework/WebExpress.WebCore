@@ -7,7 +7,6 @@ namespace WebExpress.WebCore.Test.Message
     /// <summary>
     /// Unit tests for parsing HTTP POST requests.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestPostRequest : UnitTestRequest
     {
         /// <summary>
@@ -129,7 +128,70 @@ namespace WebExpress.WebCore.Test.Message
         }
 
         /// <summary>
-        /// Retrieves the value of a parameter from the request using the 
+        /// Tests that a multipart field arrives as it was typed: the body is not url-encoded,
+        /// so a plus or a percent sign is no escape there.
+        /// </summary>
+        [Fact]
+        public void MultipartKeepsWhatWasTyped()
+        {
+            var body = "------B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nC++ 100% a+b%2B\r\n------B--\r\n";
+
+            var request = Post("multipart/form-data; boundary=----B", body);
+
+            Assert.Equal("C++ 100% a+b%2B", request?.GetParameter("a")?.Value);
+        }
+
+        /// <summary>
+        /// Tests that a plain text field arrives as it was typed.
+        /// </summary>
+        [Fact]
+        public void TextPlainKeepsWhatWasTyped()
+        {
+            var request = Post("text/plain", "a=C++ 100%\r\n");
+
+            Assert.Equal("C++ 100%", request?.GetParameter("a")?.Value);
+        }
+
+        /// <summary>
+        /// Tests that an url-encoded body is decoded: a plus is a blank, an escape its character.
+        /// </summary>
+        [Fact]
+        public void UrlencodedDecodesItsEscapes()
+        {
+            var request = Post("application/x-www-form-urlencoded", "a=C%2B%2B&b=a+b&c=100%25");
+
+            Assert.Equal("C++", GetParameterValue(request, "a"));
+            Assert.Equal("a b", GetParameterValue(request, "b"));
+            Assert.Equal("100%", GetParameterValue(request, "c")?.Trim());
+        }
+
+        /// <summary>
+        /// Tests that the keys of an url-encoded body are decoded as their values are.
+        /// </summary>
+        [Fact]
+        public void UrlencodedDecodesItsKeys()
+        {
+            var request = Post("application/x-www-form-urlencoded", "items%5B%5D=a&first+name=b");
+
+            Assert.Equal("a", GetParameterValue(request, "items[]"));
+            Assert.Equal("b", GetParameterValue(request, "first name")?.Trim());
+        }
+
+        /// <summary>
+        /// Builds a POST request with the given body.
+        /// </summary>
+        /// <param name="contentType">The content type of the body.</param>
+        /// <param name="body">The body as it travels.</param>
+        /// <returns>The parsed request.</returns>
+        private static IRequest Post(string contentType, string body)
+        {
+            var content = $"POST /ix HTTP/1.1\r\nHost: localhost\r\nContent-Length: {System.Text.Encoding.UTF8.GetByteCount(body)}\r\nContent-Type: {contentType}\r\n\r\n{body}";
+
+            return UnitTestFixture.CreateRequestMock(content);
+        }
+
+        /// <summary>
+        /// Retrieves the value of a parameter from the request using the
         /// specified key.
         /// </summary>
         /// <param name="request">

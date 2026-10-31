@@ -19,6 +19,11 @@ namespace WebExpress.WebCore.WebSitemap
     public sealed class SitemapManager : ISitemapManager, ISystemComponent
     {
         private SitemapNode _root = new();
+
+        // maps an endpoint context to its sitemap node so GetUri resolves a route in O(1) instead of
+        // rebuilding and linearly scanning the whole sitemap tree on every call. rebuilt by Refresh
+        // alongside _root; the stored order preserves the previous pre-order "first match" tiebreak.
+        private Dictionary<IEndpointContext, (SitemapNode Node, int Order)> _endpointIndex = new();
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly IUri _serverUri;
@@ -40,8 +45,10 @@ namespace WebExpress.WebCore.WebSitemap
         {
             _componentHub = componentHub;
             _httpServerContext = httpServerContext;
-            _serverUri = new UriEndpoint(_httpServerContext?.Endpoints.FirstOrDefault(e => e.Uri.StartsWith("https"))?.ToString()
-                ?? _httpServerContext?.Endpoints.FirstOrDefault()?.ToString() ?? "");
+            _serverUri = new UriEndpoint(!string.IsNullOrWhiteSpace(_httpServerContext?.ExternalUri)
+                ? _httpServerContext.ExternalUri
+                : _httpServerContext?.Endpoints.FirstOrDefault(e => e.Uri.StartsWith("https"))?.ToString()
+                    ?? _httpServerContext?.Endpoints.FirstOrDefault()?.ToString() ?? "");
 
             _httpServerContext?.Log?.Debug
             (
@@ -98,7 +105,21 @@ namespace WebExpress.WebCore.WebSitemap
                 ));
             }
 
+            var index = new Dictionary<IEndpointContext, (SitemapNode Node, int Order)>();
+            var order = 0;
+            foreach (var node in newSiteMapNode.GetPreOrder())
+            {
+                // first pre-order occurrence wins, mirroring the previous FirstOrDefault over GetPreOrder
+                if (node.EndpointContext is not null)
+                {
+                    index.TryAdd(node.EndpointContext, (node, order));
+                }
+
+                order++;
+            }
+
             _root = newSiteMapNode;
+            _endpointIndex = index;
 
             Log();
         }
@@ -111,7 +132,6 @@ namespace WebExpress.WebCore.WebSitemap
         /// <returns>The search result with the found resource or null</returns>
         public SearchResult SearchResource(Uri requestUri, SearchContext searchContext)
         {
-            var variables = new Dictionary<string, string>();
             var result = SearchNode
             (
                 _root,
@@ -120,16 +140,15 @@ namespace WebExpress.WebCore.WebSitemap
                 searchContext
             );
 
-            if (result is not null && result.EndpointContext is not null)
+            if (result?.EndpointContext is not null &&
+                (!result.EndpointContext.Conditions.Any() ||
+                 result.EndpointContext.Conditions.All(x => x.Fulfillment(searchContext.HttpContext?.Request))))
             {
-                if (!result.EndpointContext.Conditions.Any() || result.EndpointContext.Conditions.All(x => x.Fulfillment(searchContext.HttpContext?.Request)))
-                {
-                    return result;
-                }
+                return result;
             }
 
-            // 404
-            return result;
+            // 404 - not found or the endpoint's conditions are not fulfilled
+            return null;
         }
 
         /// <summary>
@@ -166,8 +185,7 @@ namespace WebExpress.WebCore.WebSitemap
         {
             var endpointContexts = _componentHub?.EndpointManager.GetEndpoints(endpointType, applicationContext);
 
-            var node = _root.GetPreOrder()
-                .FirstOrDefault(x => endpointContexts.Contains(x.EndpointContext));
+            var node = ResolveNode(endpointContexts);
 
             return new UriEndpoint(_serverUri, node?.EndpointContext?.Route.PathSegments, null).BindParameters(parameters);
         }
@@ -176,7 +194,7 @@ namespace WebExpress.WebCore.WebSitemap
         /// Returns the URI for this type based on the sitemap configuration, taking into account 
         /// the specific context in which the URI is valid.
         /// </summary>
-        /// <typeparam name="TEnpoint">
+        /// <typeparam name="TEndpoint">
         /// The class from which the URI is to be determined. URI route must not have any dynamic 
         /// components (such as '/a/guid/b').
         /// </typeparam>
@@ -186,22 +204,52 @@ namespace WebExpress.WebCore.WebSitemap
         /// <returns>
         /// Returns the URI taking into account the context, or null if no valid URI is found.
         /// </returns>
-        public IUri GetUri<TEnpoint>(IEndpointContext endpointContext)
-            where TEnpoint : IEndpoint
+        public IUri GetUri<TEndpoint>(IEndpointContext endpointContext)
+            where TEndpoint : IEndpoint
         {
-            var endpointContexts = _componentHub?.EndpointManager.GetEndpoints(typeof(TEnpoint), endpointContext.ApplicationContext)
+            var endpointContexts = _componentHub?.EndpointManager.GetEndpoints(typeof(TEndpoint), endpointContext.ApplicationContext)
                 .Where(x => x.EndpointId.Equals(endpointContext.EndpointId));
 
-            var node = _root.GetPreOrder()
-                .FirstOrDefault(x => endpointContexts.Contains(x.EndpointContext));
+            var node = ResolveNode(endpointContexts);
 
             if (node is null)
             {
                 // fallback to the search by application context
-                return GetUri<TEnpoint>(endpointContext.ApplicationContext);
+                return GetUri<TEndpoint>(endpointContext.ApplicationContext);
             }
 
             return new UriEndpoint(_serverUri, node?.EndpointContext?.Route.PathSegments, null);
+        }
+
+        /// <summary>
+        /// Resolves the sitemap node whose endpoint context appears first in pre-order among the
+        /// given candidates. The lookup uses the precomputed endpoint index, replacing a full
+        /// rebuild and linear scan of the sitemap tree (previously the dominant render-time cost) with
+        /// an O(1) lookup per candidate.
+        /// </summary>
+        /// <param name="endpointContexts">The candidate endpoint contexts, or null.</param>
+        /// <returns>The matching node, or null when no candidate is part of the sitemap.</returns>
+        private SitemapNode ResolveNode(IEnumerable<IEndpointContext> endpointContexts)
+        {
+            if (endpointContexts is null)
+            {
+                return null;
+            }
+
+            var index = _endpointIndex;
+            SitemapNode best = null;
+            var bestOrder = int.MaxValue;
+
+            foreach (var ctx in endpointContexts)
+            {
+                if (ctx is not null && index.TryGetValue(ctx, out var hit) && hit.Order < bestOrder)
+                {
+                    best = hit.Node;
+                    bestOrder = hit.Order;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>
@@ -216,7 +264,6 @@ namespace WebExpress.WebCore.WebSitemap
                 return null;
             }
 
-            var variables = new Dictionary<string, string>();
             var result = SearchNode
             (
                 _root,
@@ -425,8 +472,6 @@ namespace WebExpress.WebCore.WebSitemap
                     outPathSegments.Enqueue(node.PathSegment.Copy());
                 }
 
-                var type = node.EndpointContext?.GetType();
-
                 if (nextPathSegment is null)
                 {
                     return new SearchResult()
@@ -470,9 +515,32 @@ namespace WebExpress.WebCore.WebSitemap
                     };
                 }
 
-                foreach (var child in node.Children.Where(x => IsMatched(x, nextPathSegment)))
+                // a constant segment is the more specific match, so it is tried before a
+                // variable one. without the ordering the winner is whichever endpoint happened
+                // to register first, which lets a route like /assets/${workspacekey} swallow
+                // /assets/css/theme.css and answer 404 from a page that was never meant to
+                // serve it.
+                //
+                // a candidate that leads nowhere is no longer the end of the search either:
+                // each branch is walked on copies of the queues, so an exhausted branch leaves
+                // the state untouched for the next candidate instead of taking the whole
+                // request down with it.
+                foreach (var child in node.Children
+                    .Where(x => IsMatched(x, nextPathSegment))
+                    .OrderBy(x => x.PathSegment is IUriPathSegmentVariable ? 1 : 0))
                 {
-                    return SearchNode(child, inPathSegments, outPathSegments, searchContext);
+                    var result = SearchNode
+                    (
+                        child,
+                        new Queue<string>(inPathSegments),
+                        new Queue<IUriPathSegment>(outPathSegments),
+                        searchContext
+                    );
+
+                    if (result is not null)
+                    {
+                        return result;
+                    }
                 }
             }
 

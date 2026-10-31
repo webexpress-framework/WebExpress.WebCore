@@ -5,7 +5,7 @@ using System.Text;
 namespace WebExpress.WebCore.WebHtml
 {
     /// <summary>
-    /// Represents the content as a paragraph.
+    /// Renders an HTML <c>&lt;p&gt;</c> element — a paragraph, the standard block for a run of text.
     /// </summary>
     public class HtmlElementTextContentP : HtmlElement, IHtmlElementTextContent
     {

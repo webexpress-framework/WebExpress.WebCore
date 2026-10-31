@@ -1,7 +1,8 @@
 ﻿namespace WebExpress.WebCore.WebIdentity.Model
 {
     /// <summary>
-    /// Represents an identity item within the WebExpress framework.
+    /// Model type that represents a single identity (a known user or principal) in WebExpress's
+    /// identity system. It currently has no members and serves as a placeholder for identity data.
     /// </summary>
     public class IdentityItem
     {

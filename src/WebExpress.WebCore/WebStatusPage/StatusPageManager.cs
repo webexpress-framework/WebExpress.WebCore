@@ -354,6 +354,7 @@ namespace WebExpress.WebCore.WebStatusPage
                 {
                     400 => new ResponseBadRequest(!string.IsNullOrWhiteSpace(message) ? new StatusMessage(message) : null),
                     401 => new ResponseUnauthorized(!string.IsNullOrWhiteSpace(message) ? new StatusMessage(message) : null),
+                    403 => new ResponseForbidden(!string.IsNullOrWhiteSpace(message) ? new StatusMessage(message) : null),
                     404 => new ResponseNotFound(!string.IsNullOrWhiteSpace(message) ? new StatusMessage(message) : null),
                     500 => new ResponseInternalServerError(!string.IsNullOrWhiteSpace(message) ? new StatusMessage(message) : null),
                     _ => new ResponseInternalServerError(!string.IsNullOrWhiteSpace(message) ? new StatusMessage(message) : null),

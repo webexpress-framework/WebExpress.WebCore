@@ -5,7 +5,6 @@ namespace WebExpress.WebCore.Test.Html
     /// <summary>
     /// Unit tests for Css utility methods.
     /// </summary>
-    [Collection("NonParallelTests")]
     public class UnitTestCss
     {
         /// <summary>

@@ -16,6 +16,12 @@ namespace WebExpress.WebCore.Test
     public sealed class TestPlugin : IPlugin
     {
         /// <summary>
+        /// Determines whether the plugin has been released, so a test can tell that removing
+        /// the plugin disposes this very instance.
+        /// </summary>
+        public bool IsDisposed { get; private set; }
+
+        /// <summary>
         /// Initializes a new instance of the class.
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
@@ -36,6 +42,7 @@ namespace WebExpress.WebCore.Test
         /// </summary>
         public void Dispose()
         {
+            IsDisposed = true;
         }
     }
 }

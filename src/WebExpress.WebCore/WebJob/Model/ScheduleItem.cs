@@ -11,6 +11,8 @@ namespace WebExpress.WebCore.WebJob.Model
     /// </summary>
     internal class ScheduleItem : IDisposable
     {
+        private int _disposed;
+
         /// <summary>
         /// Gets the associated plugin context.
         /// </summary>
@@ -71,10 +73,33 @@ namespace WebExpress.WebCore.WebJob.Model
         }
 
         /// <summary>
-        /// Performs application-specific tasks related to sharing, returning, or resetting unmanaged resources.
+        /// Determines whether the job has been released. A run that was already scheduled when
+        /// the job was removed checks this so it does not process a disposed instance.
+        /// </summary>
+        public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+        /// <summary>
+        /// Releases the job instance as soon as the job is removed, so a plugin that is unloaded
+        /// at runtime leaves no job holding handles or references into its load context. Both the
+        /// removal and the shutdown of the manager may reach the same item, so only the first
+        /// call has an effect.
         /// </summary>
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                TokenSource.Cancel();
+                Instance?.Dispose();
+            }
+            finally
+            {
+                TokenSource.Dispose();
+            }
         }
 
         /// <summary>
