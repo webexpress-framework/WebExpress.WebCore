@@ -81,12 +81,14 @@
 		<PropertyGroup>
 			<SbomUnzipPath>$(IntermediateOutputPath)sbom</SbomUnzipPath>
 			<SbomFileName>$(PackageId.ToLowerInvariant())</SbomFileName>
+			<!-- dotnet pack -o sets PackageOutputPath without a trailing slash -->
+			<SbomPackageDir>$([MSBuild]::EnsureTrailingSlash('$(PackageOutputPath)'))</SbomPackageDir>
 		</PropertyGroup>
 		<RemoveDir Directories="$(SbomUnzipPath)" />
-		<Unzip SourceFiles="$(PackageOutputPath)$(PackageId).$(PackageVersion).nupkg" DestinationFolder="$(SbomUnzipPath)" />
+		<Unzip SourceFiles="$(SbomPackageDir)$(PackageId).$(PackageVersion).nupkg" DestinationFolder="$(SbomUnzipPath)" />
 		<ItemGroup>
-			<SbomFile Include="$(SbomUnzipPath)\_manifest\$(SbomSpecification)\manifest.spdx.json" TargetPath="$(PackageOutputPath)$(SbomFileName).spdx.json" />
-			<SbomFile Include="$(SbomUnzipPath)\_manifest\$(SbomSpecification)\manifest.spdx.json.sha256" TargetPath="$(PackageOutputPath)$(SbomFileName).spdx.json.sha256" />
+			<SbomFile Include="$(SbomUnzipPath)\_manifest\$(SbomSpecification)\manifest.spdx.json" TargetPath="$(SbomPackageDir)$(SbomFileName).spdx.json" />
+			<SbomFile Include="$(SbomUnzipPath)\_manifest\$(SbomSpecification)\manifest.spdx.json.sha256" TargetPath="$(SbomPackageDir)$(SbomFileName).spdx.json.sha256" />
 		</ItemGroup>
 		<Copy SourceFiles="@(SbomFile)" DestinationFiles="@(SbomFile->'%(TargetPath)')" />
 		<RemoveDir Directories="$(SbomUnzipPath)" />
