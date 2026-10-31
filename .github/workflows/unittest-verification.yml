@@ -28,11 +28,6 @@ jobs:
       - name: Build project
         run: dotnet build ./WebExpress.WebCore.slnx --no-restore --configuration Release
 
-      # dotnet test only accepts --project/--report-trx in Microsoft.Testing.Platform mode,
-      # which global.json switches on; the repo deliberately ships without one
-      - name: Use Microsoft.Testing.Platform
-        run: echo '{"test":{"runner":"Microsoft.Testing.Platform"}}' > global.json
-
       - name: Run xUnit tests
         id: tests
         continue-on-error: true
