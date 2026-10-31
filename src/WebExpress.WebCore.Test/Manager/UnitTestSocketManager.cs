@@ -1,5 +1,6 @@
 ﻿using WebExpress.WebCore.Test.Fixture;
 using WebExpress.WebCore.WebComponent;
+using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPlugin;
 using WebExpress.WebCore.WebSocket;
 
@@ -84,6 +85,27 @@ namespace WebExpress.WebCore.Test.Manager
 
             // act
             Assert.Equal(contextPath, socket.Route.ToString());
+        }
+
+        /// <summary>
+        /// Verifies that a plain http request to a socket endpoint, which never passed the
+        /// handshake, is told to upgrade instead of failing the dispatch with a server error.
+        /// </summary>
+        [Fact]
+        public void HandleRequest_WithoutHandshake_RequiresUpgrade()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var socket = componentHub.SocketManager.Sockets.First();
+            var request = UnitTestFixture.CreateRequestMock();
+
+            // act
+            var response = componentHub.EndpointManager.HandleRequest(request, socket);
+
+            // validation
+            var upgrade = Assert.IsType<ResponseUpgradeRequired>(response);
+            Assert.Equal(426, upgrade.Status);
+            Assert.Equal("websocket", upgrade.Header.Upgrade);
         }
 
         /// <summary>
