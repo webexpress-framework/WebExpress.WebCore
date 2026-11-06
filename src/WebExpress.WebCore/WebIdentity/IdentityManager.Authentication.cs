@@ -119,10 +119,11 @@ namespace WebExpress.WebCore.WebIdentity
                 state.Changed = true;
                 return null;
             }
-            state.Identity = ValidateAccessToken(pair.AccessToken, request.ApplicationContext);
-            state.Pair = pair;
+            // a grant that may no longer act is not renewed either; its cookies are removed as above
+            state.Identity = Confirm(ValidateAccessToken(pair.AccessToken, request.ApplicationContext), pair.AccessToken, request);
+            state.Pair = state.Identity is not null ? pair : null;
             state.Changed = true;
-            return pair;
+            return state.Pair;
         }
 
         /// <summary>
@@ -150,7 +151,7 @@ namespace WebExpress.WebCore.WebIdentity
         {
             if (request?.ApplicationContext is null) { return null; }
             if (_authenticationStates.TryGetValue(request, out var state)) { return state.Identity; }
-            var identity = AuthenticateRequest(request);
+            var identity = Confirm(AuthenticateRequest(request, out var token), token, request);
             if (identity is not null)
             {
                 Metrics?.RecordActiveUser(identity.Id);
@@ -165,18 +166,20 @@ namespace WebExpress.WebCore.WebIdentity
         /// Verifies the credential a request carries, preferring an explicit authorization header over the browser cookie.
         /// </summary>
         /// <param name="request">The HTTP request whose authentication context is being evaluated.</param>
+        /// <param name="token">The credential the request carries, or null.</param>
         /// <returns>The verified request identity, or null when no accepted credential authenticates it.</returns>
-        private IIdentity AuthenticateRequest(IRequest request)
+        private IIdentity AuthenticateRequest(IRequest request, out string token)
         {
             var authorization = request.Header.Authorization;
             // an explicit, invalid authorization header must never fall back to browser credentials
             if (authorization is not null)
             {
+                token = authorization.Token;
                 return string.Equals(authorization.Type, "Bearer", StringComparison.OrdinalIgnoreCase)
                     ? ValidatePersonalAccessToken(authorization.Token, request.ApplicationContext) : null;
             }
-            var cookie = CookieValue(request, AccessCookie);
-            return cookie is null ? null : ValidateAccessToken(cookie, request.ApplicationContext);
+            token = CookieValue(request, AccessCookie);
+            return token is null ? null : ValidateAccessToken(token, request.ApplicationContext);
         }
 
         /// <summary>

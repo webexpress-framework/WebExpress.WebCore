@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace WebExpress.WebCore.WebSetting
 {
@@ -56,5 +57,17 @@ namespace WebExpress.WebCore.WebSetting
         /// Chooses an application for the root authentication endpoints when none is supplied.
         /// </summary>
         public string ApplicationId { get; set; }
+
+        /// <summary>
+        /// Names groups of applications whose tokens are accepted by each other, so one sign-in
+        /// serves all of them. The browser keeps one access cookie for the whole host; without a
+        /// group a sign-in to one application would end the sign-in to the other. Grant revocations
+        /// and refresh replay markers have to reach every member, so the members share one token
+        /// store - the default store does, a plugin-supplied store has to.
+        /// </summary>
+        /// <example>
+        /// "ApplicationGroups": { "kleenestar": [ "kleenestar.core", "kleenestar.portal" ] }
+        /// </example>
+        public Dictionary<string, List<string>> ApplicationGroups { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

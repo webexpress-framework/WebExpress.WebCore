@@ -219,7 +219,17 @@ namespace WebExpress.WebCore
                     return 1;
                 }
 
-                PackageBuilder.Create(argumentDict["spec"], argumentDict["config"], argumentDict["target"], argumentDict["output"]);
+                try
+                {
+                    PackageBuilder.Create(argumentDict["spec"], argumentDict["config"], argumentDict["target"], argumentDict["output"]);
+                }
+                catch (Exception ex)
+                {
+                    // the post build step only shows the exit code, so the reason has to be on the console
+                    Console.Error.WriteLine($"*** PackageBuilder: {ex.Message}");
+
+                    return 1;
+                }
 
                 return 0;
             }

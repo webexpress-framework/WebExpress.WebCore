@@ -126,7 +126,7 @@ namespace WebExpress.WebCore.WebAsset
                 }
             }
 
-            Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+            Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
         }
 
         /// <summary>
