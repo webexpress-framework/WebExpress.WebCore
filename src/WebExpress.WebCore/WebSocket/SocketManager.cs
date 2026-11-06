@@ -283,7 +283,7 @@ namespace WebExpress.WebCore.WebSocket
                 return;
             }
 
-            Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+            Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
         }
 
         /// <summary>

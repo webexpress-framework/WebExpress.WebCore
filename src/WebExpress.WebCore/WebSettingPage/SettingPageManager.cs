@@ -229,9 +229,9 @@ namespace WebExpress.WebCore.WebSettingPage
                 return;
             }
 
-            RegisterCategory(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
-            RegisterGroup(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
-            RegisterPage(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+            RegisterCategory(pluginContext, _componentHub.GetBoundApplications(pluginContext));
+            RegisterGroup(pluginContext, _componentHub.GetBoundApplications(pluginContext));
+            RegisterPage(pluginContext, _componentHub.GetBoundApplications(pluginContext));
         }
 
         /// <summary>

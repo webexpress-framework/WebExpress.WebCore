@@ -89,7 +89,7 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="plugin">The plugin whose authentication source bindings are affected.</param>
         private void OnAddPlugin(object sender, IPluginContext plugin)
         {
-            foreach (var application in _hub.ApplicationManager.GetApplications(plugin)) { Discover(plugin, application); }
+            foreach (var application in _hub.GetBoundApplications(plugin)) { Discover(plugin, application); }
         }
 
         /// <summary>

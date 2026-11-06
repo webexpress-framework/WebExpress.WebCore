@@ -367,7 +367,7 @@ namespace WebExpress.WebCore.WebRestApi
                     return;
                 }
 
-                Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+                Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
             }
         }
 

@@ -286,7 +286,7 @@ namespace WebExpress.WebCore.WebPage
                 return;
             }
 
-            Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+            Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
         }
 
         /// <summary>
