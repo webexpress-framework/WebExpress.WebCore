@@ -281,7 +281,7 @@ namespace WebExpress.WebCore.WebLog
                         break;
                 }
 
-                Console.WriteLine(text.Length > _separatorWidth ? string.Concat(text.AsSpan(0, _separatorWidth - 3), "...") : text.PadRight(_width, ' '));
+                Console.WriteLine(level != LogLevel.Exception && text.Length > _separatorWidth ? string.Concat(text.AsSpan(0, _separatorWidth - 3), "...") : text.PadRight(_width, ' '));
                 Console.ResetColor();
             }
         }
@@ -534,9 +534,9 @@ namespace WebExpress.WebCore.WebLog
         }
 
         /// <summary>
-        /// Logs an exception message.
+        /// Preserves exception types, nested causes and stack traces for failure diagnosis.
         /// </summary>
-        /// <param name="exception">The exception</param>
+        /// <param name="exception">The exception whose complete diagnostic details are required.</param>
         /// <param name="instance">>Method/ function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
@@ -547,10 +547,7 @@ namespace WebExpress.WebCore.WebLog
                 var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
                 var className = methodInfo?.ReflectedType.Name;
 
-                Add(LogLevel.Exception, exception?.Message.Trim(), $"{className}.{instance}", line, file);
-                Add(LogLevel.Exception, exception?.StackTrace is not null
-                    ? exception?.StackTrace.Trim()
-                    : exception?.Message.Trim(), $"{className}.{instance}", line, file);
+                Add(LogLevel.Exception, exception?.ToString(), $"{className}.{instance}", line, file);
             }
             catch (Exception ex)
             {

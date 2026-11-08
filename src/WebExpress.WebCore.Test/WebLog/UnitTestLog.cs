@@ -46,6 +46,95 @@ namespace WebExpress.WebCore.Test.WebLog
         }
 
         /// <summary>
+        /// Ensures reflection failures retain their nested cause and original throw site in every output.
+        /// </summary>
+        [Fact]
+        public void ExceptionPreservesNestedCauseInConsoleAndFile()
+        {
+            // arrange
+            var dir = CreateTempDirectory();
+            var log = new Log { LogMode = LogMode.Append };
+            var originalOutput = Console.Out;
+            using var output = new StringWriter();
+            var exception = Record.Exception(() => Activator.CreateInstance(typeof(FailingPlugin)));
+            try
+            {
+                Console.SetOut(output);
+                log.Begin(dir, "exception.log");
+
+                // act
+                log.Exception(exception);
+                log.Close();
+
+                // validation
+                var messages = new[]
+                {
+                    output.ToString(),
+                    File.ReadAllText(Path.Combine(dir, "exception.log")),
+                    string.Join(Environment.NewLine, log.GetRecentEntries().Select(entry => entry.Message))
+                };
+                foreach (var message in messages)
+                {
+                    Assert.Contains("System.Reflection.TargetInvocationException", message);
+                    Assert.Contains("System.InvalidOperationException", message);
+                    Assert.Contains("System.IO.IOException", message);
+                    Assert.Contains(FailingPlugin.FailureMessage, message);
+                    Assert.Contains(nameof(FailingPlugin) + "..ctor", message);
+                }
+                Assert.Equal(1, log.ExceptionCount);
+                Assert.Equal(1, log.ErrorCount);
+            }
+            finally
+            {
+                Console.SetOut(originalOutput);
+                log.Close();
+                Directory.Delete(dir, true);
+            }
+        }
+
+        /// <summary>
+        /// Ensures parallel failures retain every cause rather than only the first inner exception.
+        /// </summary>
+        [Fact]
+        public void ExceptionPreservesAllAggregateCauses()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+            var exception = new AggregateException(
+                new InvalidOperationException("first failure"),
+                new IOException("second failure"));
+
+            // act
+            log.Exception(exception);
+
+            // validation
+            var message = string.Join(Environment.NewLine, log.GetRecentEntries().Select(entry => entry.Message));
+            Assert.Contains("System.InvalidOperationException: first failure", message);
+            Assert.Contains("System.IO.IOException: second failure", message);
+            Assert.Equal(1, log.ExceptionCount);
+            Assert.Equal(1, log.ErrorCount);
+        }
+
+        /// <summary>
+        /// Reproduces constructor failures wrapped by reflection during plugin activation.
+        /// </summary>
+        private sealed class FailingPlugin
+        {
+            /// <summary>
+            /// Provides a cause longer than the console width to detect diagnostic truncation.
+            /// </summary>
+            public static string FailureMessage => new string('x', 500) + " root cause";
+
+            /// <summary>
+            /// Fails with nested diagnostic context to reproduce an activation error.
+            /// </summary>
+            public FailingPlugin()
+            {
+                throw new InvalidOperationException("Plugin initialization failed.", new IOException(FailureMessage));
+            }
+        }
+
+        /// <summary>
         /// Tests that clearing resets all counters.
         /// </summary>
         [Fact]
