@@ -417,6 +417,13 @@ namespace WebExpress.WebCore
                 _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.uri"), args: v.Uri);
             }
 
+            _httpServer.HttpServerContext.Log?.Info(message: $"External URI: {SettingsLog.FormatValue("WebExpress:ExternalUri", settings.ExternalUri)}");
+            _httpServer.HttpServerContext.Log?.Info(message: $"Context path: {settings.ContextPath ?? "(empty)"}");
+            foreach (var parameter in configuration.AsEnumerable().Where(x => x.Value is not null).OrderBy(x => x.Key, StringComparer.Ordinal))
+            {
+                _httpServer.HttpServerContext.Log?.Info(message: $"Configuration {parameter.Key}: {SettingsLog.FormatValue(parameter.Key, parameter.Value)}");
+            }
+
             _httpServer.HttpServerContext.Log?.Separator('=');
 
             Directory.CreateDirectory(packageBase);

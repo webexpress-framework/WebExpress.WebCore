@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http.Features;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using System;
 using System.Net;
 using System.Text;
@@ -67,7 +68,8 @@ namespace WebExpress.WebCore.WebMessage
             var connectionFeature = contextFeatures.Get<IHttpConnectionFeature>();
             var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
             var header = new RequestHeaderFields(contextFeatures);
-            var baseUri = new UriBuilder(requestFeature.Scheme, HostNameOf(header.Host), connectionFeature.LocalPort).Uri;
+            var requestHost = new HostString(header.Host);
+            var baseUri = new UriBuilder(requestFeature.Scheme, HostNameOf(header.Host), requestHost.Port ?? -1).Uri;
 
             Features = contextFeatures;
             Id = connectionFeature.ConnectionId;

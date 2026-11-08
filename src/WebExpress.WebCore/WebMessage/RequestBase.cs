@@ -171,7 +171,8 @@ namespace WebExpress.WebCore.WebMessage
                 new UriAuthority()
                 {
                     Host = requestHost.Host,
-                    Port = requestHost.Port ?? connectionFeature.LocalPort
+                    // an omitted host port denotes the scheme default, never the internal listener port
+                    Port = requestHost.Port
                 },
                 requestFeature.RawTarget
             );

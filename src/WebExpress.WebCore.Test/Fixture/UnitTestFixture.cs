@@ -197,6 +197,7 @@ namespace WebExpress.WebCore.Test.Fixture
 
             var requestFeature = new HttpRequestFeature
             {
+                Scheme = "http",
                 Headers = new HeaderDictionary
                 {
                     ["Host"] = "localhost",
