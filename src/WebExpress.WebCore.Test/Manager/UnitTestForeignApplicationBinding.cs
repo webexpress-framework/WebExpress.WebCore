@@ -9,6 +9,7 @@ using WebExpress.WebCore.WebHtml;
 using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPage;
 using WebExpress.WebCore.WebPlugin;
+using WebExpress.WebCore.WebRestApi;
 using WebExpress.WebCore.WebSitemap;
 
 namespace WebExpress.WebCore.Test.Manager
@@ -24,9 +25,11 @@ namespace WebExpress.WebCore.Test.Manager
         private const string AssetContent = "/* foreign */";
 
         /// <summary>
-        /// Tests that page, fragment and asset of a plugin loaded after the foreign application
-        /// are bound to that application. A contributing plugin serves its pages under its name and its
-        /// assets under its id, below the application's context path.
+        /// Tests that page, rest api, fragment and asset of a plugin loaded after the foreign
+        /// application are bound to that application. A contributing plugin serves all of them under
+        /// its id, below the application's context path. The plugin's name is an i18n key, which
+        /// must not leak into the route: its colon would end up in the path and the pages would
+        /// drift away from the assets.
         /// </summary>
         [Fact]
         public void PluginAfterApplication()
@@ -44,7 +47,9 @@ namespace WebExpress.WebCore.Test.Manager
             // validation
             Assert.Single(plugins);
             Assert.Contains(application, componentHub.PluginManager.GetAssociatedApplications(plugins[0]));
-            Assert.Equal("webexpress.webcore.test.foreign.www.extension", Search(componentHub, "http://localhost:8080/server/appa/foreign/extension"));
+            Assert.Equal("webexpress.webcore.test.foreign.www.extension", Search(componentHub, "http://localhost:8080/server/appa/webexpress.webcore.test.foreign/extension"));
+            Assert.Equal("webexpress.webcore.test.foreign.www.api._1_.data", Search(componentHub, "http://localhost:8080/server/appa/webexpress.webcore.test.foreign/api/1/data"));
+            Assert.Null(Search(componentHub, "http://localhost:8080/server/appa/foreign:plugin.name/extension"));
             Assert.Single(componentHub.FragmentManager.GetFragments(application, foreign.Fragment));
             Assert.Equal(AssetContent, Request(componentHub, "http://localhost:8080/server/appa/webexpress.webcore.test.foreign/assets/css/foreign.css"));
         }
@@ -67,7 +72,7 @@ namespace WebExpress.WebCore.Test.Manager
 
             // validation
             Assert.Empty(componentHub.FragmentManager.GetFragments(application, foreign.Fragment));
-            Assert.Null(Search(componentHub, "http://localhost:8080/server/appb/foreign/extension"));
+            Assert.Null(Search(componentHub, "http://localhost:8080/server/appb/webexpress.webcore.test.foreign/extension"));
         }
 
         /// <summary>
@@ -143,7 +148,7 @@ namespace WebExpress.WebCore.Test.Manager
             }
 
             /// <summary>
-            /// Emits the plugin, a page under WWW and a fragment, each a sealed subclass of a base
+            /// Emits the plugin, a page and a rest api under WWW and a fragment, each a sealed subclass of a base
             /// in the test assembly.
             /// </summary>
             /// <returns>The plugin assembly.</returns>
@@ -154,11 +159,12 @@ namespace WebExpress.WebCore.Test.Manager
 
                 var plugin = Emit(module, $"{AssemblyName}.ForeignPlugin", typeof(ForeignPluginBase),
                     Attribute(typeof(ApplicationAttribute<TestApplicationA>)),
-                    new CustomAttributeBuilder(typeof(NameAttribute).GetConstructor([typeof(string)]), ["Foreign"]));
+                    new CustomAttributeBuilder(typeof(NameAttribute).GetConstructor([typeof(string)]), ["foreign:plugin.name"]));
                 var page = Emit(module, $"{AssemblyName}.WWW.Extension", typeof(ForeignPageBase));
+                var restApi = Emit(module, $"{AssemblyName}.WWW.Api._1_.Data", typeof(ForeignRestApiBase));
                 var fragment = Emit(module, $"{AssemblyName}.ForeignFragment", typeof(ForeignFragmentBase), Attribute(typeof(SectionAttribute<TestSectionA>)));
 
-                return new ForeignAssembly(builder, [plugin, page, fragment], fragment);
+                return new ForeignAssembly(builder, [plugin, page, restApi, fragment], fragment);
             }
 
             /// <summary>
@@ -314,6 +320,19 @@ namespace WebExpress.WebCore.Test.Manager
         /// Releases the page.
         /// </summary>
         public override void Dispose()
+        {
+        }
+    }
+
+    /// <summary>
+    /// The base of the emitted foreign rest api. Abstract, so the test plugin does not discover it.
+    /// </summary>
+    public abstract class ForeignRestApiBase : IRestApi
+    {
+        /// <summary>
+        /// Releases the rest api.
+        /// </summary>
+        public void Dispose()
         {
         }
     }
