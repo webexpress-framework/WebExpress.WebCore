@@ -468,7 +468,10 @@ namespace WebExpress.WebCore.WebUri
         }
 
         /// <summary>
-        /// Creates a new endpoint uri and fills it with the given parameters.
+        /// Creates a new endpoint uri and fills it with the given parameters. Only path
+        /// variables that carry no value yet are filled: a bound segment stays a variable, so
+        /// binding the request of the current page onto a link that already names another
+        /// record would otherwise turn it into a link to the current record.
         /// </summary>
         /// <param name="parameters">
         /// The parameters that fill in the variable parts of the uri.
@@ -492,6 +495,7 @@ namespace WebExpress.WebCore.WebUri
                 pathSegments = pathSegments.Select(x =>
                 {
                     if (x is IUriPathSegmentVariable variable &&
+                        string.IsNullOrEmpty(variable.Value) &&
                         variable.VariableName.Equals(key, StringComparison.OrdinalIgnoreCase))
                     {
                         var copy = variable.Copy() as IUriPathSegmentVariable;

@@ -414,5 +414,29 @@ namespace WebExpress.WebCore.Test.WebUri
             Assert.Equal("/a/${testparametera}/b?testparameterb=", uri.ToString());
             Assert.Equal("/a/10/b?testparameterb=20", bind.ToString());
         }
+
+        /// <summary>
+        /// Tests that a path variable which already carries a value keeps it, so a link to
+        /// record 7 rendered on the page of record 42 still leads to 7.
+        /// </summary>
+        [Fact]
+        public void BindParametersKeepsBoundVariable()
+        {
+            // arrange
+            var pathSegments = new IUriPathSegment[]
+            {
+                new UriPathSegmentConstant("a"),
+                new UriPathSegmentVariableInt<TestParameterA>()
+            };
+
+            var uri = new UriEndpoint(pathSegments)
+                .BindParameters(new TestParameterA() { Value = "7" });
+
+            // act
+            var bind = uri.BindParameters(new TestParameterA() { Value = "42" });
+
+            // validation
+            Assert.Equal("/a/7", bind.ToString());
+        }
     }
 }
