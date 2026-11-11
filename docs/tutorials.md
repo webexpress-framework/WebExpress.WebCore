@@ -14,5 +14,8 @@ Begin with our basic tutorial:
 
 This tutorial will guide you through the initial steps of creating and running your first `WebExpress` application.
 
+# Contributing an item from a plugin
+An application can open an extension point to other plugins without any registration: it defines an interface and collects its implementations with a `PluginTypeCatalog<TItem>`, and a plugin contributes one by shipping a `public sealed` class with a parameterless constructor. The [Plugin type catalog](plugin-type-catalog.md) page walks through an export-format example - the manager, a contributed format and the test that keeps it findable.
+
 Stay tuned for more exciting and educational tutorials to help you unlock the full potential of `WebExpress`. Happy coding and 
 best of luck with your projects!

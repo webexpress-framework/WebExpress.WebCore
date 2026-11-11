@@ -20,6 +20,10 @@ We hope you enjoy using `WebExpress.WebCore` and find it valuable for your proje
 
 The container health endpoint is documented in the [Health model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#health-model) section of the Development Guide. WebCore provides `/health` globally, and applications contribute critical dependency checks as public sealed `IHealth` components in `WebExpress.WebCore.WebHealth`. The `HealthManager` discovers these components through the plugin and application lifecycle. The guide includes the component model, a database example, the HTTP contract, and Docker and Kubernetes probe configuration.
 
+## Plugin type catalog
+
+An application's own extension points - every `public sealed` implementation of an interface any plugin ships - are collected by `PluginTypeCatalog<TItem>` in `WebExpress.WebCore.WebPlugin`, the building block the `HealthManager` uses for its checks. A manager holds it as a field: it sweeps the loaded plugins, follows the ones arriving and leaving, keeps track of which plugin provides which key and falls back to another plugin's offer when the provider leaves. The [Plugin type catalog](plugin-type-catalog.md) page describes the convention, the ownership rules, the binding per application and an example.
+
 ## Metrics
 
 The Prometheus endpoint is documented in the [Metrics model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#metrics-model) section of the Development Guide. WebCore provides `/metrics` globally with request, error, login, active user, process, and runtime metrics. Applications record their own values with `MetricCounter`, `MetricGauge`, and `MetricHistogram` instruments, or report them at scrape time as public sealed `IMetric` components in `WebExpress.WebCore.WebMetrics`. The `MetricsManager` discovers these components through the plugin and application lifecycle and labels every series with its application. The guide includes an LDAP example, the list of framework metrics, the HTTP contract, and Prometheus, Kubernetes, and alerting configuration.
