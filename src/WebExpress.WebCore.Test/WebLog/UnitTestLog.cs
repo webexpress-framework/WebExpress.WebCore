@@ -238,25 +238,41 @@ namespace WebExpress.WebCore.Test.WebLog
         }
 
         /// <summary>
-        /// Tests that an exception is on the console once the logging call returns. The process
-        /// may die right after logging it, and then no shutdown hook drains the queue.
+        /// Tests that neither an exception nor a fatal error waits for the console. They are
+        /// logged where the code goes on - in a request or a shutdown drain - which a slow console
+        /// would otherwise hold up; the entry still reaches the console with the next flush.
         /// </summary>
-        [Fact]
-        public void ExceptionIsOnConsoleWhenCallReturns()
+        /// <param name="fatal">True to log a fatal error, false to log an exception.</param>
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void ErrorDoesNotWaitForConsole(bool fatal)
         {
             // arrange
             var log = new Log { LogMode = LogMode.Off };
+            var lines = string.Join(Environment.NewLine, Enumerable.Range(0, 20).Select(x => $"console-line-{x}"));
             var originalOutput = Console.Out;
-            using var output = new StringWriter();
-            string text;
+            using var output = new SlowWriter(TimeSpan.FromMilliseconds(500));
+            var stopwatch = new System.Diagnostics.Stopwatch();
 
             try
             {
                 Console.SetOut(output);
 
                 // act
-                log.Exception(new InvalidOperationException("console-exception-marker"));
-                text = output.ToString();
+                stopwatch.Start();
+
+                if (fatal)
+                {
+                    log.FatalError(lines);
+                }
+                else
+                {
+                    log.Exception(new InvalidOperationException(lines));
+                }
+
+                stopwatch.Stop();
+                Log.FlushConsole();
             }
             finally
             {
@@ -264,7 +280,25 @@ namespace WebExpress.WebCore.Test.WebLog
             }
 
             // validation
-            Assert.Contains("console-exception-marker", text);
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromMilliseconds(250), $"logging took {stopwatch.Elapsed}");
+            Assert.Contains("console-line-19", output.ToString());
+        }
+
+        /// <summary>
+        /// A console whose every write takes a while, as a redirected or captured console does.
+        /// </summary>
+        /// <param name="delay">The time a write takes.</param>
+        private sealed class SlowWriter(TimeSpan delay) : StringWriter
+        {
+            /// <summary>
+            /// Writes a block of entries after the delay.
+            /// </summary>
+            /// <param name="value">The block.</param>
+            public override void Write(string value)
+            {
+                Thread.Sleep(delay);
+                base.Write(value);
+            }
         }
 
         /// <summary>

@@ -293,9 +293,11 @@ namespace WebExpress.WebCore.WebLog
 
         /// <summary>
         /// Queues a single, color-coded entry for the console writer. The queue keeps the order
-        /// of the calls, so entries never interleave or swap colors. Fatal errors and exceptions
-        /// wait until they are on the console, because the process may die right after them -
-        /// through Environment.FailFast for instance - without any shutdown hook running.
+        /// of the calls, so entries never interleave or swap colors. No level waits until its
+        /// entry is on the console: an entry is logged where the code goes on - in a request or
+        /// a shutdown drain - and a wait there is a round trip through the writer the whole
+        /// process shares, which a slow console stretches to seconds. Closing the log, a regular
+        /// exit and a crash drain the queue.
         /// </summary>
         /// <param name="level">The level of the entry, which selects the console color.</param>
         /// <param name="text">The fully formatted entry text.</param>
@@ -320,12 +322,6 @@ namespace WebExpress.WebCore.WebLog
                 // the writer is gone or stuck; writing directly keeps the entry and, above all,
                 // keeps the caller from waiting on a queue nobody drains any more
                 WriteBlock(color, line.Text + Environment.NewLine);
-                return;
-            }
-
-            if (level is LogLevel.FatalError or LogLevel.Exception)
-            {
-                FlushConsole();
             }
         }
 
