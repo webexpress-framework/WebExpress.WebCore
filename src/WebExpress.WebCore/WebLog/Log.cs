@@ -55,9 +55,14 @@ namespace WebExpress.WebCore.WebLog
         (
             new BoundedChannelOptions(10_000) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait }
         );
-        private static readonly Task _consoleWriter = Task.Run(WriteConsoleAsync);
         private static readonly TimeSpan _consoleDrainTimeout = TimeSpan.FromSeconds(5);
         private const int _consoleBatchSize = 256;
+
+        // the background writer and the direct fallback must not interleave their color changes
+        private static readonly Lock _consoleWriteLock = new();
+
+        // started last, so everything the writer touches is initialized before it runs
+        private static readonly Task _consoleWriter = Task.Run(WriteConsoleAsync);
 
         // the class part of the origin column comes from the caller's file name; resolving it once
         // per file keeps the string work off the logging path
@@ -135,6 +140,19 @@ namespace WebExpress.WebCore.WebLog
         /// isolated so it cannot break logging.
         /// </summary>
         public event EventHandler<LogEntry> EntryLogged;
+
+        /// <summary>
+        /// Hooks the console drain into process shutdown. This happens here and not in the writer
+        /// task, so the hooks are in place before the first entry is queued, even if the process
+        /// ends before the thread pool ever started the writer.
+        /// </summary>
+        static Log()
+        {
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => FlushConsole();
+
+            // a crash skips ProcessExit, and the entries describing it are the ones that matter
+            AppDomain.CurrentDomain.UnhandledException += (_, _) => FlushConsole();
+        }
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -275,7 +293,9 @@ namespace WebExpress.WebCore.WebLog
 
         /// <summary>
         /// Queues a single, color-coded entry for the console writer. The queue keeps the order
-        /// of the calls, so entries never interleave or swap colors.
+        /// of the calls, so entries never interleave or swap colors. Fatal errors and exceptions
+        /// wait until they are on the console, because the process may die right after them -
+        /// through Environment.FailFast for instance - without any shutdown hook running.
         /// </summary>
         /// <param name="level">The level of the entry, which selects the console color.</param>
         /// <param name="text">The fully formatted entry text.</param>
@@ -295,30 +315,80 @@ namespace WebExpress.WebCore.WebLog
                 null
             );
 
-            if (!_console.Writer.TryWrite(line))
+            if (!Enqueue(line))
             {
-                _console.Writer.WriteAsync(line).AsTask().GetAwaiter().GetResult();
+                // the writer is gone or stuck; writing directly keeps the entry and, above all,
+                // keeps the caller from waiting on a queue nobody drains any more
+                WriteBlock(color, line.Text + Environment.NewLine);
+                return;
+            }
+
+            if (level is LogLevel.FatalError or LogLevel.Exception)
+            {
+                FlushConsole();
+            }
+        }
+
+        /// <summary>
+        /// Hands an item to the console writer. A full queue slows the caller down, but only as
+        /// long as the writer is alive and makes progress within the drain timeout.
+        /// </summary>
+        /// <param name="line">The entry or flush marker to queue.</param>
+        /// <returns>True if the item was queued, false if the writer cannot take it.</returns>
+        private static bool Enqueue(ConsoleLine line)
+        {
+            if (_console.Writer.TryWrite(line))
+            {
+                return true;
+            }
+
+            if (_consoleWriter.IsCompleted)
+            {
+                return false;
+            }
+
+            // a canceled write is never queued, so a timed-out entry cannot show up twice
+            using var timeout = new CancellationTokenSource(_consoleDrainTimeout);
+
+            try
+            {
+                _console.Writer.WriteAsync(line, timeout.Token).AsTask().GetAwaiter().GetResult();
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
             }
         }
 
         /// <summary>
         /// Waits until every console entry queued so far has been written. Used where the output
-        /// must be complete - when logging stops and before the process exits.
+        /// must be complete - when logging stops and before the process exits. Queuing the marker
+        /// and waiting for it share one timeout, so a stalled console delays shutdown by at most
+        /// that long.
         /// </summary>
         public static void FlushConsole()
         {
-            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
             if (_consoleWriter.IsCompleted)
             {
                 return;
             }
 
+            using var timeout = new CancellationTokenSource(_consoleDrainTimeout);
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var marker = new ConsoleLine(null, null, done);
 
-            if (_console.Writer.TryWrite(marker) || _console.Writer.WriteAsync(marker).AsTask().Wait(_consoleDrainTimeout))
+            try
             {
-                done.Task.Wait(_consoleDrainTimeout);
+                if (!_console.Writer.TryWrite(marker))
+                {
+                    _console.Writer.WriteAsync(marker, timeout.Token).AsTask().GetAwaiter().GetResult();
+                }
+
+                done.Task.Wait(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
             }
         }
 
@@ -329,8 +399,6 @@ namespace WebExpress.WebCore.WebLog
         /// </summary>
         private static async Task WriteConsoleAsync()
         {
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => FlushConsole();
-
             var reader = _console.Reader;
             var batch = new List<ConsoleLine>(_consoleBatchSize);
             var block = new StringBuilder();
@@ -342,37 +410,34 @@ namespace WebExpress.WebCore.WebLog
                     batch.Add(line);
                 }
 
-                try
+                var index = 0;
+                while (index < batch.Count)
                 {
-                    var index = 0;
-                    while (index < batch.Count)
+                    if (batch[index].Done is { } done)
                     {
-                        if (batch[index].Done is { } done)
-                        {
-                            done.TrySetResult();
-                            index++;
-                            continue;
-                        }
+                        done.TrySetResult();
+                        index++;
+                        continue;
+                    }
 
-                        var color = batch[index].Color;
-                        block.Clear();
+                    var color = batch[index].Color;
+                    block.Clear();
 
-                        while (index < batch.Count && batch[index].Done is null && batch[index].Color == color)
-                        {
-                            block.AppendLine(batch[index].Text);
-                            index++;
-                        }
+                    while (index < batch.Count && batch[index].Done is null && batch[index].Color == color)
+                    {
+                        block.AppendLine(batch[index].Text);
+                        index++;
+                    }
 
+                    try
+                    {
                         WriteBlock(color, block.ToString());
                     }
-                }
-                catch
-                {
-                    // a closed or redirected console must not stop the writer for good, and a
-                    // waiting flush is released either way
-                    foreach (var line in batch)
+                    catch (Exception ex)
                     {
-                        line.Done?.TrySetResult();
+                        // only this block is lost; the rest of the batch and every waiting flush
+                        // still get their turn, so a closed or redirected console cannot stop the writer
+                        ReportConsoleFailure(ex);
                     }
                 }
 
@@ -387,27 +452,55 @@ namespace WebExpress.WebCore.WebLog
         /// <param name="text">The entries, each terminated by a line break.</param>
         private static void WriteBlock(ConsoleColor? color, string text)
         {
-            if (color is null)
+            lock (_consoleWriteLock)
             {
-                Console.Out.Write(text);
-                return;
-            }
+                try
+                {
+                    // a default block resets as well: a color left behind by another component
+                    // would otherwise tint every info entry after it
+                    if (color is null)
+                    {
+                        Console.ResetColor();
+                    }
+                    else
+                    {
+                        Console.ForegroundColor = color.Value;
+                    }
 
-            Console.ForegroundColor = color.Value;
+                    Console.Out.Write(text);
+                }
+                finally
+                {
+                    if (color is not null)
+                    {
+                        Console.ResetColor();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Reports that console output was lost. The notice goes to the error stream, because the
+        /// output stream is the one that just failed.
+        /// </summary>
+        /// <param name="exception">The failure of the console write.</param>
+        private static void ReportConsoleFailure(Exception exception)
+        {
             try
             {
-                Console.Out.Write(text);
+                Console.Error.WriteLine($"Logging failed: {exception.Message}");
             }
-            finally
+            catch
             {
-                Console.ResetColor();
+                // nothing is left to report to
             }
         }
 
         /// <summary>
         /// Builds the origin column of an entry from the caller's class and member. The class is
         /// taken from the source file name the compiler passes in; walking the stack at run time
-        /// for it cost more than the rest of the logging call.
+        /// for it cost more than the rest of the logging call. The price is that a nested class,
+        /// or a second class in the same file, is reported under the file's main class.
         /// </summary>
         /// <param name="instance">The calling member, or an explicit origin.</param>
         /// <param name="file">The caller's source file, or null when the origin is explicit.</param>
@@ -423,7 +516,10 @@ namespace WebExpress.WebCore.WebLog
             {
                 // both separators: the path is the one of the build machine, not of this one
                 var start = path.LastIndexOfAny(['/', '\\']) + 1;
-                var end = path.IndexOf('.', start);
+
+                // the name ends before the extension, a partial part (Foo.Render.cs) or the
+                // type parameters of a generic file name (Foo{T}.cs, Foo`1.cs)
+                var end = path.IndexOfAny(['.', '{', '`'], start);
 
                 return end < 0 ? path[start..] : path[start..end];
             });

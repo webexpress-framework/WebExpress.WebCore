@@ -45,11 +45,14 @@ namespace WebExpress.WebCore.WebAsset.Model
                 return item;
             }
 
-            // a context built elsewhere for the same endpoint is not in the reference index
+            // a context built elsewhere for the same endpoint is not in the reference index. The
+            // application has to match as well: every application mounting the plugin shares the
+            // endpoint id, so a context of a removed application would otherwise be served by another one.
             return _dictionary.Values
                 .SelectMany(x => x.Values)
                 .SelectMany(x => x.Values)
-                .FirstOrDefault(x => x.AssetContext?.EndpointId?.Equals(assetContext.EndpointId) ?? false);
+                .FirstOrDefault(x => (x.AssetContext?.EndpointId?.Equals(assetContext.EndpointId) ?? false)
+                    && Equals(x.AssetContext.ApplicationContext, assetContext.ApplicationContext));
         }
 
         /// <summary>
@@ -109,6 +112,7 @@ namespace WebExpress.WebCore.WebAsset.Model
             if (assetList.Remove(assetItem.AssetContext.EndpointId, out var replaced))
             {
                 _byContext.Remove(replaced.AssetContext);
+                replaced.Dispose();
             }
 
             assetList.Add(assetItem.AssetContext.EndpointId, assetItem);

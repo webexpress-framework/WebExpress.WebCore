@@ -218,6 +218,56 @@ namespace WebExpress.WebCore.Test.WebLog
         }
 
         /// <summary>
+        /// Tests that the class taken from a generic or partial file name stops at the type
+        /// parameters or the part suffix, so the origin column names a class that exists.
+        /// </summary>
+        [Theory]
+        [InlineData(@"C:\src\Repository{TEntity}.cs", "Repository.Load")]
+        [InlineData("/src/Repository`1.cs", "Repository.Load")]
+        [InlineData("/src/Repository.Query.cs", "Repository.Load")]
+        public void OriginStripsGenericAndPartialFileNames(string file, string expected)
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+
+            // act
+            log.Info("origin", "Load", null, file);
+
+            // validation
+            Assert.Equal(expected, log.GetRecentEntries().Last().Instance);
+        }
+
+        /// <summary>
+        /// Tests that an exception is on the console once the logging call returns. The process
+        /// may die right after logging it, and then no shutdown hook drains the queue.
+        /// </summary>
+        [Fact]
+        public void ExceptionIsOnConsoleWhenCallReturns()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+            var originalOutput = Console.Out;
+            using var output = new StringWriter();
+            string text;
+
+            try
+            {
+                Console.SetOut(output);
+
+                // act
+                log.Exception(new InvalidOperationException("console-exception-marker"));
+                text = output.ToString();
+            }
+            finally
+            {
+                Console.SetOut(originalOutput);
+            }
+
+            // validation
+            Assert.Contains("console-exception-marker", text);
+        }
+
+        /// <summary>
         /// Tests that an explicit origin without a source file - as the Kestrel adapter passes
         /// it - is kept as given rather than prefixed with a class.
         /// </summary>

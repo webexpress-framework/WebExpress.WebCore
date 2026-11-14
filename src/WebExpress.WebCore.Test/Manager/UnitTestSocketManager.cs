@@ -50,6 +50,30 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that removing a plugin announces every socket it provided, so the endpoint
+        /// registration drops their routes. The removal used to enumerate the sockets only after
+        /// deleting them and announced none.
+        /// </summary>
+        [Fact]
+        public void RemoveAnnouncesEverySocket()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var socketManager = componentHub.SocketManager as SocketManager;
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+            var expected = socketManager.GetSockets(plugin).ToList();
+            var announced = new List<ISocketContext>();
+            socketManager.RemoveSocket += (_, socketContext) => announced.Add(socketContext);
+
+            // act
+            socketManager.Remove(plugin);
+
+            // validation
+            Assert.NotEmpty(expected);
+            Assert.Equal(expected.OrderBy(x => x.Route.ToString()), announced.OrderBy(x => x.Route.ToString()));
+        }
+
+        /// <summary>
         /// Test the id property of the socket.
         /// </summary>
         [Theory]

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using WebExpress.WebCore.WebApplication;
@@ -16,8 +17,9 @@ namespace WebExpress.WebCore.WebSocket.Model
         private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, Dictionary<Type, SocketItem>>> _dict = new Dictionary<IPluginContext, Dictionary<IApplicationContext, Dictionary<Type, SocketItem>>>();
 
         // every socket connection resolves its item by context; a scan over all items per
-        // connection showed up in the request profile
-        private readonly Dictionary<ISocketContext, SocketItem> _byContext = [];
+        // connection showed up in the request profile. Concurrent, because connections read it
+        // without a lock while adding or removing a plugin or application writes to it.
+        private readonly ConcurrentDictionary<ISocketContext, SocketItem> _byContext = new();
 
         /// <summary>
         /// Gets all socket contexts.
@@ -80,7 +82,7 @@ namespace WebExpress.WebCore.WebSocket.Model
 
             foreach (var item in removed)
             {
-                _byContext.Remove(item.SocketContext);
+                _byContext.TryRemove(item.SocketContext, out _);
                 item.Dispose();
             }
 
@@ -103,7 +105,7 @@ namespace WebExpress.WebCore.WebSocket.Model
 
             foreach (var item in removed)
             {
-                _byContext.Remove(item.SocketContext);
+                _byContext.TryRemove(item.SocketContext, out _);
                 item.Dispose();
             }
 
