@@ -15,6 +15,11 @@ namespace WebExpress.WebCore.WebAsset.Model
     {
         private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, OrderedDictionary<IComponentId, AssetItem>>> _dictionary = [];
 
+        // every asset request resolves its item here, and a plugin embeds thousands of assets per
+        // application; the sitemap hands back the very context instance registered, so a reference
+        // index answers in constant time where a scan over all items dominated the request cpu
+        private readonly Dictionary<IAssetContext, AssetItem> _byContext = new(ReferenceEqualityComparer.Instance);
+
         /// <summary>
         /// Gets all asset items.
         /// </summary>
@@ -35,6 +40,12 @@ namespace WebExpress.WebCore.WebAsset.Model
                 return null;
             }
 
+            if (_byContext.TryGetValue(assetContext, out var item))
+            {
+                return item;
+            }
+
+            // a context built elsewhere for the same endpoint is not in the reference index
             return _dictionary.Values
                 .SelectMany(x => x.Values)
                 .SelectMany(x => x.Values)
@@ -95,8 +106,13 @@ namespace WebExpress.WebCore.WebAsset.Model
             var assetList = value;
 
             // a later asset of the same endpoint replaces the earlier one and is listed last
-            assetList.Remove(assetItem.AssetContext.EndpointId);
+            if (assetList.Remove(assetItem.AssetContext.EndpointId, out var replaced))
+            {
+                _byContext.Remove(replaced.AssetContext);
+            }
+
             assetList.Add(assetItem.AssetContext.EndpointId, assetItem);
+            _byContext[assetItem.AssetContext] = assetItem;
 
             return true;
         }
@@ -122,6 +138,7 @@ namespace WebExpress.WebCore.WebAsset.Model
 
                 foreach (var assetItem in items)
                 {
+                    _byContext.Remove(assetItem.AssetContext);
                     assetItem.Dispose();
                 }
 
@@ -154,6 +171,7 @@ namespace WebExpress.WebCore.WebAsset.Model
                     foreach (var assetItem in assetList.Values)
                     {
                         removedAssets.Add(assetItem.AssetContext);
+                        _byContext.Remove(assetItem.AssetContext);
                         assetItem.Dispose();
                     }
                 }

@@ -15,6 +15,10 @@ namespace WebExpress.WebCore.WebSocket.Model
     {
         private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, Dictionary<Type, SocketItem>>> _dict = new Dictionary<IPluginContext, Dictionary<IApplicationContext, Dictionary<Type, SocketItem>>>();
 
+        // every socket connection resolves its item by context; a scan over all items per
+        // connection showed up in the request profile
+        private readonly Dictionary<ISocketContext, SocketItem> _byContext = [];
+
         /// <summary>
         /// Gets all socket contexts.
         /// </summary>
@@ -56,6 +60,7 @@ namespace WebExpress.WebCore.WebSocket.Model
             if (!socketDict.ContainsKey(type))
             {
                 socketDict[type] = socketItem;
+                _byContext[socketItem.SocketContext] = socketItem;
                 return true;
             }
 
@@ -68,12 +73,14 @@ namespace WebExpress.WebCore.WebSocket.Model
         /// <param name="pluginContext">The plugin context.</param>
         public IEnumerable<ISocketContext> RemoveSocket(IPluginContext pluginContext)
         {
-            var removed = GetSocketItems(pluginContext);
+            // materialized before the removal, which would otherwise leave the lazy query empty
+            var removed = GetSocketItems(pluginContext).ToList();
 
             _dict.Remove(pluginContext);
 
             foreach (var item in removed)
             {
+                _byContext.Remove(item.SocketContext);
                 item.Dispose();
             }
 
@@ -86,7 +93,8 @@ namespace WebExpress.WebCore.WebSocket.Model
         /// <param name="applicationContext">The application context.</param>
         public IEnumerable<ISocketContext> RemoveSocket(IApplicationContext applicationContext)
         {
-            var removed = GetSocketItems(applicationContext);
+            // materialized before the removal, which would otherwise leave the lazy query empty
+            var removed = GetSocketItems(applicationContext).ToList();
 
             foreach (var applicationDict in _dict.Values)
             {
@@ -95,6 +103,7 @@ namespace WebExpress.WebCore.WebSocket.Model
 
             foreach (var item in removed)
             {
+                _byContext.Remove(item.SocketContext);
                 item.Dispose();
             }
 
@@ -150,10 +159,9 @@ namespace WebExpress.WebCore.WebSocket.Model
         /// </returns>
         public SocketItem GetSocketItem(ISocketContext socketContext)
         {
-            return _dict.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .FirstOrDefault(x => x.SocketContext.Equals(socketContext));
+            return socketContext is not null && _byContext.TryGetValue(socketContext, out var item)
+                ? item
+                : null;
         }
 
         /// <summary>

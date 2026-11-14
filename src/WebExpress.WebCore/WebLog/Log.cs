@@ -1,11 +1,13 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
 using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebLog
@@ -45,7 +47,21 @@ namespace WebExpress.WebCore.WebLog
         // an interned, shared instance and is null until Begin has run - both are unsafe.
         private readonly Lock _fileLock = new();
         private readonly Lock _recentLock = new();
-        private static readonly Lock _consoleLock = new();
+
+        // the console is slow and serialized, so a request thread only queues its line; one
+        // background writer drains the queue. Bounded so a console that cannot keep up slows the
+        // callers down instead of growing memory without limit.
+        private static readonly Channel<ConsoleLine> _console = Channel.CreateBounded<ConsoleLine>
+        (
+            new BoundedChannelOptions(10_000) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait }
+        );
+        private static readonly Task _consoleWriter = Task.Run(WriteConsoleAsync);
+        private static readonly TimeSpan _consoleDrainTimeout = TimeSpan.FromSeconds(5);
+        private const int _consoleBatchSize = 256;
+
+        // the class part of the origin column comes from the caller's file name; resolving it once
+        // per file keeps the string work off the logging path
+        private static readonly ConcurrentDictionary<string, string> _callerTypes = new();
 
         // counters are touched from arbitrary caller threads, so they are updated atomically.
         private int _errorCount;
@@ -258,32 +274,161 @@ namespace WebExpress.WebCore.WebLog
         }
 
         /// <summary>
-        /// Writes a single, color-coded entry to the console. Serialized so concurrent callers
-        /// cannot interleave color changes with each other.
+        /// Queues a single, color-coded entry for the console writer. The queue keeps the order
+        /// of the calls, so entries never interleave or swap colors.
         /// </summary>
         /// <param name="level">The level of the entry, which selects the console color.</param>
         /// <param name="text">The fully formatted entry text.</param>
         private void WriteToConsole(LogLevel level, string text)
         {
-            lock (_consoleLock)
+            var color = level switch
             {
-                switch (level)
+                LogLevel.Error or LogLevel.FatalError or LogLevel.Exception => ConsoleColor.Red,
+                LogLevel.Warning => ConsoleColor.Yellow,
+                _ => (ConsoleColor?)null
+            };
+
+            var line = new ConsoleLine
+            (
+                color,
+                level != LogLevel.Exception && text.Length > _separatorWidth ? string.Concat(text.AsSpan(0, _separatorWidth - 3), "...") : text.PadRight(_width, ' '),
+                null
+            );
+
+            if (!_console.Writer.TryWrite(line))
+            {
+                _console.Writer.WriteAsync(line).AsTask().GetAwaiter().GetResult();
+            }
+        }
+
+        /// <summary>
+        /// Waits until every console entry queued so far has been written. Used where the output
+        /// must be complete - when logging stops and before the process exits.
+        /// </summary>
+        public static void FlushConsole()
+        {
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            if (_consoleWriter.IsCompleted)
+            {
+                return;
+            }
+
+            var marker = new ConsoleLine(null, null, done);
+
+            if (_console.Writer.TryWrite(marker) || _console.Writer.WriteAsync(marker).AsTask().Wait(_consoleDrainTimeout))
+            {
+                done.Task.Wait(_consoleDrainTimeout);
+            }
+        }
+
+        /// <summary>
+        /// Drains the console queue for the lifetime of the process. Consecutive entries of one
+        /// color are written as a single block, so the color is switched once per block and not
+        /// once per entry.
+        /// </summary>
+        private static async Task WriteConsoleAsync()
+        {
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => FlushConsole();
+
+            var reader = _console.Reader;
+            var batch = new List<ConsoleLine>(_consoleBatchSize);
+            var block = new StringBuilder();
+
+            while (await reader.WaitToReadAsync().ConfigureAwait(false))
+            {
+                while (batch.Count < _consoleBatchSize && reader.TryRead(out var line))
                 {
-                    case LogLevel.Error:
-                    case LogLevel.FatalError:
-                    case LogLevel.Exception:
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        break;
-                    case LogLevel.Warning:
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        break;
-                    default:
-                        break;
+                    batch.Add(line);
                 }
 
-                Console.WriteLine(level != LogLevel.Exception && text.Length > _separatorWidth ? string.Concat(text.AsSpan(0, _separatorWidth - 3), "...") : text.PadRight(_width, ' '));
+                try
+                {
+                    var index = 0;
+                    while (index < batch.Count)
+                    {
+                        if (batch[index].Done is { } done)
+                        {
+                            done.TrySetResult();
+                            index++;
+                            continue;
+                        }
+
+                        var color = batch[index].Color;
+                        block.Clear();
+
+                        while (index < batch.Count && batch[index].Done is null && batch[index].Color == color)
+                        {
+                            block.AppendLine(batch[index].Text);
+                            index++;
+                        }
+
+                        WriteBlock(color, block.ToString());
+                    }
+                }
+                catch
+                {
+                    // a closed or redirected console must not stop the writer for good, and a
+                    // waiting flush is released either way
+                    foreach (var line in batch)
+                    {
+                        line.Done?.TrySetResult();
+                    }
+                }
+
+                batch.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Writes a block of entries in one color.
+        /// </summary>
+        /// <param name="color">The color, or null for the console's default.</param>
+        /// <param name="text">The entries, each terminated by a line break.</param>
+        private static void WriteBlock(ConsoleColor? color, string text)
+        {
+            if (color is null)
+            {
+                Console.Out.Write(text);
+                return;
+            }
+
+            Console.ForegroundColor = color.Value;
+            try
+            {
+                Console.Out.Write(text);
+            }
+            finally
+            {
                 Console.ResetColor();
             }
+        }
+
+        /// <summary>
+        /// Builds the origin column of an entry from the caller's class and member. The class is
+        /// taken from the source file name the compiler passes in; walking the stack at run time
+        /// for it cost more than the rest of the logging call.
+        /// </summary>
+        /// <param name="instance">The calling member, or an explicit origin.</param>
+        /// <param name="file">The caller's source file, or null when the origin is explicit.</param>
+        /// <returns>The origin in the form class.member.</returns>
+        private static string Caller(string instance, string file)
+        {
+            if (string.IsNullOrEmpty(file))
+            {
+                return instance;
+            }
+
+            var type = _callerTypes.GetOrAdd(file, static path =>
+            {
+                // both separators: the path is the one of the build machine, not of this one
+                var start = path.LastIndexOfAny(['/', '\\']) + 1;
+                var end = path.IndexOf('.', start);
+
+                return end < 0 ? path[start..] : path[start..end];
+            });
+
+            return $"{type}.{instance}";
         }
 
         /// <summary>
@@ -358,10 +503,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Info, message, $"{className}.{instance}", line, file);
+                Add(LogLevel.Info, message, Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -381,10 +523,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Info, string.Format(message, args), $"{className}.{instance}", line, file);
+                Add(LogLevel.Info, string.Format(message, args), Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -403,10 +542,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Warning, message, $"{className}.{instance}", line, file);
+                Add(LogLevel.Warning, message, Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -427,10 +563,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Warning, string.Format(message, args), $"{className}.{instance}", line, file);
+                Add(LogLevel.Warning, string.Format(message, args), Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -450,10 +583,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Error, message, $"{className}.{instance}", line, file);
+                Add(LogLevel.Error, message, Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -474,10 +604,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Error, string.Format(message, args), $"{className}.{instance}", line, file);
+                Add(LogLevel.Error, string.Format(message, args), Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -497,10 +624,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.FatalError, message, $"{className}.{instance}", line, file);
+                Add(LogLevel.FatalError, message, Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -521,10 +645,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.FatalError, string.Format(message, args), $"{className}.{instance}", line, file);
+                Add(LogLevel.FatalError, string.Format(message, args), Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -544,10 +665,7 @@ namespace WebExpress.WebCore.WebLog
         {
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Exception, exception?.ToString(), $"{className}.{instance}", line, file);
+                Add(LogLevel.Exception, exception?.ToString(), Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -566,8 +684,7 @@ namespace WebExpress.WebCore.WebLog
         /// <param name="file">The source file.</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
         {
-            // capturing the call stack to derive the class name is expensive; skip it entirely when
-            // debug output is disabled, which is the common case outside of troubleshooting.
+            // debug entries are frequent and usually switched off; skip the formatting entirely
             if (!DebugMode)
             {
                 return;
@@ -575,10 +692,7 @@ namespace WebExpress.WebCore.WebLog
 
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Debug, message, $"{className}.{instance}", line, file);
+                Add(LogLevel.Debug, message, Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -596,7 +710,7 @@ namespace WebExpress.WebCore.WebLog
         /// <param name="args">Parameter für die Formatierung der Nachricht</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args)
         {
-            // see the parameterless-args overload: avoid the stack walk unless debug output is on.
+            // see the parameterless-args overload: avoid the formatting unless debug output is on
             if (!DebugMode)
             {
                 return;
@@ -604,10 +718,7 @@ namespace WebExpress.WebCore.WebLog
 
             try
             {
-                var methodInfo = new StackTrace().GetFrame(1)?.GetMethod();
-                var className = methodInfo?.ReflectedType.Name;
-
-                Add(LogLevel.Debug, string.Format(message, args), $"{className}.{instance}", line, file);
+                Add(LogLevel.Debug, string.Format(message, args), Caller(instance, file), line, file);
             }
             catch (Exception ex)
             {
@@ -628,6 +739,7 @@ namespace WebExpress.WebCore.WebLog
             _workerThread = null;
 
             Flush();
+            FlushConsole();
         }
 
         /// <summary>
@@ -735,5 +847,14 @@ namespace WebExpress.WebCore.WebLog
         {
             return null;
         }
+
+        /// <summary>
+        /// An entry waiting for the console writer, or - with a completion set - a marker that is
+        /// completed once everything queued before it has been written.
+        /// </summary>
+        /// <param name="Color">The color of the entry, or null for the console's default.</param>
+        /// <param name="Text">The formatted entry.</param>
+        /// <param name="Done">The completion of a flush marker.</param>
+        private sealed record ConsoleLine(ConsoleColor? Color, string Text, TaskCompletionSource Done);
     }
 }

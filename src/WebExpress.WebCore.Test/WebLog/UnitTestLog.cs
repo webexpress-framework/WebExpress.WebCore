@@ -199,6 +199,85 @@ namespace WebExpress.WebCore.Test.WebLog
         }
 
         /// <summary>
+        /// Tests that an entry names the calling class and member. The class comes from the
+        /// caller's source file, not from a stack walk, which was the most expensive part of a
+        /// logging call.
+        /// </summary>
+        [Fact]
+        public void OriginNamesCallingClassAndMember()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+
+            // act
+            log.Info("origin");
+            log.Warning("origin");
+
+            // validation
+            Assert.All(log.GetRecentEntries(), entry => Assert.Equal($"{nameof(UnitTestLog)}.{nameof(OriginNamesCallingClassAndMember)}", entry.Instance));
+        }
+
+        /// <summary>
+        /// Tests that an explicit origin without a source file - as the Kestrel adapter passes
+        /// it - is kept as given rather than prefixed with a class.
+        /// </summary>
+        [Fact]
+        public void ExplicitOriginWithoutFileIsKept()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+
+            // act
+            log.Error("explicit", "Kestrel", null, null);
+
+            // validation
+            Assert.Equal("Kestrel", log.GetRecentEntries().Last().Instance);
+        }
+
+        /// <summary>
+        /// Tests that the console output of a closed log is complete. The console is written by a
+        /// background writer, so stopping the log has to wait until it caught up.
+        /// </summary>
+        [Fact]
+        public void CloseFlushesConsoleInOrder()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+            var originalOutput = Console.Out;
+            using var output = new StringWriter();
+
+            try
+            {
+                Console.SetOut(output);
+
+                // act
+                for (var i = 0; i < 500; i++)
+                {
+                    if (i % 7 == 0)
+                    {
+                        log.Warning("console-order-" + i);
+                    }
+                    else
+                    {
+                        log.Info("console-order-" + i);
+                    }
+                }
+
+                log.Close();
+            }
+            finally
+            {
+                Console.SetOut(originalOutput);
+            }
+
+            // validation
+            var text = output.ToString();
+            var positions = Enumerable.Range(0, 500).Select(i => text.IndexOf("console-order-" + i + " ", StringComparison.Ordinal)).ToList();
+            Assert.DoesNotContain(-1, positions);
+            Assert.Equal(positions.Order(), positions);
+        }
+
+        /// <summary>
         /// Tests that the EntryLogged event is raised for each recorded entry.
         /// </summary>
         [Fact]
