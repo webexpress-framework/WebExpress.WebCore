@@ -367,7 +367,7 @@ namespace WebExpress.WebCore.WebRestApi
                     return;
                 }
 
-                Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+                Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
             }
         }
 
@@ -533,12 +533,7 @@ namespace WebExpress.WebCore.WebRestApi
                 // assign the rest api to existing applications
                 foreach (var applicationContext in applicationContexts)
                 {
-                    var prefix = applicationContext.Route.Concat
-                    (
-                        applicationContext.PluginContext != pluginContext
-                            ? pluginContext.PluginName.ToLower()
-                            : ""
-                    );
+                    var prefix = EndpointManager.CreatePluginRoute(applicationContext, pluginContext);
 
                     var routePath = EndpointManager.CreateEndpointRoute
                     (

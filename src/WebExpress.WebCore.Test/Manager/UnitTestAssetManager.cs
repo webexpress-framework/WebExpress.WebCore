@@ -183,6 +183,71 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that an asset whose plugin was removed is no longer served, even for a context
+        /// resolved before the removal. Requests resolve their asset through an index by context,
+        /// and an entry left behind there would keep serving a disposed asset.
+        /// </summary>
+        [Fact]
+        public void RemovedAssetIsNotServed()
+        {
+            // arrange
+            var uri = "http://localhost:8080/server/appa/assets/css/mycss.css";
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+            componentHub.SitemapManager.Refresh();
+
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = UnitTestFixture.CreateHttpContextMock()
+            });
+
+            // act
+            (componentHub.AssetManager as AssetManager).Remove(plugin);
+            var response = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext);
+
+            // validation
+            Assert.IsType<ResponseNotFound>(response);
+        }
+
+        /// <summary>
+        /// Tests that an asset of a removed application is not served by another application that
+        /// mounts the same plugin. Both share the endpoint id, so a lookup by id alone would hand
+        /// a context resolved before the removal to the asset of the other application.
+        /// </summary>
+        [Fact]
+        public void AssetOfRemovedApplicationIsNotServedByAnother()
+        {
+            // arrange
+            var uri = "http://localhost:8080/server/appa/assets/css/mycss.css";
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).First();
+            componentHub.SitemapManager.Refresh();
+
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = UnitTestFixture.CreateHttpContextMock()
+            });
+
+            // act
+            (componentHub.AssetManager as AssetManager).Remove(application);
+            var response = componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext);
+
+            // validation
+            Assert.NotEmpty(componentHub.AssetManager.Assets);
+            Assert.IsType<ResponseNotFound>(response);
+        }
+
+        /// <summary>
         /// Tests that the asset response carries the content type derived from the file extension.
         /// </summary>
         [Theory]

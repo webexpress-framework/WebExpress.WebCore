@@ -3,8 +3,7 @@
 	<PropertyGroup>
 		<OutputType>Library</OutputType>
 		<Title>WebExpress.WebCore</Title>
-		<Version>2.0.0.0</Version>
-		<AssemblyVersion>2.0.0.0</AssemblyVersion>
+		<Version>2.0.1-alpha</Version>
 		<TargetFramework>net10.0</TargetFramework>
 		<RuntimeIdentifiers>any</RuntimeIdentifiers>
 		<RepositoryUrl>https://github.com/webexpress-framework/WebExpress.git</RepositoryUrl>
@@ -14,7 +13,6 @@
 		<EnableDynamicLoading>true</EnableDynamicLoading>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<Description>Core library of the WebExpress web server.</Description>
-		<PackageVersion>2.0.0-alpha</PackageVersion>
 		<PackageProjectUrl>https://github.com/webexpress-framework/WebExpress</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
@@ -30,14 +28,17 @@
 	<PropertyGroup>
 		<!-- under Visual Studio the package would start its sbom-tool.exe, which requires the .NET 8 runtime; GenerateSbomWithDotnet hands the work to the dotnet msbuild instead -->
 		<GenerateSbom Condition="'$(MSBuildRuntimeType)' == 'Core' AND '$(Configuration)' == 'Release'">true</GenerateSbom>
-		<SbomGenerationPackageVersion>$(PackageVersion)</SbomGenerationPackageVersion>
-		<!-- scan only the restore graph, otherwise older packages lying in bin end up as dependencies -->
-		<SbomGenerationBuildComponentPath>$(MSBuildProjectDirectory)\$(BaseIntermediateOutputPath)</SbomGenerationBuildComponentPath>
+		<SbomGenerationPackageVersion>$(Version)</SbomGenerationPackageVersion>
+		<!-- the component detection takes every *.nuspec it sees for a dependency, and obj keeps one per version ever packed; it scans a folder holding only the restore graph (see PrepareSbomComponents) -->
+		<SbomGenerationBuildComponentPath>$(MSBuildProjectDirectory)\$(BaseIntermediateOutputPath)sbom-components</SbomGenerationBuildComponentPath>
 	</PropertyGroup>
 
+	<!-- downloaded rather than referenced: a package reference, even with PrivateAssets="all", lands in the restore graph, and the SBOM would list its own build tool as a dependency of the package -->
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Sbom.Targets" Version="4.1.13" PrivateAssets="all" />
+		<PackageDownload Include="Microsoft.Sbom.Targets" Version="[4.1.13]" />
 	</ItemGroup>
+
+	<Import Project="$(NuGetPackageRoot)microsoft.sbom.targets\4.1.13\build\Microsoft.Sbom.Targets.targets" Condition="Exists('$(NuGetPackageRoot)microsoft.sbom.targets\4.1.13\build\Microsoft.Sbom.Targets.targets')" />
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
@@ -73,6 +74,17 @@
 
 	<Target Name="GenerateSbomWithDotnet" AfterTargets="Pack" Condition="'$(MSBuildRuntimeType)' != 'Core' AND '$(IsPackable)' == 'true' AND '$(Configuration)' == 'Release'">
 		<Exec Command="dotnet msbuild &quot;$(MSBuildProjectFullPath)&quot; -nologo -v:m -t:GenerateSbomTarget -p:Configuration=$(Configuration)" />
+	</Target>
+
+	<Target Name="PrepareSbomComponents" BeforeTargets="GenerateSbomTarget" Condition="'$(GenerateSbom)' == 'true'">
+		<PropertyGroup>
+			<!-- the detection reports download dependencies too, which holds nothing but the SBOM tool; the array has flat objects only, so a pattern can empty it -->
+			<SbomDownloadDependencies>"downloadDependencies":\s*\[[^{}\]]*(\{[^{}]*\}[^{}\]]*)*\]</SbomDownloadDependencies>
+			<SbomRestoreGraph>$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</SbomRestoreGraph>
+			<SbomRestoreGraph>$([System.Text.RegularExpressions.Regex]::Replace('$(SbomRestoreGraph)', '$(SbomDownloadDependencies)', '"downloadDependencies": []'))</SbomRestoreGraph>
+		</PropertyGroup>
+		<RemoveDir Directories="$(SbomGenerationBuildComponentPath)" />
+		<WriteLinesToFile File="$(SbomGenerationBuildComponentPath)\project.assets.json" Lines="$([MSBuild]::Escape('$(SbomRestoreGraph)'))" Overwrite="true" />
 	</Target>
 
 	<!-- Microsoft.Sbom.Targets only embeds the manifest in the nupkg; copy it next to the package as well -->

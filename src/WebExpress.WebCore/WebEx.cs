@@ -219,7 +219,17 @@ namespace WebExpress.WebCore
                     return 1;
                 }
 
-                PackageBuilder.Create(argumentDict["spec"], argumentDict["config"], argumentDict["target"], argumentDict["output"]);
+                try
+                {
+                    PackageBuilder.Create(argumentDict["spec"], argumentDict["config"], argumentDict["target"], argumentDict["output"]);
+                }
+                catch (Exception ex)
+                {
+                    // the post build step only shows the exit code, so the reason has to be on the console
+                    Console.Error.WriteLine($"*** PackageBuilder: {ex.Message}");
+
+                    return 1;
+                }
 
                 return 0;
             }
@@ -405,6 +415,13 @@ namespace WebExpress.WebCore
             foreach (var v in settings.Endpoints)
             {
                 _httpServer.HttpServerContext.Log?.Info(message: I18N.Translate("webexpress.webcore:app.uri"), args: v.Uri);
+            }
+
+            _httpServer.HttpServerContext.Log?.Info(message: $"External URI: {SettingsLog.FormatValue("WebExpress:ExternalUri", settings.ExternalUri)}");
+            _httpServer.HttpServerContext.Log?.Info(message: $"Context path: {settings.ContextPath ?? "(empty)"}");
+            foreach (var parameter in configuration.AsEnumerable().Where(x => x.Value is not null).OrderBy(x => x.Key, StringComparer.Ordinal))
+            {
+                _httpServer.HttpServerContext.Log?.Info(message: $"Configuration {parameter.Key}: {SettingsLog.FormatValue(parameter.Key, parameter.Value)}");
             }
 
             _httpServer.HttpServerContext.Log?.Separator('=');

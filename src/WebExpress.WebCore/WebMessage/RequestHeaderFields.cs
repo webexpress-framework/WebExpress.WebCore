@@ -171,17 +171,42 @@ namespace WebExpress.WebCore.WebMessage
             SecWebSocketProtocol = requestFeature.Headers.SecWebSocketProtocol;
             SecWebSocketVersion = requestFeature.Headers.SecWebSocketVersion;
 
-            Cookies = requestFeature.Headers.Cookie
-                .SelectMany(c => c.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                .Select(c =>
-                {
-                    var eqIndex = c.IndexOf('=');
-                    if (eqIndex < 0) { return null; }
-                    return new Cookie(c[..eqIndex].Trim(), c[(eqIndex + 1)..].Trim());
-                })
-                .Where(c => c is not null);
+            Cookies = ParseCookies(requestFeature.Headers.Cookie);
 
             Authorization = RequestAuthorization.Parse(requestFeature.Headers.Authorization);
+        }
+
+        /// <summary>
+        /// Parses the cookie header once per request. The cookies are read several times while a
+        /// request is handled - the session lookup alone does so twice - and a lazy query would
+        /// split the header and allocate every cookie anew on each of those reads.
+        /// </summary>
+        /// <param name="headerValues">The values of the cookie header.</param>
+        /// <returns>The well-formed cookies; a malformed one is skipped.</returns>
+        private static List<Cookie> ParseCookies(IEnumerable<string> headerValues)
+        {
+            var cookies = new List<Cookie>();
+
+            foreach (var pair in headerValues.SelectMany(c => c.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))
+            {
+                var eqIndex = pair.IndexOf('=');
+                if (eqIndex < 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    cookies.Add(new Cookie(pair[..eqIndex].Trim(), pair[(eqIndex + 1)..].Trim()));
+                }
+                catch (CookieException)
+                {
+                    // a cookie another site on the same host set with a name or value the
+                    // cookie type rejects must not fail the request
+                }
+            }
+
+            return cookies;
         }
     }
 }

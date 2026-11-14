@@ -85,9 +85,9 @@ namespace WebExpress.WebCore.WebMessage
         }
 
         /// <summary>
-        /// Determines the origin the browser addressed. It is taken from the host header rather
-        /// than the request uri, which carries the local listening port and would differ from
-        /// the browser's view whenever a container or proxy maps the port.
+        /// Determines the origin the browser addressed from the host header and request scheme.
+        /// The transport endpoint is deliberately excluded because container port mappings
+        /// can expose a different public port.
         /// </summary>
         /// <param name="request">The incoming request.</param>
         /// <returns>The origin, or null when it cannot be determined.</returns>

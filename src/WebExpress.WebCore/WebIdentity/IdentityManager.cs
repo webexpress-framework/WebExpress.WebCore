@@ -78,7 +78,7 @@ namespace WebExpress.WebCore.WebIdentity
                 return;
             }
 
-            Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+            Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
         }
 
         /// <summary>
@@ -106,6 +106,8 @@ namespace WebExpress.WebCore.WebIdentity
         private void Register(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts)
         {
             var assembly = pluginContext?.Assembly;
+
+            RegisterValidators(pluginContext, applicationContexts);
 
             // process permissions
             foreach (var permissionType in assembly.GetTypes().Where
@@ -343,6 +345,7 @@ namespace WebExpress.WebCore.WebIdentity
         private void OnRemovePlugin(object sender, IPluginContext e)
         {
             Remove(e);
+            RemoveValidators(e, null);
         }
 
         /// <summary>
@@ -353,6 +356,7 @@ namespace WebExpress.WebCore.WebIdentity
         private void OnRemoveApplication(object sender, IApplicationContext e)
         {
             Remove(e);
+            RemoveValidators(null, e);
         }
 
         /// <summary>

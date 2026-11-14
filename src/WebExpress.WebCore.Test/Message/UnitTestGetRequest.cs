@@ -18,7 +18,7 @@ namespace WebExpress.WebCore.Test.Message
             var content = UnitTestFixture.GetEmbeddedResource("general.get");
             var request = UnitTestFixture.CreateRequestMock(content);
 
-            Assert.Equal("http://localhost:8080/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
+            Assert.Equal("http://localhost/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
         }
 
         /// <summary>
@@ -30,7 +30,7 @@ namespace WebExpress.WebCore.Test.Message
             var content = UnitTestFixture.GetEmbeddedResource("less.get");
             var request = UnitTestFixture.CreateRequestMock(content);
 
-            Assert.Equal("http://localhost:8080/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
+            Assert.Equal("http://localhost/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
         }
 
         /// <summary>
@@ -42,7 +42,7 @@ namespace WebExpress.WebCore.Test.Message
             var content = UnitTestFixture.GetEmbeddedResource("massive.get");
             var request = UnitTestFixture.CreateRequestMock(content);
 
-            Assert.Equal("http://localhost:8080/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
+            Assert.Equal("http://localhost/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
         }
 
         /// <summary>
@@ -55,7 +55,7 @@ namespace WebExpress.WebCore.Test.Message
             var request = UnitTestFixture.CreateRequestMock(content);
             var param = request?.GetParameter("a")?.Value;
 
-            Assert.Equal("http://localhost:8080/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
+            Assert.Equal("http://localhost/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
             Assert.Equal("1", param);
         }
 
@@ -70,7 +70,7 @@ namespace WebExpress.WebCore.Test.Message
             var a = request?.GetParameter("a")?.Value;
             var b = request?.GetParameter("b")?.Value;
 
-            Assert.Equal("http://localhost:8080/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
+            Assert.Equal("http://localhost/abc/xyz/A7BCCCA9-4C7E-4117-9EE2-ECC3381B605A", request.Uri?.ToString());
             Assert.Equal("ä", a);
             Assert.Equal("ö ü", b);
         }

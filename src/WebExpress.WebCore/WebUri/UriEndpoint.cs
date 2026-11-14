@@ -94,7 +94,7 @@ namespace WebExpress.WebCore.WebUri
         /// <summary>
         /// Checks if it is a relative uri.
         /// </summary>
-        public bool IsRelative => Authority is null;
+        public virtual bool IsRelative => Authority is null;
 
         /// <summary>
         /// Retrieves a collection of variables represented as key-value pairs.
@@ -202,8 +202,11 @@ namespace WebExpress.WebCore.WebUri
         /// Copy constructor
         /// </summary>
         /// <param name="uri">The uri.</param>
+        /// <exception cref="ArgumentException">The uri is a data url, whose content an endpoint cannot hold.</exception>
         public UriEndpoint(IUri uri)
         {
+            RefuseData(uri);
+
             Scheme = uri?.Scheme ?? UriScheme.Http;
             Authority = uri?.Authority;
             PathSegments = [.. uri?.PathSegments.Select(x => x.Copy()) ?? []];
@@ -226,8 +229,9 @@ namespace WebExpress.WebCore.WebUri
         /// </summary>
         /// <param name="uri">The uri.</param>
         /// <param name="segments">The path segments.</param>
+        /// <exception cref="ArgumentException">The uri is a data url, whose content an endpoint cannot hold.</exception>
         public UriEndpoint(IUri uri, IEnumerable<IUriPathSegment> segments)
-            : this(uri.Scheme, uri.Authority, uri.Fragment, uri.Query, segments)
+            : this(RefuseData(uri).Scheme, uri.Authority, uri.Fragment, uri.Query, segments)
         {
         }
 
@@ -237,8 +241,9 @@ namespace WebExpress.WebCore.WebUri
         /// <param name="uri">The uri.</param>
         /// <param name="segments">The path segments.</param>
         /// <param name="extendedSegments">Other segments.</param>
+        /// <exception cref="ArgumentException">The uri is a data url, whose content an endpoint cannot hold.</exception>
         public UriEndpoint(IUri uri, IEnumerable<IUriPathSegment> segments, IEnumerable<IUriPathSegment> extendedSegments)
-            : this(uri.Scheme, uri.Authority, uri.Fragment, uri.Query, extendedSegments is not null
+            : this(RefuseData(uri).Scheme, uri.Authority, uri.Fragment, uri.Query, extendedSegments is not null
                   ? segments.Union(extendedSegments)
                   : segments)
         {
@@ -325,7 +330,7 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>
         /// A new uri instance containing the original URI with the specified query segments appended.
         /// </returns>
-        public IUri Concat(params IUriQuery[] query)
+        public virtual IUri Concat(params IUriQuery[] query)
         {
             var copy = new UriEndpoint((IUri)this);
             copy.Query = [.. copy.Query.Concat(query?.Where(x => x is not null) ?? [])];
@@ -414,7 +419,7 @@ namespace WebExpress.WebCore.WebUri
         /// </summary>
         /// <param name="count">The count of elements to skip.</param>
         /// <returns>The sub uri after skipping the specified number of elements.</returns>
-        public IUri Skip(int count)
+        public virtual IUri Skip(int count)
         {
             if (count >= PathSegments.Count())
             {
@@ -468,7 +473,10 @@ namespace WebExpress.WebCore.WebUri
         }
 
         /// <summary>
-        /// Creates a new endpoint uri and fills it with the given parameters.
+        /// Creates a new endpoint uri and fills it with the given parameters. Only path
+        /// variables that carry no value yet are filled: a bound segment stays a variable, so
+        /// binding the request of the current page onto a link that already names another
+        /// record would otherwise turn it into a link to the current record.
         /// </summary>
         /// <param name="parameters">
         /// The parameters that fill in the variable parts of the uri.
@@ -492,6 +500,7 @@ namespace WebExpress.WebCore.WebUri
                 pathSegments = pathSegments.Select(x =>
                 {
                     if (x is IUriPathSegmentVariable variable &&
+                        string.IsNullOrEmpty(variable.Value) &&
                         variable.VariableName.Equals(key, StringComparison.OrdinalIgnoreCase))
                     {
                         var copy = variable.Copy() as IUriPathSegmentVariable;
@@ -614,9 +623,26 @@ namespace WebExpress.WebCore.WebUri
         /// </summary>
         /// <param name="fragment">The fragment to set (e.g., "section1").</param>
         /// <returns>A new IUri instance with the updated fragment. The original URI remains unchanged.</returns>
-        public IUri SetFragment(string fragment)
+        public virtual IUri SetFragment(string fragment)
         {
             return new UriEndpoint(Scheme, Authority, fragment, Query, PathSegments);
+        }
+
+        /// <summary>
+        /// Refuses to copy a data url into an endpoint: the copy would keep only the parts an
+        /// endpoint has, which a data url leaves empty, and silently turn the content into the root.
+        /// </summary>
+        /// <param name="uri">The uri to copy.</param>
+        /// <returns>The uri.</returns>
+        /// <exception cref="ArgumentException">The uri is a data url.</exception>
+        private static IUri RefuseData(IUri uri)
+        {
+            if (uri is UriData)
+            {
+                throw new ArgumentException("A data url cannot be copied into an endpoint; use it as it is.", nameof(uri));
+            }
+
+            return uri;
         }
 
         /// <summary>

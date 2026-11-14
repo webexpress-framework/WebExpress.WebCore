@@ -15,13 +15,17 @@ namespace WebExpress.WebCore.WebHealth
     /// <summary>
     /// Discovers health components through plugin and application events and aggregates their availability.
     /// </summary>
+    /// <remarks>
+    /// The discovery is a <see cref="PluginTypeCatalog{TItem}"/> bound per application: one binding
+    /// per public sealed <see cref="IHealth"/> type, contributing plugin and associated application.
+    /// The key names the plugin and the type, so no two plugins ever shadow each other's checks.
+    /// </remarks>
     public class HealthManager : IHealthManager, ISystemComponent
     {
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly Lock _sync = new();
-        private readonly List<HealthItem> _items = [];
-        private long _revision;
+        private readonly PluginTypeCatalog<HealthItem> _catalog;
         private bool _disposed;
 
         /// <summary>
@@ -41,10 +45,7 @@ namespace WebExpress.WebCore.WebHealth
         {
             get
             {
-                lock (_sync)
-                {
-                    return _items.Select(x => x.HealthContext).ToArray();
-                }
+                return _catalog.Items.Select(x => x.HealthContext).ToArray();
             }
         }
 
@@ -58,10 +59,39 @@ namespace WebExpress.WebCore.WebHealth
         {
             _componentHub = componentHub;
             _httpServerContext = httpServerContext;
-            _componentHub.PluginManager.AddPlugin += OnAddPlugin;
-            _componentHub.PluginManager.RemovePlugin += OnRemovePlugin;
-            _componentHub.ApplicationManager.AddApplication += OnAddApplication;
-            _componentHub.ApplicationManager.RemoveApplication += OnRemoveApplication;
+            _catalog = new PluginTypeCatalog<HealthItem>(KeyOf, typeof(IHealth), Create, PluginTypeBinding.Application);
+            _catalog.Added += (_, e) => AddHealth?.Invoke(this, e.Item.HealthContext);
+            _catalog.Removed += (_, e) => RemoveHealth?.Invoke(this, e.Item.HealthContext);
+            _catalog.Attach(componentHub, httpServerContext);
+        }
+
+        /// <summary>
+        /// Keys a binding by its plugin and type, so checks of different plugins never replace
+        /// each other even when their types share a name.
+        /// </summary>
+        /// <param name="item">The binding.</param>
+        /// <returns>The key.</returns>
+        private static string KeyOf(HealthItem item)
+        {
+            return $"{item.HealthContext.PluginContext?.PluginId}/{item.HealthClass.FullName}";
+        }
+
+        /// <summary>
+        /// Builds a binding without activating the component, so a failing constructor surfaces as
+        /// an unsuccessful check rather than as a missing one.
+        /// </summary>
+        /// <param name="origin">The discovered type and its plugin and application.</param>
+        /// <returns>The binding.</returns>
+        private HealthItem Create(PluginTypeOrigin origin)
+        {
+            var context = new HealthContext
+            {
+                PluginContext = origin.PluginContext,
+                ApplicationContext = origin.ApplicationContext,
+                HealthId = new ComponentId(origin.Type.FullName.ToLowerInvariant())
+            };
+
+            return new HealthItem(origin.Type, context, _componentHub, _httpServerContext);
         }
 
         /// <summary>
@@ -71,7 +101,7 @@ namespace WebExpress.WebCore.WebHealth
         /// <returns>A snapshot of the health components bound to the application.</returns>
         public IEnumerable<IHealthContext> GetHealthChecks(IApplicationContext applicationContext)
         {
-            return HealthChecks.Where(x => x.ApplicationContext == applicationContext).ToArray();
+            return _catalog.GetItems(applicationContext).Select(x => x.HealthContext).ToArray();
         }
 
         /// <summary>
@@ -81,41 +111,7 @@ namespace WebExpress.WebCore.WebHealth
         /// <param name="applicationContexts">The applications associated with the plugin.</param>
         internal void Register(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts)
         {
-            var healthTypes = pluginContext.Assembly.GetTypes()
-                .Where(x => x.IsClass && x.IsPublic && x.IsSealed && !x.ContainsGenericParameters &&
-                    typeof(IHealth).IsAssignableFrom(x)).ToArray();
-
-            foreach (var applicationContext in applicationContexts.Distinct())
-            {
-                foreach (var healthType in healthTypes)
-                {
-                    HealthContext context;
-                    lock (_sync)
-                    {
-                        if (_disposed)
-                        {
-                            return;
-                        }
-
-                        if (_items.Any(x => x.HealthContext.PluginContext == pluginContext &&
-                            x.HealthContext.ApplicationContext == applicationContext && x.HealthClass == healthType))
-                        {
-                            continue;
-                        }
-
-                        context = new HealthContext
-                        {
-                            PluginContext = pluginContext,
-                            ApplicationContext = applicationContext,
-                            HealthId = new ComponentId(healthType.FullName.ToLowerInvariant())
-                        };
-                        _items.Add(new HealthItem(healthType, context, _componentHub, _httpServerContext));
-                        _revision++;
-                    }
-
-                    AddHealth?.Invoke(this, context);
-                }
-            }
+            _catalog.Collect(pluginContext, applicationContexts);
         }
 
         /// <summary>
@@ -135,8 +131,8 @@ namespace WebExpress.WebCore.WebHealth
                     return false;
                 }
 
-                items = _items.ToArray();
-                revision = _revision;
+                revision = _catalog.Version;
+                items = [.. _catalog.Items];
             }
 
             var frameworkHealthy = CheckFramework();
@@ -145,7 +141,7 @@ namespace WebExpress.WebCore.WebHealth
             // lifecycle state may change while dependency checks are waiting
             lock (_sync)
             {
-                return !_disposed && revision == _revision && frameworkHealthy && results.All(x => x) && CheckFramework();
+                return !_disposed && revision == _catalog.Version && frameworkHealthy && results.All(x => x) && CheckFramework();
             }
         }
 
@@ -203,74 +199,7 @@ namespace WebExpress.WebCore.WebHealth
         /// <param name="pluginContext">The plugin whose component bindings must be removed.</param>
         internal void Remove(IPluginContext pluginContext)
         {
-            Remove(x => x.HealthContext.PluginContext == pluginContext);
-        }
-
-        /// <summary>
-        /// Detaches matching bindings before component disposal can execute application code.
-        /// </summary>
-        /// <param name="predicate">The ownership condition identifying bindings to remove.</param>
-        private void Remove(Func<HealthItem, bool> predicate)
-        {
-            HealthItem[] removed;
-            lock (_sync)
-            {
-                removed = _items.Where(predicate).ToArray();
-                foreach (var item in removed)
-                {
-                    _items.Remove(item);
-                    _revision++;
-                }
-            }
-
-            foreach (var item in removed)
-            {
-                item.Dispose();
-                RemoveHealth?.Invoke(this, item.HealthContext);
-            }
-        }
-
-        /// <summary>
-        /// Discovers checks for applications associated with a newly available plugin.
-        /// </summary>
-        /// <param name="sender">The plugin manager raising the lifecycle event.</param>
-        /// <param name="pluginContext">The plugin whose components are available.</param>
-        private void OnAddPlugin(object sender, IPluginContext pluginContext)
-        {
-            Register(pluginContext, _componentHub.PluginManager.GetAssociatedApplications(pluginContext));
-        }
-
-        /// <summary>
-        /// Discovers checks from plugins already associated with a newly available application.
-        /// </summary>
-        /// <param name="sender">The application manager raising the lifecycle event.</param>
-        /// <param name="applicationContext">The application whose dependencies must participate in probes.</param>
-        private void OnAddApplication(object sender, IApplicationContext applicationContext)
-        {
-            foreach (var pluginContext in _componentHub.PluginManager.GetPlugins(applicationContext))
-            {
-                Register(pluginContext, [applicationContext]);
-            }
-        }
-
-        /// <summary>
-        /// Prevents an unloaded plugin from retaining health component instances.
-        /// </summary>
-        /// <param name="sender">The plugin manager raising the lifecycle event.</param>
-        /// <param name="pluginContext">The plugin whose bindings must be removed.</param>
-        private void OnRemovePlugin(object sender, IPluginContext pluginContext)
-        {
-            Remove(pluginContext);
-        }
-
-        /// <summary>
-        /// Prevents removed applications from leaving checks contributed by any plugin in the host.
-        /// </summary>
-        /// <param name="sender">The application manager raising the lifecycle event.</param>
-        /// <param name="applicationContext">The application whose bindings must be removed.</param>
-        private void OnRemoveApplication(object sender, IApplicationContext applicationContext)
-        {
-            Remove(x => x.HealthContext.ApplicationContext == applicationContext);
+            _catalog.Withdraw(pluginContext);
         }
 
         /// <summary>
@@ -286,13 +215,10 @@ namespace WebExpress.WebCore.WebHealth
                 }
 
                 _disposed = true;
-                _componentHub.PluginManager.AddPlugin -= OnAddPlugin;
-                _componentHub.PluginManager.RemovePlugin -= OnRemovePlugin;
-                _componentHub.ApplicationManager.AddApplication -= OnAddApplication;
-                _componentHub.ApplicationManager.RemoveApplication -= OnRemoveApplication;
             }
 
-            Remove(_ => true);
+            // detaches every binding and disposes it once its active check finished
+            _catalog.Dispose();
             GC.SuppressFinalize(this);
         }
     }

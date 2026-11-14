@@ -126,7 +126,7 @@ namespace WebExpress.WebCore.WebAsset
                 }
             }
 
-            Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+            Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
         }
 
         /// <summary>
@@ -168,7 +168,7 @@ namespace WebExpress.WebCore.WebAsset
 
             // a plugin embeds thousands of assets, all mounted under the same route per application
             var prefixes = applicationContexts
-                .Select(x => (ApplicationContext: x, Prefix: GetPluginRoute(x, pluginContext).Concat(new UriPathSegmentConstant("assets"))))
+                .Select(x => (ApplicationContext: x, Prefix: EndpointManager.CreatePluginRoute(x, pluginContext).Concat(new UriPathSegmentConstant("assets"))))
                 .ToArray();
 
             foreach (var resource in embeddedResources)
@@ -227,25 +227,6 @@ namespace WebExpress.WebCore.WebAsset
         }
 
         /// <summary>
-        /// Returns the route a plugin's endpoints are addressed under within an application.
-        /// A plugin that owns the application serves straight from the application route,
-        /// while every other plugin contributing to that application is given a segment of
-        /// its own so two plugins cannot collide on the same file name.
-        /// </summary>
-        /// <param name="applicationContext">The context of the application.</param>
-        /// <param name="pluginContext">The context of the plugin.</param>
-        /// <returns>The route the plugin's assets are mounted under.</returns>
-        private static IRoute GetPluginRoute(IApplicationContext applicationContext, IPluginContext pluginContext)
-        {
-            return applicationContext.Route.Concat
-            (
-                applicationContext.PluginContext != pluginContext
-                    ? pluginContext.PluginId.ToString()
-                    : null
-            );
-        }
-
-        /// <summary>
         /// Returns the route the given embedded file of a plugin is served from within an
         /// application. Consumers that have to link an embedded file - an include rendering a
         /// link or script element - resolve it here instead of composing the route themselves,
@@ -264,7 +245,7 @@ namespace WebExpress.WebCore.WebAsset
                 return null;
             }
 
-            return GetPluginRoute(applicationContext, pluginContext).Concat(file);
+            return EndpointManager.CreatePluginRoute(applicationContext, pluginContext).Concat(file);
         }
 
         /// <summary>

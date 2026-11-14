@@ -414,5 +414,76 @@ namespace WebExpress.WebCore.Test.WebUri
             Assert.Equal("/a/${testparametera}/b?testparameterb=", uri.ToString());
             Assert.Equal("/a/10/b?testparameterb=20", bind.ToString());
         }
+
+        /// <summary>
+        /// Tests that a path variable which already carries a value keeps it, so a link to
+        /// record 7 rendered on the page of record 42 still leads to 7.
+        /// </summary>
+        [Fact]
+        public void BindParametersKeepsBoundVariable()
+        {
+            // arrange
+            var pathSegments = new IUriPathSegment[]
+            {
+                new UriPathSegmentConstant("a"),
+                new UriPathSegmentVariableInt<TestParameterA>()
+            };
+
+            var uri = new UriEndpoint(pathSegments)
+                .BindParameters(new TestParameterA() { Value = "7" });
+
+            // act
+            var bind = uri.BindParameters(new TestParameterA() { Value = "42" });
+
+            // validation
+            Assert.Equal("/a/7", bind.ToString());
+        }
+
+        /// <summary>
+        /// Tests that a data url keeps its content through the transformations it supports: a
+        /// fragment is set or replaced, and an operation that adds nothing returns it unchanged.
+        /// </summary>
+        [Fact]
+        public void DataUrlKeepsItsContent()
+        {
+            // arrange
+            var uri = new UriData("data:image/svg+xml,%3Csvg%2F%3E#icon");
+
+            // act
+            var preview = uri.SetFragment("preview");
+            var withoutFragment = uri.SetFragment(null);
+
+            // validation
+            Assert.Equal("icon", uri.Fragment);
+            Assert.False(uri.IsRelative);
+            Assert.Equal("data:image/svg+xml,%3Csvg%2F%3E#preview", preview.ToString());
+            Assert.Equal("data:image/svg+xml,%3Csvg%2F%3E", withoutFragment.ToString());
+            Assert.Equal("data:image/svg+xml,%3Csvg%2F%3E#icon", uri.Value);
+            Assert.Same(uri, uri.Add());
+            Assert.Same(uri, uri.Concat(" "));
+            Assert.Same(uri, uri.Concat(Array.Empty<IUriPathSegment>()));
+            Assert.Same(uri, uri.BindParameters(new TestParameterA() { Value = "1" }));
+        }
+
+        /// <summary>
+        /// Tests that a transformation a data url cannot take is refused instead of returning an
+        /// endpoint without the content.
+        /// </summary>
+        [Fact]
+        public void DataUrlRefusesWhatWouldLoseItsContent()
+        {
+            // arrange
+            IUri uri = new UriData("data:text/plain,hello");
+
+            // validation
+            Assert.Throws<NotSupportedException>(() => uri.Add(new UriQuery("a", "1")));
+            Assert.Throws<NotSupportedException>(() => uri.Concat("page"));
+            Assert.Throws<NotSupportedException>(() => uri.Concat(new UriPathSegmentConstant("page")));
+            Assert.Throws<NotSupportedException>(() => uri.Take(1));
+            Assert.Throws<NotSupportedException>(() => ((UriData)uri).TakeLast(1));
+            Assert.Throws<NotSupportedException>(() => uri.Skip(0));
+            Assert.Throws<ArgumentException>(() => new UriEndpoint(uri));
+            Assert.Throws<ArgumentException>(() => UriEndpoint.Combine(uri, "page"));
+        }
     }
 }

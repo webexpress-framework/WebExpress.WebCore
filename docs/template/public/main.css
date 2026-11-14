@@ -8,3 +8,10 @@ body {
   --bs-link-color-rgb: 66, 184, 131 !important;
   --bs-link-hover-color-rgb: 64, 180, 128 !important;
 }
+
+/* the brand is a flex row, so the blank between logo and title collapses; the svg has no fixed size */
+#logo {
+  width: 40px;
+  height: 40px;
+  margin-right: .75rem;
+}

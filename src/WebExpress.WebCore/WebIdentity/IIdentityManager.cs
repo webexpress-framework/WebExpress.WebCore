@@ -118,6 +118,23 @@ namespace WebExpress.WebCore.WebIdentity
         IIdentity GetCurrentIdentity(IRequest request);
 
         /// <summary>
+        /// Adds a validator that confirms every identity of the application on each request. Plugins
+        /// need not call this: their public sealed validators are discovered for the applications
+        /// they serve.
+        /// </summary>
+        /// <param name="validator">The validator.</param>
+        /// <param name="applicationContext">The application whose requests it confirms.</param>
+        void RegisterValidator(IIdentityValidator validator, IApplicationContext applicationContext);
+
+        /// <summary>
+        /// Removes a validator from the application.
+        /// </summary>
+        /// <param name="validator">The validator.</param>
+        /// <param name="applicationContext">The application it was added to.</param>
+        /// <returns>True when the validator was registered.</returns>
+        bool UnregisterValidator(IIdentityValidator validator, IApplicationContext applicationContext);
+
+        /// <summary>
         /// Checks whether the specified identity satisfies all policies associated with the given endpoint context.
         /// </summary>
         /// <param name="identity">The identity to check.</param>

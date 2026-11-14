@@ -330,7 +330,7 @@ namespace WebExpress.WebCore.WebPlugin
 
                     var pluginContext = new PluginContext()
                     {
-                        Assembly = type.Assembly,
+                        Assembly = assembly,
                         PluginId = id,
                         PluginName = name,
                         Manufacturer = type.Assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company,

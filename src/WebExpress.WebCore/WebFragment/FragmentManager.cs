@@ -76,7 +76,7 @@ namespace WebExpress.WebCore.WebFragment
                 return;
             }
 
-            Register(pluginContext, _componentHub?.ApplicationManager.GetApplications(pluginContext));
+            Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
         }
 
         /// <summary>
@@ -183,7 +183,7 @@ namespace WebExpress.WebCore.WebFragment
                 }
 
                 // assign the fragment to existing applications
-                foreach (var applicationContext in _componentHub?.ApplicationManager.GetApplications(pluginContext))
+                foreach (var applicationContext in applicationContexts ?? [])
                 {
                     // assign section
                     foreach (var section in sections)

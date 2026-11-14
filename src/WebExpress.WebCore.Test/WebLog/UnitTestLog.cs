@@ -46,6 +46,95 @@ namespace WebExpress.WebCore.Test.WebLog
         }
 
         /// <summary>
+        /// Ensures reflection failures retain their nested cause and original throw site in every output.
+        /// </summary>
+        [Fact]
+        public void ExceptionPreservesNestedCauseInConsoleAndFile()
+        {
+            // arrange
+            var dir = CreateTempDirectory();
+            var log = new Log { LogMode = LogMode.Append };
+            var originalOutput = Console.Out;
+            using var output = new StringWriter();
+            var exception = Record.Exception(() => Activator.CreateInstance(typeof(FailingPlugin)));
+            try
+            {
+                Console.SetOut(output);
+                log.Begin(dir, "exception.log");
+
+                // act
+                log.Exception(exception);
+                log.Close();
+
+                // validation
+                var messages = new[]
+                {
+                    output.ToString(),
+                    File.ReadAllText(Path.Combine(dir, "exception.log")),
+                    string.Join(Environment.NewLine, log.GetRecentEntries().Select(entry => entry.Message))
+                };
+                foreach (var message in messages)
+                {
+                    Assert.Contains("System.Reflection.TargetInvocationException", message);
+                    Assert.Contains("System.InvalidOperationException", message);
+                    Assert.Contains("System.IO.IOException", message);
+                    Assert.Contains(FailingPlugin.FailureMessage, message);
+                    Assert.Contains(nameof(FailingPlugin) + "..ctor", message);
+                }
+                Assert.Equal(1, log.ExceptionCount);
+                Assert.Equal(1, log.ErrorCount);
+            }
+            finally
+            {
+                Console.SetOut(originalOutput);
+                log.Close();
+                Directory.Delete(dir, true);
+            }
+        }
+
+        /// <summary>
+        /// Ensures parallel failures retain every cause rather than only the first inner exception.
+        /// </summary>
+        [Fact]
+        public void ExceptionPreservesAllAggregateCauses()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+            var exception = new AggregateException(
+                new InvalidOperationException("first failure"),
+                new IOException("second failure"));
+
+            // act
+            log.Exception(exception);
+
+            // validation
+            var message = string.Join(Environment.NewLine, log.GetRecentEntries().Select(entry => entry.Message));
+            Assert.Contains("System.InvalidOperationException: first failure", message);
+            Assert.Contains("System.IO.IOException: second failure", message);
+            Assert.Equal(1, log.ExceptionCount);
+            Assert.Equal(1, log.ErrorCount);
+        }
+
+        /// <summary>
+        /// Reproduces constructor failures wrapped by reflection during plugin activation.
+        /// </summary>
+        private sealed class FailingPlugin
+        {
+            /// <summary>
+            /// Provides a cause longer than the console width to detect diagnostic truncation.
+            /// </summary>
+            public static string FailureMessage => new string('x', 500) + " root cause";
+
+            /// <summary>
+            /// Fails with nested diagnostic context to reproduce an activation error.
+            /// </summary>
+            public FailingPlugin()
+            {
+                throw new InvalidOperationException("Plugin initialization failed.", new IOException(FailureMessage));
+            }
+        }
+
+        /// <summary>
         /// Tests that clearing resets all counters.
         /// </summary>
         [Fact]
@@ -107,6 +196,169 @@ namespace WebExpress.WebCore.Test.WebLog
             Assert.Equal(2, recent.Count);
             Assert.Equal("m3", recent[0].Message);
             Assert.Equal("m4", recent[1].Message);
+        }
+
+        /// <summary>
+        /// Tests that an entry names the calling class and member. The class comes from the
+        /// caller's source file, not from a stack walk, which was the most expensive part of a
+        /// logging call.
+        /// </summary>
+        [Fact]
+        public void OriginNamesCallingClassAndMember()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+
+            // act
+            log.Info("origin");
+            log.Warning("origin");
+
+            // validation
+            Assert.All(log.GetRecentEntries(), entry => Assert.Equal($"{nameof(UnitTestLog)}.{nameof(OriginNamesCallingClassAndMember)}", entry.Instance));
+        }
+
+        /// <summary>
+        /// Tests that the class taken from a generic or partial file name stops at the type
+        /// parameters or the part suffix, so the origin column names a class that exists.
+        /// </summary>
+        [Theory]
+        [InlineData(@"C:\src\Repository{TEntity}.cs", "Repository.Load")]
+        [InlineData("/src/Repository`1.cs", "Repository.Load")]
+        [InlineData("/src/Repository.Query.cs", "Repository.Load")]
+        public void OriginStripsGenericAndPartialFileNames(string file, string expected)
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+
+            // act
+            log.Info("origin", "Load", null, file);
+
+            // validation
+            Assert.Equal(expected, log.GetRecentEntries().Last().Instance);
+        }
+
+        /// <summary>
+        /// Tests that neither an exception nor a fatal error waits for the console. They are
+        /// logged where the code goes on - in a request or a shutdown drain - which a slow console
+        /// would otherwise hold up; the entry still reaches the console with the next flush.
+        /// </summary>
+        /// <param name="fatal">True to log a fatal error, false to log an exception.</param>
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void ErrorDoesNotWaitForConsole(bool fatal)
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+            var lines = string.Join(Environment.NewLine, Enumerable.Range(0, 20).Select(x => $"console-line-{x}"));
+            var originalOutput = Console.Out;
+            using var output = new SlowWriter(TimeSpan.FromMilliseconds(500));
+            var stopwatch = new System.Diagnostics.Stopwatch();
+
+            try
+            {
+                Console.SetOut(output);
+
+                // act
+                stopwatch.Start();
+
+                if (fatal)
+                {
+                    log.FatalError(lines);
+                }
+                else
+                {
+                    log.Exception(new InvalidOperationException(lines));
+                }
+
+                stopwatch.Stop();
+                Log.FlushConsole();
+            }
+            finally
+            {
+                Console.SetOut(originalOutput);
+            }
+
+            // validation
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromMilliseconds(250), $"logging took {stopwatch.Elapsed}");
+            Assert.Contains("console-line-19", output.ToString());
+        }
+
+        /// <summary>
+        /// A console whose every write takes a while, as a redirected or captured console does.
+        /// </summary>
+        /// <param name="delay">The time a write takes.</param>
+        private sealed class SlowWriter(TimeSpan delay) : StringWriter
+        {
+            /// <summary>
+            /// Writes a block of entries after the delay.
+            /// </summary>
+            /// <param name="value">The block.</param>
+            public override void Write(string value)
+            {
+                Thread.Sleep(delay);
+                base.Write(value);
+            }
+        }
+
+        /// <summary>
+        /// Tests that an explicit origin without a source file - as the Kestrel adapter passes
+        /// it - is kept as given rather than prefixed with a class.
+        /// </summary>
+        [Fact]
+        public void ExplicitOriginWithoutFileIsKept()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+
+            // act
+            log.Error("explicit", "Kestrel", null, null);
+
+            // validation
+            Assert.Equal("Kestrel", log.GetRecentEntries().Last().Instance);
+        }
+
+        /// <summary>
+        /// Tests that the console output of a closed log is complete. The console is written by a
+        /// background writer, so stopping the log has to wait until it caught up.
+        /// </summary>
+        [Fact]
+        public void CloseFlushesConsoleInOrder()
+        {
+            // arrange
+            var log = new Log { LogMode = LogMode.Off };
+            var originalOutput = Console.Out;
+            using var output = new StringWriter();
+
+            try
+            {
+                Console.SetOut(output);
+
+                // act
+                for (var i = 0; i < 500; i++)
+                {
+                    if (i % 7 == 0)
+                    {
+                        log.Warning("console-order-" + i);
+                    }
+                    else
+                    {
+                        log.Info("console-order-" + i);
+                    }
+                }
+
+                log.Close();
+            }
+            finally
+            {
+                Console.SetOut(originalOutput);
+            }
+
+            // validation
+            var text = output.ToString();
+            var positions = Enumerable.Range(0, 500).Select(i => text.IndexOf("console-order-" + i + " ", StringComparison.Ordinal)).ToList();
+            Assert.DoesNotContain(-1, positions);
+            Assert.Equal(positions.Order(), positions);
         }
 
         /// <summary>

@@ -275,6 +275,11 @@ root.title=Applications
 root.introduction=Select an application to continue.
 root.empty=No applications are available.
 
+plugintypecatalog.type_failed=The type '{0}' of '{1}' was skipped: {2}
+plugintypecatalog.key_missing=The type '{0}' of '{1}' was skipped because it names no key.
+plugintypecatalog.key_duplicate=The type '{0}' of '{1}' was skipped because another type of it already uses the key '{2}'.
+plugintypecatalog.types_incomplete=Not every type of '{0}' could be loaded: {1}
+
 health.host_unavailable=The HTTP host is starting or stopping.
 health.component_unavailable=A component manager failed to initialize.
 health.application_unavailable=The application '{0}' of the plugin '{1}' could not be created: {2}

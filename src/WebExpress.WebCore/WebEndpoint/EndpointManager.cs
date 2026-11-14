@@ -10,6 +10,7 @@ using WebExpress.WebCore.WebAttribute;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebIcon;
 using WebExpress.WebCore.WebMessage;
+using WebExpress.WebCore.WebPlugin;
 using WebExpress.WebCore.WebUri;
 
 namespace WebExpress.WebCore.WebEndpoint
@@ -160,6 +161,28 @@ namespace WebExpress.WebCore.WebEndpoint
         private static Type[] GetAssemblyTypes(Assembly assembly)
         {
             return _assemblyTypes.GetOrAdd(assembly, a => a.GetTypes());
+        }
+
+        /// <summary>
+        /// Returns the route a plugin's endpoints are addressed under within an application.
+        /// A plugin that owns the application serves straight from the application route,
+        /// while every other plugin contributing to that application is given a segment of
+        /// its own so two plugins cannot collide on the same path. The segment is the plugin
+        /// id and never the plugin name: the name is a display text, often an i18n key whose
+        /// colon does not belong into a path, and pages, rest apis and assets of one plugin
+        /// must share one prefix.
+        /// </summary>
+        /// <param name="applicationContext">The context of the application.</param>
+        /// <param name="pluginContext">The context of the plugin.</param>
+        /// <returns>The route the plugin's endpoints are mounted under.</returns>
+        public static IRoute CreatePluginRoute(IApplicationContext applicationContext, IPluginContext pluginContext)
+        {
+            return applicationContext.Route.Concat
+            (
+                applicationContext.PluginContext != pluginContext
+                    ? pluginContext.PluginId.ToString()
+                    : null
+            );
         }
 
         /// <summary>

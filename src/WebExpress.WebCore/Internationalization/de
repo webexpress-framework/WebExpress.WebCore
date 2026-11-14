@@ -275,6 +275,11 @@ root.title=Anwendungen
 root.introduction=Wählen Sie eine Anwendung aus, um fortzufahren.
 root.empty=Es sind keine Anwendungen verfügbar.
 
+plugintypecatalog.type_failed=Der Typ '{0}' von '{1}' wurde übersprungen: {2}
+plugintypecatalog.key_missing=Der Typ '{0}' von '{1}' wurde übersprungen, weil er keinen Schlüssel nennt.
+plugintypecatalog.key_duplicate=Der Typ '{0}' von '{1}' wurde übersprungen, weil ein anderer Typ dort bereits den Schlüssel '{2}' verwendet.
+plugintypecatalog.types_incomplete=Nicht alle Typen von '{0}' konnten geladen werden: {1}
+
 health.host_unavailable=Der HTTP-Host wird gestartet oder beendet.
 health.component_unavailable=Ein Komponentenmanager konnte nicht initialisiert werden.
 health.application_unavailable=Die Anwendung '{0}' des Plugins '{1}' konnte nicht erzeugt werden: {2}

@@ -27,6 +27,11 @@ namespace WebExpress.WebCore.Test.Fixture
         internal TestClock Clock { get; } = new();
 
         /// <summary>
+        /// Gets the application groups an <see cref="Instance"/> created afterwards is configured with.
+        /// </summary>
+        internal Dictionary<string, string[]> Groups { get; } = [];
+
+        /// <summary>
         /// Creates an isolated signing authority and durable token directory for each test.
         /// </summary>
         /// <param name="requireHttps">Whether the test retains the production transport requirement.</param>
@@ -63,7 +68,10 @@ namespace WebExpress.WebCore.Test.Fixture
         /// <returns>The configuration containing the authentication section.</returns>
         private IConfigurationRoot Configuration()
         {
-            return new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string>
+            var groups = Groups.SelectMany(group => group.Value.Select((id, index) =>
+                new KeyValuePair<string, string>($"WebExpress:Authentication:ApplicationGroups:{group.Key}:{index}", id)));
+
+            return new ConfigurationBuilder().AddInMemoryCollection(groups).AddInMemoryCollection(new Dictionary<string, string>
             {
                 ["WebExpress:Authentication:Issuer"] = Settings.Issuer,
                 ["WebExpress:Authentication:Audience"] = Settings.Audience,

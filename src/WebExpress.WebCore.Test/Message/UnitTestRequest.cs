@@ -9,6 +9,41 @@ namespace WebExpress.WebCore.Test.Message
     public class UnitTestRequest
     {
         /// <summary>
+        /// Prevents form actions from inheriting a container listener port absent from the public host.
+        /// </summary>
+        /// <param name="scheme">The HTTP scheme received by the server.</param>
+        /// <param name="host">The public host header, including an optional explicit port.</param>
+        /// <param name="externalUri">The independently configured sitemap base URI.</param>
+        /// <param name="expected">The request URI that form rendering must receive.</param>
+        [Theory]
+        [InlineData("http", "vila", "http://vila/", "http://vila/vila/settings/mode?tab=1")]
+        [InlineData("http", "vila", null, "http://vila/vila/settings/mode?tab=1")]
+        [InlineData("http", "vila:80", "http://vila/", "http://vila/vila/settings/mode?tab=1")]
+        [InlineData("http", "vila:9090", null, "http://vila:9090/vila/settings/mode?tab=1")]
+        [InlineData("https", "vila", null, "https://vila/vila/settings/mode?tab=1")]
+        [InlineData("https", "vila:8443", null, "https://vila:8443/vila/settings/mode?tab=1")]
+        public void RequestUriPreservesPublicPort(string scheme, string host, string externalUri, string expected)
+        {
+            // arrange
+            var features = Prepare(null, RequestMethod.GET, "?tab=1");
+            features.Get<IHttpConnectionFeature>().LocalPort = 8080;
+            var requestFeature = features.Get<IHttpRequestFeature>();
+            requestFeature.Scheme = scheme;
+            requestFeature.Headers.Host = host;
+            requestFeature.RawTarget = "/vila/settings/mode?tab=1";
+            var context = Fixture.UnitTestFixture.CreateHttpServerContextMock(externalUri: externalUri);
+
+            // act
+            var httpContext = new WebMessage.HttpContext(features, context);
+            var request = httpContext.Request;
+
+            // validation
+            Assert.Equal(expected, request.Uri.ToString());
+            Assert.Equal(expected, httpContext.Uri.ToString());
+            Assert.Equal(8080, ((IPEndPoint)request.LocalEndPoint).Port);
+        }
+
+        /// <summary>
         /// Creates the feature collection.
         /// </summary>
         /// <param name="reader">The reader.</param>

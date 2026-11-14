@@ -14,7 +14,8 @@ namespace WebExpress.WebCore.WebIdentity
     /// <summary>
     /// Enforces disjoint trust rules for access, refresh, and personal credentials.
     /// Access verification needs only the shared signing configuration and the signed claims; replay
-    /// and revocation markers live in the store that <see cref="IIdentityTokenStoreManager"/> binds to the application.
+    /// and revocation markers live in the store that <see cref="IIdentityTokenStoreManager"/> binds to
+    /// the application the credential was issued for, which every application of its group consults.
     /// </summary>
     public partial class IdentityManager
     {
@@ -32,8 +33,10 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="AccessLifetime">The lifetime of a signed authorization snapshot.</param>
         /// <param name="RefreshLifetime">The absolute lifetime of a login grant.</param>
         /// <param name="PersonalLifetime">The maximum lifetime of a personal credential.</param>
+        /// <param name="Groups">The configured groups of applications that accept each other's tokens.</param>
         private sealed record TokenAuthority(SigningCredentials Signing, string Issuer, string Audience,
-            TimeSpan AccessLifetime, TimeSpan RefreshLifetime, TimeSpan PersonalLifetime);
+            TimeSpan AccessLifetime, TimeSpan RefreshLifetime, TimeSpan PersonalLifetime,
+            IReadOnlyList<string[]> Groups);
 
         /// <summary>
         /// Gets or sets the UTC clock that enforces signed expiration boundaries, replaceable so tests can cross deadlines without sleeping.
@@ -62,9 +65,13 @@ namespace WebExpress.WebCore.WebIdentity
                     {
                         throw new ArgumentException("Authentication token lifetimes are invalid.");
                     }
+                    var groups = (settings.ApplicationGroups ?? [])
+                        .Select(x => (x.Value ?? []).Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).ToArray())
+                        .Where(x => x.Length > 1)
+                        .ToArray();
                     _authority = new TokenAuthority(new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256),
                         settings.Issuer, settings.Audience, settings.AccessTokenLifetime, settings.RefreshTokenLifetime,
-                        settings.MaximumPersonalAccessTokenLifetime);
+                        settings.MaximumPersonalAccessTokenLifetime, groups);
                     return _authority;
                 }
             }
@@ -126,7 +133,7 @@ namespace WebExpress.WebCore.WebIdentity
         {
             var jwt = ValidateToken(token, applicationContext, "pat");
             // without a store a revocation cannot be ruled out, so the credential is refused
-            var store = TokenStore(applicationContext);
+            var store = CredentialStore(jwt, applicationContext);
             return jwt is not null && store is not null && !store.IsRevoked("pat:" + jwt.Id) ? ReadIdentity(jwt) : null;
         }
 
@@ -141,7 +148,7 @@ namespace WebExpress.WebCore.WebIdentity
         {
             var jwt = ValidateToken(token, applicationContext, "refresh");
             var identity = ReadIdentity(jwt);
-            var store = TokenStore(applicationContext);
+            var store = CredentialStore(jwt, applicationContext);
             if (identity is null || store is null || !jwt.TryGetPayloadValue<string>("grant", out var grant) ||
                 string.IsNullOrEmpty(grant) || store.IsRevoked("grant:" + grant)) { return null; }
             var expires = new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero);
@@ -151,7 +158,23 @@ namespace WebExpress.WebCore.WebIdentity
                 return null;
             }
             var rememberMe = !jwt.TryGetPayloadValue<bool>("remember_me", out var persistent) || persistent;
-            return IssuePair(identity, applicationContext, grant, expires, rememberMe);
+            // the renewed pair keeps the audience of the application the sign-in was issued for:
+            // renewing in a member of an overlapping group must not hand the grant to the
+            // applications that only trust the renewing one
+            return IssuePair(identity, applicationContext, grant, expires, rememberMe, IssuedFor(jwt));
+        }
+
+        /// <summary>
+        /// Returns the application a token was issued for, read from its audience.
+        /// </summary>
+        /// <param name="jwt">The verified token.</param>
+        /// <returns>The application id, or null when the audience is not one of this deployment.</returns>
+        private string IssuedFor(JsonWebToken jwt)
+        {
+            var prefix = RequireAuthority().Audience + "/";
+            var audience = jwt.Audiences.FirstOrDefault(x => x.StartsWith(prefix, StringComparison.Ordinal));
+
+            return audience?[prefix.Length..];
         }
 
         /// <summary>
@@ -165,7 +188,7 @@ namespace WebExpress.WebCore.WebIdentity
             RequireAuthority();
             var jwt = ValidateToken(token, applicationContext, "pat");
             if (jwt is null) { return false; }
-            RequireTokenStore(applicationContext).Revoke("pat:" + jwt.Id, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
+            RequireCredentialStore(jwt, applicationContext).Revoke("pat:" + jwt.Id, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
             return true;
         }
 
@@ -181,7 +204,7 @@ namespace WebExpress.WebCore.WebIdentity
             if (jwt is not null && jwt.TryGetPayloadValue<string>("grant", out var grant) &&
                 jwt.TryGetPayloadValue<long>("grant_exp", out var expiration))
             {
-                RequireTokenStore(applicationContext).Revoke("grant:" + grant, DateTimeOffset.FromUnixTimeSeconds(expiration));
+                RequireCredentialStore(jwt, applicationContext).Revoke("grant:" + grant, DateTimeOffset.FromUnixTimeSeconds(expiration));
             }
         }
 
@@ -229,7 +252,7 @@ namespace WebExpress.WebCore.WebIdentity
             var jwt = ValidateToken(token, applicationContext, "refresh");
             if (jwt is not null && jwt.TryGetPayloadValue<string>("grant", out var grant))
             {
-                RequireTokenStore(applicationContext).Revoke("grant:" + grant, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
+                RequireCredentialStore(jwt, applicationContext).Revoke("grant:" + grant, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
             }
         }
 
@@ -265,16 +288,18 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="grant">The identifier of the original login grant.</param>
         /// <param name="deadline">The absolute deadline beyond which the login grant cannot be renewed.</param>
         /// <param name="rememberMe">Whether browser credentials persist beyond the browser session.</param>
+        /// <param name="issuedFor">The application whose audience the pair carries; null for the given application.</param>
         /// <returns>The signed token pair constrained by the absolute grant deadline.</returns>
-        private IdentityTokenPair IssuePair(IIdentity identity, IApplicationContext applicationContext, string grant, DateTimeOffset deadline, bool rememberMe)
+        private IdentityTokenPair IssuePair(IIdentity identity, IApplicationContext applicationContext, string grant, DateTimeOffset deadline, bool rememberMe,
+            string issuedFor = null)
         {
             ArgumentNullException.ThrowIfNull(identity);
             var accessDeadline = Clock.GetUtcNow() + RequireAuthority().AccessLifetime;
             if (accessDeadline > deadline) { accessDeadline = deadline; }
             var pair = new IdentityTokenPair
             {
-                AccessToken = SignIdentity(identity, applicationContext, "access", accessDeadline, grant, deadline),
-                RefreshToken = SignIdentity(identity, applicationContext, "refresh", deadline, grant, deadline, rememberMe),
+                AccessToken = SignIdentity(identity, applicationContext, "access", accessDeadline, grant, deadline, issuedFor: issuedFor),
+                RefreshToken = SignIdentity(identity, applicationContext, "refresh", deadline, grant, deadline, rememberMe, issuedFor),
                 AccessTokenExpiresAt = accessDeadline,
                 RefreshTokenExpiresAt = deadline,
                 RememberMe = rememberMe
@@ -296,9 +321,10 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="grant">The identifier of the original login grant.</param>
         /// <param name="grantExpires">The expiration deadline shared by credentials from one login grant.</param>
         /// <param name="rememberMe">Whether a refresh credential may restore persistent browser cookies.</param>
+        /// <param name="issuedFor">The application whose audience the credential carries; null for the given application.</param>
         /// <returns>The signed credential containing the trusted identity snapshot.</returns>
         private string SignIdentity(IIdentity identity, IApplicationContext applicationContext, string purpose, DateTimeOffset expires,
-            string grant = null, DateTimeOffset? grantExpires = null, bool rememberMe = true)
+            string grant = null, DateTimeOffset? grantExpires = null, bool rememberMe = true, string issuedFor = null)
         {
             var claims = new Dictionary<string, object>
             {
@@ -309,7 +335,7 @@ namespace WebExpress.WebCore.WebIdentity
             if (purpose == "refresh") { claims["remember_me"] = rememberMe; }
             if (identity.Email is not null) { claims["email"] = identity.Email; }
             if (grant is not null) { claims["grant"] = grant; claims["grant_exp"] = grantExpires.Value.ToUnixTimeSeconds(); }
-            return SignToken(claims, applicationContext, purpose, expires);
+            return SignToken(claims, applicationContext, purpose, expires, issuedFor);
         }
 
         /// <summary>
@@ -319,8 +345,10 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="applicationContext">The application that scopes token audiences and authentication.</param>
         /// <param name="purpose">The token purpose separating access, renewal, and browser correlation.</param>
         /// <param name="expires">The signed expiration deadline of the credential.</param>
+        /// <param name="issuedFor">The application whose audience the credential carries; null for the given application.</param>
         /// <returns>The signed JWT bound to the deployment trust boundary.</returns>
-        private string SignToken(Dictionary<string, object> claims, IApplicationContext applicationContext, string purpose, DateTimeOffset expires)
+        private string SignToken(Dictionary<string, object> claims, IApplicationContext applicationContext, string purpose, DateTimeOffset expires,
+            string issuedFor = null)
         {
             var authority = RequireAuthority();
             ArgumentNullException.ThrowIfNull(applicationContext);
@@ -329,7 +357,7 @@ namespace WebExpress.WebCore.WebIdentity
             claims["token_use"] = purpose;
             return _tokenHandler.CreateToken(new SecurityTokenDescriptor
             {
-                Issuer = authority.Issuer, Audience = authority.Audience + "/" + applicationContext.ApplicationId,
+                Issuer = authority.Issuer, Audience = authority.Audience + "/" + (issuedFor ?? applicationContext.ApplicationId),
                 IssuedAt = Clock.GetUtcNow().UtcDateTime, NotBefore = Clock.GetUtcNow().UtcDateTime,
                 Expires = expires.UtcDateTime, Claims = claims, SigningCredentials = authority.Signing,
                 TokenType = "wx-" + purpose + "+jwt"
@@ -352,7 +380,7 @@ namespace WebExpress.WebCore.WebIdentity
             var result = _tokenHandler.ValidateTokenAsync(token, new TokenValidationParameters
             {
                 ValidateIssuer = true, ValidIssuer = authority.Issuer,
-                ValidateAudience = true, ValidAudience = authority.Audience + "/" + applicationContext.ApplicationId,
+                ValidateAudience = true, ValidAudiences = AcceptedAudiences(authority, applicationContext, purpose),
                 ValidateIssuerSigningKey = true, IssuerSigningKey = authority.Signing.Key,
                 RequireSignedTokens = true, RequireExpirationTime = true,
                 ValidAlgorithms = [SecurityAlgorithms.HmacSha256], ValidTypes = ["wx-" + purpose + "+jwt"],
@@ -364,6 +392,29 @@ namespace WebExpress.WebCore.WebIdentity
             if (!result.IsValid || result.SecurityToken is not JsonWebToken jwt || string.IsNullOrEmpty(jwt.Id) ||
                 !jwt.TryGetPayloadValue<string>("token_use", out var use) || use != purpose) { return null; }
             return jwt;
+        }
+
+        /// <summary>
+        /// Returns the audiences a token of the purpose is accepted with in the application: its own,
+        /// and for the credentials of a sign-in also those of the applications grouped with it. A
+        /// challenge correlates one browser round trip with one application and stays its own.
+        /// </summary>
+        /// <param name="authority">The signing authority.</param>
+        /// <param name="applicationContext">The application the token is presented to.</param>
+        /// <param name="purpose">The token purpose.</param>
+        /// <returns>The accepted audiences.</returns>
+        private static IEnumerable<string> AcceptedAudiences(TokenAuthority authority, IApplicationContext applicationContext, string purpose)
+        {
+            var own = applicationContext.ApplicationId;
+            var applications = purpose == "challenge"
+                ? [own]
+                : authority.Groups
+                    .Where(x => x.Contains(own, StringComparer.OrdinalIgnoreCase))
+                    .SelectMany(x => x)
+                    .Append(own)
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            return [.. applications.Select(x => authority.Audience + "/" + x)];
         }
 
         /// <summary>
@@ -416,14 +467,40 @@ namespace WebExpress.WebCore.WebIdentity
         }
 
         /// <summary>
+        /// Resolves the store that holds the markers of a sign-in credential. Every application of a
+        /// group honors the credential, so its markers must live in one place - the store of the
+        /// application it was issued for; with each member's own store, a refresh token would be
+        /// consumed once per member and a revocation in one member would go unseen in the others.
+        /// </summary>
+        /// <param name="jwt">The verified credential, or null.</param>
+        /// <param name="applicationContext">The application the credential was presented to.</param>
+        /// <returns>The store of the issuing application, or null when it is not available here.</returns>
+        private IIdentityTokenStore CredentialStore(JsonWebToken jwt, IApplicationContext applicationContext)
+        {
+            var issuedFor = jwt is null ? null : IssuedFor(jwt);
+
+            if (issuedFor is null || string.Equals(issuedFor, applicationContext?.ApplicationId, StringComparison.OrdinalIgnoreCase))
+            {
+                return TokenStore(applicationContext);
+            }
+
+            // an issuing application this instance does not serve has markers nobody here can
+            // consult; the receiving application's store never saw them, so the credential is refused
+            var issuer = _componentHub?.ApplicationManager?.GetApplication(issuedFor);
+
+            return issuer is null ? null : TokenStore(issuer);
+        }
+
+        /// <summary>
         /// Fails a revocation outright rather than reporting success for a marker that was never persisted.
         /// </summary>
-        /// <param name="applicationContext">The application whose credentials are consumed or revoked.</param>
-        /// <returns>The store bound to the application.</returns>
-        private IIdentityTokenStore RequireTokenStore(IApplicationContext applicationContext)
+        /// <param name="jwt">The verified credential being revoked.</param>
+        /// <param name="applicationContext">The application the credential was presented to.</param>
+        /// <returns>The store that holds the credential's markers.</returns>
+        private IIdentityTokenStore RequireCredentialStore(JsonWebToken jwt, IApplicationContext applicationContext)
         {
-            return TokenStore(applicationContext) ??
-                throw new InvalidOperationException("Configure WebExpress:Authentication:TokenStorePath or register an identity token store.");
+            return CredentialStore(jwt, applicationContext) ??
+                throw new InvalidOperationException("Configure WebExpress:Authentication:TokenStorePath or register an identity token store for every application of the group.");
         }
 
         /// <summary>
