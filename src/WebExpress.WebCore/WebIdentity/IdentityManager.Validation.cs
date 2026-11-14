@@ -73,30 +73,56 @@ namespace WebExpress.WebCore.WebIdentity
                 {
                     lock (_validatorGate)
                     {
-                        if (_validators.Any(x => x.Plugin == pluginContext && x.Application == applicationContext && x.Validator.GetType() == type))
+                        if (_validators.Any(x => x.Plugin == pluginContext && x.Application == applicationContext && ValidatorType(x.Validator) == type))
                         {
                             continue;
                         }
                     }
 
-                    var dependencies = new object[] { _componentHub, _httpServerContext, applicationContext, pluginContext };
-                    var constructor = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                        .OrderByDescending(x => x.GetParameters().Length)
-                        .FirstOrDefault(x => x.GetParameters().All(p => dependencies.Any(p.ParameterType.IsInstanceOfType)));
-
-                    if (constructor is null)
-                    {
-                        continue;
-                    }
-
-                    var validator = (IIdentityValidator)constructor.Invoke(constructor.GetParameters()
-                        .Select(p => dependencies.First(p.ParameterType.IsInstanceOfType)).ToArray());
+                    var validator = CreateValidator(type, pluginContext, applicationContext);
 
                     lock (_validatorGate)
                     {
                         _validators.Add((pluginContext, applicationContext, validator));
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Constructs a validator for an application. A validator that cannot be constructed is
+        /// replaced by one that refuses every identity: the plugin meant to guard the application,
+        /// and an application without its guard must not accept sign-ins as if none were intended.
+        /// </summary>
+        /// <param name="type">The validator type.</param>
+        /// <param name="pluginContext">The plugin that defines it.</param>
+        /// <param name="applicationContext">The application it confirms identities for.</param>
+        /// <returns>The validator, or a refusing stand-in for the given type.</returns>
+        private IIdentityValidator CreateValidator(Type type, IPluginContext pluginContext, IApplicationContext applicationContext)
+        {
+            var dependencies = new object[] { _componentHub, _httpServerContext, applicationContext, pluginContext };
+            var constructor = type.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                .OrderByDescending(x => x.GetParameters().Length)
+                .FirstOrDefault(x => x.GetParameters().All(p => dependencies.Any(p.ParameterType.IsInstanceOfType)));
+
+            if (constructor is null)
+            {
+                _httpServerContext?.Log?.Error($"The identity validator '{type.FullName}' has no constructor the discovery can satisfy; application '{applicationContext?.ApplicationId}' refuses every identity.");
+
+                return new RefusingValidator(type);
+            }
+
+            try
+            {
+                return (IIdentityValidator)constructor.Invoke(constructor.GetParameters()
+                    .Select(p => dependencies.First(p.ParameterType.IsInstanceOfType)).ToArray());
+            }
+            catch (Exception ex)
+            {
+                _httpServerContext?.Log?.Error($"The identity validator '{type.FullName}' could not be constructed; application '{applicationContext?.ApplicationId}' refuses every identity.");
+                _httpServerContext?.Log?.Exception(ex is TargetInvocationException { InnerException: { } inner } ? inner : ex);
+
+                return new RefusingValidator(type);
             }
         }
 
@@ -171,6 +197,39 @@ namespace WebExpress.WebCore.WebIdentity
             }
 
             return identity;
+        }
+
+        /// <summary>
+        /// Returns the validator type a registration stands for, so a refusing stand-in counts as
+        /// the type it replaces and a repeated discovery does not add a second one.
+        /// </summary>
+        /// <param name="validator">The registered validator.</param>
+        /// <returns>The type of the validator, or the type a stand-in replaces.</returns>
+        private static Type ValidatorType(IIdentityValidator validator)
+        {
+            return validator is RefusingValidator refusing ? refusing.Type : validator.GetType();
+        }
+
+        /// <summary>
+        /// Stands in for a validator that could not be constructed and refuses every identity.
+        /// </summary>
+        /// <param name="type">The validator type it replaces.</param>
+        private sealed class RefusingValidator(Type type) : IIdentityValidator
+        {
+            /// <summary>
+            /// Gets the validator type it replaces.
+            /// </summary>
+            public Type Type { get; } = type;
+
+            /// <summary>
+            /// Refuses the identity.
+            /// </summary>
+            /// <param name="context">The identity to confirm.</param>
+            /// <returns>Always false.</returns>
+            public bool Validate(IdentityValidationContext context)
+            {
+                return false;
+            }
         }
     }
 }

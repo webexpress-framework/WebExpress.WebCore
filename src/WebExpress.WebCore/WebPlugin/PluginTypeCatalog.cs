@@ -41,8 +41,14 @@ namespace WebExpress.WebCore.WebPlugin
     /// <para>
     /// The catalog is thread-safe. Types are scanned and items constructed outside its lock, and
     /// <see cref="Added"/> and <see cref="Removed"/> are raised after it was released, so a
-    /// constructor or a handler may call back into the catalog. Items the catalog constructed are
-    /// disposed when they leave it, if they are disposable; registered items belong to their caller.
+    /// constructor or a handler may call back into the catalog. The events are raised one at a
+    /// time and in the order the changes were made: a change a handler causes is raised after
+    /// that handler returns, and a change made on another thread while events are being raised
+    /// is raised by the thread already raising them - a mirror built from the events therefore
+    /// always ends where <see cref="Find(string)"/> does. A handler that throws is logged and
+    /// does not keep the other handlers or the disposal of the leaving items from running. Items
+    /// the catalog constructed are disposed when they leave it, if they are disposable;
+    /// registered items belong to their caller.
     /// </para>
     /// </remarks>
     /// <typeparam name="TItem">The type of the items.</typeparam>
@@ -55,6 +61,17 @@ namespace WebExpress.WebCore.WebPlugin
         private readonly Lock _sync = new();
         private readonly List<Offer> _offers = [];
         private readonly Dictionary<Slot, Offer> _inUse = new(SlotComparer.Instance);
+
+        // a discovery runs outside the lock; its marker lets a withdrawal in the meantime veto the
+        // commit, so an owner that already left cannot come back with the discovered items
+        private readonly List<Offer> _pending = [];
+
+        // changes are queued in the order they were made and delivered by one thread at a time, so
+        // a change caused by a handler, or made on another thread meanwhile, cannot overtake one
+        // that was made before it
+        private readonly Queue<Notice> _notices = new();
+        private bool _dispatching;
+
         private IComponentHub _componentHub;
         private IHttpServerContext _httpServerContext;
         private long _version;
@@ -466,6 +483,7 @@ namespace WebExpress.WebCore.WebPlugin
 
                 removed = [.. _offers];
                 _offers.Clear();
+                _pending.Clear();
                 changes = [.. _inUse.Select(x => new Change(x.Key, x.Value, null))];
                 _inUse.Clear();
 
@@ -473,6 +491,8 @@ namespace WebExpress.WebCore.WebPlugin
                 {
                     _version++;
                 }
+
+                Publish(changes, removed);
             }
 
             if (componentHub?.PluginManager is { } plugins)
@@ -487,8 +507,7 @@ namespace WebExpress.WebCore.WebPlugin
                 applications.RemoveApplication -= OnRemoveApplication;
             }
 
-            Raise(changes);
-            Release(removed);
+            Drain();
         }
 
         /// <summary>
@@ -507,7 +526,8 @@ namespace WebExpress.WebCore.WebPlugin
         /// <summary>
         /// Discovers and files the items of one plugin (or assembly) and application. The types
         /// are scanned and the items built outside the lock; an offer that arrived meanwhile wins
-        /// and the duplicate is discarded.
+        /// and the duplicate is discarded, and so are the items when their owner was withdrawn
+        /// while they were built.
         /// </summary>
         /// <param name="pluginContext">The plugin, or null for an assembly without one.</param>
         /// <param name="applicationContext">The application, or null for a catalog bound per plugin.</param>
@@ -519,34 +539,57 @@ namespace WebExpress.WebCore.WebPlugin
                 return;
             }
 
+            Offer pending;
+
             lock (_sync)
             {
                 if (_disposed || _offers.Any(x => x.IsOfferOf(pluginContext, applicationContext, assembly)))
                 {
                     return;
                 }
+
+                pending = new Offer(pluginContext, applicationContext, assembly, registered: false, new Dictionary<string, TItem>());
+                _pending.Add(pending);
             }
 
-            var offer = new Offer(pluginContext, applicationContext, assembly, registered: false, Discover(pluginContext, applicationContext, assembly));
-            List<Change> changes = null;
+            Dictionary<string, TItem> items;
+
+            try
+            {
+                items = Discover(pluginContext, applicationContext, assembly);
+            }
+            catch
+            {
+                // a marker left behind would keep the owner from ever being collected again
+                lock (_sync)
+                {
+                    _pending.Remove(pending);
+                }
+
+                throw;
+            }
+
+            var offer = new Offer(pluginContext, applicationContext, assembly, registered: false, items);
+            var committed = false;
 
             lock (_sync)
             {
-                if (!_disposed && !_offers.Any(x => x.IsOfferOf(pluginContext, applicationContext, assembly)))
+                if (_pending.Remove(pending) && !_disposed && !_offers.Any(x => x.IsOfferOf(pluginContext, applicationContext, assembly)))
                 {
                     _offers.Add(offer);
-                    changes = Resolve(offer.Items.Keys.Select(x => new Slot(applicationContext, x)));
+                    Publish(Resolve(offer.Items.Keys.Select(x => new Slot(applicationContext, x))), null);
+                    committed = true;
                 }
             }
 
-            if (changes is null)
+            if (!committed)
             {
                 Release([offer]);
 
                 return;
             }
 
-            Raise(changes);
+            Drain();
         }
 
         /// <summary>
@@ -561,7 +604,6 @@ namespace WebExpress.WebCore.WebPlugin
 
             var key = Normalize(_keyOf(item)) ?? throw new ArgumentException("The item has no key.", nameof(item));
             var offer = new Offer(null, applicationContext, null, registered: true, new Dictionary<string, TItem>(StringComparer.OrdinalIgnoreCase) { [key] = item });
-            List<Change> changes;
 
             lock (_sync)
             {
@@ -572,21 +614,21 @@ namespace WebExpress.WebCore.WebPlugin
 
                 _offers.RemoveAll(x => x.Registered && ReferenceEquals(x.ApplicationContext, applicationContext) && x.Items.ContainsKey(key));
                 _offers.Add(offer);
-                changes = Resolve([new Slot(applicationContext, key)]);
+                Publish(Resolve([new Slot(applicationContext, key)]), null);
             }
 
-            Raise(changes);
+            Drain();
         }
 
         /// <summary>
-        /// Takes out the offers a predicate selects and lets every key they touched fall back.
+        /// Takes out the offers a predicate selects and lets every key they touched fall back. A
+        /// discovery still running for a selected owner is vetoed as well.
         /// </summary>
         /// <param name="predicate">Selects the offers.</param>
         /// <returns>The number of offers taken out.</returns>
         private int WithdrawOffers(Func<Offer, bool> predicate)
         {
             List<Offer> removed;
-            List<Change> changes;
 
             lock (_sync)
             {
@@ -595,6 +637,7 @@ namespace WebExpress.WebCore.WebPlugin
                     return 0;
                 }
 
+                _pending.RemoveAll(x => predicate(x));
                 removed = [.. _offers.Where(predicate)];
 
                 if (removed.Count == 0)
@@ -607,11 +650,10 @@ namespace WebExpress.WebCore.WebPlugin
                     _offers.Remove(offer);
                 }
 
-                changes = Resolve(removed.SelectMany(x => x.Items.Keys.Select(y => new Slot(x.ApplicationContext, y))));
+                Publish(Resolve(removed.SelectMany(x => x.Items.Keys.Select(y => new Slot(x.ApplicationContext, y)))), removed);
             }
 
-            Raise(changes);
-            Release(removed);
+            Drain();
 
             return removed.Count;
         }
@@ -682,22 +724,122 @@ namespace WebExpress.WebCore.WebPlugin
         }
 
         /// <summary>
-        /// Raises the events of a set of changes, outside the lock, the leaving item before the
-        /// arriving one, so a handler that mirrors the catalog never holds two items for one key.
+        /// Queues the events of a set of changes and the disposal of the offers that left, in this
+        /// order, so a handler still sees the leaving items intact. Must be called under the lock,
+        /// so the queue keeps the order in which the changes were made.
         /// </summary>
         /// <param name="changes">The changes.</param>
-        private void Raise(IEnumerable<Change> changes)
+        /// <param name="released">The offers that left the catalog, or null.</param>
+        private void Publish(List<Change> changes, IReadOnlyList<Offer> released)
         {
             foreach (var change in changes)
             {
-                if (change.Before is { } before)
+                _notices.Enqueue(new Notice(change, null));
+            }
+
+            if (released is { Count: > 0 })
+            {
+                _notices.Enqueue(new Notice(default, released));
+            }
+        }
+
+        /// <summary>
+        /// Delivers the queued notices outside the lock. Only one thread delivers at a time; a call
+        /// while another delivery runs - from a handler or from another thread - leaves its notices
+        /// to that delivery, which takes them along after the ones queued before.
+        /// </summary>
+        private void Drain()
+        {
+            lock (_sync)
+            {
+                if (_dispatching)
                 {
-                    Removed?.Invoke(this, new PluginTypeCatalogEventArgs<TItem>(change.Slot.Key, before.Items[change.Slot.Key], before.PluginContext, before.ApplicationContext));
+                    return;
                 }
 
-                if (change.After is { } after)
+                _dispatching = true;
+            }
+
+            try
+            {
+                while (true)
                 {
-                    Added?.Invoke(this, new PluginTypeCatalogEventArgs<TItem>(change.Slot.Key, after.Items[change.Slot.Key], after.PluginContext, after.ApplicationContext));
+                    Notice notice;
+
+                    lock (_sync)
+                    {
+                        if (!_notices.TryDequeue(out notice))
+                        {
+                            _dispatching = false;
+
+                            return;
+                        }
+                    }
+
+                    Deliver(notice);
+                }
+            }
+            catch
+            {
+                // the next change delivers what is left; a flag left set would silence the catalog
+                lock (_sync)
+                {
+                    _dispatching = false;
+                }
+
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Delivers one notice: the leaving item before the arriving one, so a handler that mirrors
+        /// the catalog never holds two items for one key.
+        /// </summary>
+        /// <param name="notice">The notice.</param>
+        private void Deliver(Notice notice)
+        {
+            if (notice.Released is { } released)
+            {
+                Release(released);
+
+                return;
+            }
+
+            var change = notice.Change;
+
+            if (change.Before is { } before)
+            {
+                Notify(Removed, new PluginTypeCatalogEventArgs<TItem>(change.Slot.Key, before.Items[change.Slot.Key], before.PluginContext, before.ApplicationContext));
+            }
+
+            if (change.After is { } after)
+            {
+                Notify(Added, new PluginTypeCatalogEventArgs<TItem>(change.Slot.Key, after.Items[change.Slot.Key], after.PluginContext, after.ApplicationContext));
+            }
+        }
+
+        /// <summary>
+        /// Calls every subscriber of an event on its own, so one that throws neither hides the
+        /// change from the others nor stops the notices and disposals queued after it.
+        /// </summary>
+        /// <param name="handler">The event's subscribers.</param>
+        /// <param name="args">The event arguments.</param>
+        private void Notify(EventHandler<PluginTypeCatalogEventArgs<TItem>> handler, PluginTypeCatalogEventArgs<TItem> args)
+        {
+            if (handler is null)
+            {
+                return;
+            }
+
+            foreach (EventHandler<PluginTypeCatalogEventArgs<TItem>> subscriber in handler.GetInvocationList())
+            {
+                try
+                {
+                    subscriber(this, args);
+                }
+                catch (Exception ex)
+                {
+                    _httpServerContext?.Log?.Exception(ex);
                 }
             }
         }
@@ -1010,6 +1152,13 @@ namespace WebExpress.WebCore.WebPlugin
         /// <param name="Before">The offer in use before, or null.</param>
         /// <param name="After">The offer in use after, or null.</param>
         private readonly record struct Change(Slot Slot, Offer Before, Offer After);
+
+        /// <summary>
+        /// A queued notice: a change to raise, or the offers to release.
+        /// </summary>
+        /// <param name="Change">The change, unless offers are released.</param>
+        /// <param name="Released">The offers that left the catalog, or null for a change.</param>
+        private readonly record struct Notice(Change Change, IReadOnlyList<Offer> Released);
 
         /// <summary>
         /// Compares slots by the identity of their application and the key without case, because an

@@ -390,8 +390,7 @@ namespace WebExpress.WebCore.WebPackage
                     throw new InvalidOperationException($"<plugin>{plugin}</plugin> points to '{pluginDirectory}', outside of the spec folder '{rootDirectory}'.");
                 }
 
-                // the same name the spec inside the package gets (see SpecToZip)
-                var pluginName = SanitizeFileNameComponent(Path.GetFileName(plugin.TrimEnd('/', '\\')));
+                var pluginName = PluginName(plugin);
 
                 foreach (var target in targets)
                 {
@@ -446,7 +445,7 @@ namespace WebExpress.WebCore.WebPackage
                 Readme = "readme.md",
                 Description = package?.Description,
                 Tags = package?.Tags,
-                Plugins = package?.Plugins?.Select(x => $"{zipBinarys}/{SanitizeFileNameComponent(Path.GetFileName(x))}").ToArray(),
+                Plugins = package?.Plugins?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => $"{zipBinarys}/{PluginName(x)}").ToArray(),
                 Dependencies = package?.Dependencies,
                 Settings = package?.Settings?.Select(x => $"{SettingsDirectory}/{SanitizeFileNameComponent(Path.GetFileName(x))}").ToArray()
             };
@@ -490,6 +489,18 @@ namespace WebExpress.WebCore.WebPackage
             catch (UnauthorizedAccessException)
             {
             }
+        }
+
+        /// <summary>
+        /// Derives the name a plugin carries inside the package. The packed files and the spec
+        /// inside the package must agree on it, or the package manager cannot find the plugin's
+        /// assembly; a trailing separator (src/Plugin/) would otherwise yield an empty name.
+        /// </summary>
+        /// <param name="plugin">The plugin path as written in the spec.</param>
+        /// <returns>The sanitized name of the plugin's folder.</returns>
+        private static string PluginName(string plugin)
+        {
+            return SanitizeFileNameComponent(Path.GetFileName(plugin.TrimEnd('/', '\\')));
         }
 
         /// <summary>

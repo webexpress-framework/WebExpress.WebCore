@@ -317,11 +317,13 @@ namespace WebExpress.WebCore.WebLog
                 null
             );
 
-            if (!Enqueue(line))
+            // a writer that timed out is stuck in the console and holds its lock, so only a writer
+            // that is gone leaves the direct way open; even then a stalled direct write of another
+            // caller drops the console copy instead of queuing up behind it. The file and the
+            // recent entries still get the entry either way.
+            if (!Enqueue(line) && _consoleWriter.IsCompleted)
             {
-                // the writer is gone or stuck; writing directly keeps the entry and, above all,
-                // keeps the caller from waiting on a queue nobody drains any more
-                WriteBlock(color, line.Text + Environment.NewLine);
+                TryWriteBlock(color, line.Text + Environment.NewLine);
             }
         }
 
@@ -450,27 +452,64 @@ namespace WebExpress.WebCore.WebLog
         {
             lock (_consoleWriteLock)
             {
-                try
-                {
-                    // a default block resets as well: a color left behind by another component
-                    // would otherwise tint every info entry after it
-                    if (color is null)
-                    {
-                        Console.ResetColor();
-                    }
-                    else
-                    {
-                        Console.ForegroundColor = color.Value;
-                    }
+                WriteColored(color, text);
+            }
+        }
 
-                    Console.Out.Write(text);
-                }
-                finally
+        /// <summary>
+        /// Writes a block of entries in one color, but only if the console is free right now.
+        /// Used on a caller's thread, which must never wait for a console write that is stuck.
+        /// </summary>
+        /// <param name="color">The color, or null for the console's default.</param>
+        /// <param name="text">The entries, each terminated by a line break.</param>
+        private static void TryWriteBlock(ConsoleColor? color, string text)
+        {
+            if (!_consoleWriteLock.TryEnter())
+            {
+                return;
+            }
+
+            try
+            {
+                WriteColored(color, text);
+            }
+            catch (Exception ex)
+            {
+                ReportConsoleFailure(ex);
+            }
+            finally
+            {
+                _consoleWriteLock.Exit();
+            }
+        }
+
+        /// <summary>
+        /// Writes text in one color. The caller holds the console lock.
+        /// </summary>
+        /// <param name="color">The color, or null for the console's default.</param>
+        /// <param name="text">The text to write.</param>
+        private static void WriteColored(ConsoleColor? color, string text)
+        {
+            try
+            {
+                // a default block resets as well: a color left behind by another component
+                // would otherwise tint every info entry after it
+                if (color is null)
                 {
-                    if (color is not null)
-                    {
-                        Console.ResetColor();
-                    }
+                    Console.ResetColor();
+                }
+                else
+                {
+                    Console.ForegroundColor = color.Value;
+                }
+
+                Console.Out.Write(text);
+            }
+            finally
+            {
+                if (color is not null)
+                {
+                    Console.ResetColor();
                 }
             }
         }

@@ -14,7 +14,8 @@ namespace WebExpress.WebCore.WebIdentity
     /// <summary>
     /// Enforces disjoint trust rules for access, refresh, and personal credentials.
     /// Access verification needs only the shared signing configuration and the signed claims; replay
-    /// and revocation markers live in the store that <see cref="IIdentityTokenStoreManager"/> binds to the application.
+    /// and revocation markers live in the store that <see cref="IIdentityTokenStoreManager"/> binds to
+    /// the application the credential was issued for, which every application of its group consults.
     /// </summary>
     public partial class IdentityManager
     {
@@ -132,7 +133,7 @@ namespace WebExpress.WebCore.WebIdentity
         {
             var jwt = ValidateToken(token, applicationContext, "pat");
             // without a store a revocation cannot be ruled out, so the credential is refused
-            var store = TokenStore(applicationContext);
+            var store = CredentialStore(jwt, applicationContext);
             return jwt is not null && store is not null && !store.IsRevoked("pat:" + jwt.Id) ? ReadIdentity(jwt) : null;
         }
 
@@ -147,7 +148,7 @@ namespace WebExpress.WebCore.WebIdentity
         {
             var jwt = ValidateToken(token, applicationContext, "refresh");
             var identity = ReadIdentity(jwt);
-            var store = TokenStore(applicationContext);
+            var store = CredentialStore(jwt, applicationContext);
             if (identity is null || store is null || !jwt.TryGetPayloadValue<string>("grant", out var grant) ||
                 string.IsNullOrEmpty(grant) || store.IsRevoked("grant:" + grant)) { return null; }
             var expires = new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero);
@@ -187,7 +188,7 @@ namespace WebExpress.WebCore.WebIdentity
             RequireAuthority();
             var jwt = ValidateToken(token, applicationContext, "pat");
             if (jwt is null) { return false; }
-            RequireTokenStore(applicationContext).Revoke("pat:" + jwt.Id, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
+            RequireCredentialStore(jwt, applicationContext).Revoke("pat:" + jwt.Id, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
             return true;
         }
 
@@ -203,7 +204,7 @@ namespace WebExpress.WebCore.WebIdentity
             if (jwt is not null && jwt.TryGetPayloadValue<string>("grant", out var grant) &&
                 jwt.TryGetPayloadValue<long>("grant_exp", out var expiration))
             {
-                RequireTokenStore(applicationContext).Revoke("grant:" + grant, DateTimeOffset.FromUnixTimeSeconds(expiration));
+                RequireCredentialStore(jwt, applicationContext).Revoke("grant:" + grant, DateTimeOffset.FromUnixTimeSeconds(expiration));
             }
         }
 
@@ -251,7 +252,7 @@ namespace WebExpress.WebCore.WebIdentity
             var jwt = ValidateToken(token, applicationContext, "refresh");
             if (jwt is not null && jwt.TryGetPayloadValue<string>("grant", out var grant))
             {
-                RequireTokenStore(applicationContext).Revoke("grant:" + grant, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
+                RequireCredentialStore(jwt, applicationContext).Revoke("grant:" + grant, new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero));
             }
         }
 
@@ -466,14 +467,40 @@ namespace WebExpress.WebCore.WebIdentity
         }
 
         /// <summary>
+        /// Resolves the store that holds the markers of a sign-in credential. Every application of a
+        /// group honors the credential, so its markers must live in one place - the store of the
+        /// application it was issued for; with each member's own store, a refresh token would be
+        /// consumed once per member and a revocation in one member would go unseen in the others.
+        /// </summary>
+        /// <param name="jwt">The verified credential, or null.</param>
+        /// <param name="applicationContext">The application the credential was presented to.</param>
+        /// <returns>The store of the issuing application, or null when it is not available here.</returns>
+        private IIdentityTokenStore CredentialStore(JsonWebToken jwt, IApplicationContext applicationContext)
+        {
+            var issuedFor = jwt is null ? null : IssuedFor(jwt);
+
+            if (issuedFor is null || string.Equals(issuedFor, applicationContext?.ApplicationId, StringComparison.OrdinalIgnoreCase))
+            {
+                return TokenStore(applicationContext);
+            }
+
+            // an issuing application this instance does not serve has markers nobody here can
+            // consult; the receiving application's store never saw them, so the credential is refused
+            var issuer = _componentHub?.ApplicationManager?.GetApplication(issuedFor);
+
+            return issuer is null ? null : TokenStore(issuer);
+        }
+
+        /// <summary>
         /// Fails a revocation outright rather than reporting success for a marker that was never persisted.
         /// </summary>
-        /// <param name="applicationContext">The application whose credentials are consumed or revoked.</param>
-        /// <returns>The store bound to the application.</returns>
-        private IIdentityTokenStore RequireTokenStore(IApplicationContext applicationContext)
+        /// <param name="jwt">The verified credential being revoked.</param>
+        /// <param name="applicationContext">The application the credential was presented to.</param>
+        /// <returns>The store that holds the credential's markers.</returns>
+        private IIdentityTokenStore RequireCredentialStore(JsonWebToken jwt, IApplicationContext applicationContext)
         {
-            return TokenStore(applicationContext) ??
-                throw new InvalidOperationException("Configure WebExpress:Authentication:TokenStorePath or register an identity token store.");
+            return CredentialStore(jwt, applicationContext) ??
+                throw new InvalidOperationException("Configure WebExpress:Authentication:TokenStorePath or register an identity token store for every application of the group.");
         }
 
         /// <summary>

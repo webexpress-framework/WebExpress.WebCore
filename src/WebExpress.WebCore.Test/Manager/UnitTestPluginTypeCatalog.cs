@@ -351,6 +351,123 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// A plugin or application withdrawn while its items are being built does not come back
+        /// with them: the discovery is discarded and what it built is disposed.
+        /// </summary>
+        [Fact]
+        public void Withdrawal_DuringDiscovery_DiscardsTheItems()
+        {
+            // arrange
+            DisposableProbe.Disposed = 0;
+            var plugin = new HealthTestPluginContext("plugin", typeof(AlphaProbe));
+            var application = new ApplicationContext { ApplicationId = "app" };
+            var withdrawing = true;
+            PluginTypeCatalog<ICatalogProbe> perPlugin = null;
+            PluginTypeCatalog<ICatalogProbe> perApplication = null;
+            perPlugin = new PluginTypeCatalog<ICatalogProbe>(x => x.Key, typeof(ICatalogProbe), _ =>
+            {
+                if (withdrawing)
+                {
+                    perPlugin.Withdraw(plugin);
+                }
+
+                return new DisposableProbe();
+            });
+            perApplication = new PluginTypeCatalog<ICatalogProbe>(x => x.Key, typeof(ICatalogProbe), origin =>
+            {
+                perApplication.Withdraw(origin.ApplicationContext);
+                return new DisposableProbe();
+            }, PluginTypeBinding.Application);
+
+            // act
+            perPlugin.Collect(plugin);
+            perApplication.Collect(plugin, [application]);
+            var afterWithdrawal = (perPlugin.Items.Count, perApplication.Items.Count, DisposableProbe.Disposed);
+            withdrawing = false;
+            perPlugin.Collect(plugin);
+
+            // validation
+            Assert.Equal((0, 0, 2), afterWithdrawal);
+            Assert.IsType<DisposableProbe>(Assert.Single(perPlugin.Items));
+            perPlugin.Dispose();
+            perApplication.Dispose();
+        }
+
+        /// <summary>
+        /// A change a handler causes is raised after the change it reacts to, so a mirror built
+        /// from the events ends where the catalog does.
+        /// </summary>
+        [Fact]
+        public void Events_OfAReentrantChange_KeepTheirOrder()
+        {
+            // arrange
+            using var catalog = new PluginTypeCatalog<ICatalogProbe>(x => x.Key);
+            var first = new HealthTestPluginContext("first", typeof(AlphaProbe));
+            var second = new HealthTestPluginContext("second", typeof(AlphaTwinProbe));
+            var registered = new ConstructorProbe("alpha");
+            var mirror = new Dictionary<string, ICatalogProbe>();
+            var events = new List<string>();
+            catalog.Collect(first);
+            catalog.Added += (_, e) =>
+            {
+                events.Add($"+{e.Item.GetType().Name}");
+                mirror[e.Key] = e.Item;
+            };
+            catalog.Removed += (_, e) =>
+            {
+                events.Add($"-{e.Item.GetType().Name}");
+                mirror.Remove(e.Key);
+
+                if (e.Item is AlphaProbe)
+                {
+                    catalog.Register(registered);
+                }
+            };
+
+            // act
+            catalog.Collect(second);
+
+            // validation
+            Assert.Equal(["-AlphaProbe", "+AlphaTwinProbe", "-AlphaTwinProbe", "+ConstructorProbe"], events);
+            Assert.Same(registered, catalog.Find("alpha"));
+            Assert.Same(registered, mirror["alpha"]);
+        }
+
+        /// <summary>
+        /// A handler that throws is logged; the other handlers still hear of the change and the
+        /// leaving items are still disposed.
+        /// </summary>
+        [Fact]
+        public void Events_AThrowingHandler_StopsNothing()
+        {
+            // arrange
+            DisposableProbe.Disposed = 0;
+            var context = UnitTestFixture.CreateHttpServerContextMock();
+            var hub = UnitTestFixture.CreateComponentHubMock(context);
+            using var catalog = new PluginTypeCatalog<ICatalogProbe>(x => x.Key);
+            catalog.Attach(hub, context);
+            var plugin = new HealthTestPluginContext("plugin", typeof(DisposableProbe), typeof(BetaProbe));
+            var added = new List<string>();
+            var removed = new List<string>();
+            catalog.Added += (_, _) => throw new InvalidOperationException("added handler failed");
+            catalog.Added += (_, e) => added.Add(e.Key);
+            catalog.Removed += (_, _) => throw new InvalidOperationException("removed handler failed");
+            catalog.Removed += (_, e) => removed.Add(e.Key);
+
+            // act
+            catalog.Collect(plugin);
+            catalog.Withdraw(plugin);
+
+            // validation
+            Assert.Equal(["beta", "disposable"], added.Order());
+            Assert.Equal(["beta", "disposable"], removed.Order());
+            Assert.Equal(1, DisposableProbe.Disposed);
+            var messages = context.Log.GetRecentEntries().Select(x => x.Message).ToArray();
+            Assert.Contains(messages, x => x.Contains("added handler failed"));
+            Assert.Contains(messages, x => x.Contains("removed handler failed"));
+        }
+
+        /// <summary>
         /// A public type nested in another is not top-level and therefore no item.
         /// </summary>
         public sealed class NestedProbe : ICatalogProbe

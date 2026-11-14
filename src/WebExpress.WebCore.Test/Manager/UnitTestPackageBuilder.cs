@@ -145,13 +145,17 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
-        /// Tests that a plugin package carries the output of every requested target.
+        /// Tests that a plugin package carries the output of every requested target, and that the
+        /// spec inside names the folder the files went to - also for a path with a trailing
+        /// separator, whose plain file name would be empty.
         /// </summary>
-        [Fact]
-        public void PluginOutputIsPacked()
+        [Theory]
+        [InlineData("src/Plugin")]
+        [InlineData("src/Plugin/")]
+        public void PluginOutputIsPacked(string plugin)
         {
             // arrange
-            Spec("My.Plugin", "<plugin>src/Plugin</plugin>");
+            Spec("My.Plugin", $"<plugin>{plugin}</plugin>");
             Write("src/Plugin/bin/Release/net10.0/Plugin.dll", "plugin");
             Write("src/Plugin/bin/Debug/net10.0/Plugin.dll", "debug");
 
@@ -160,7 +164,7 @@ namespace WebExpress.WebCore.Test.Manager
 
             // assert
             Assert.Equal("plugin", entries["lib/Plugin/net10.0/Plugin.dll"]);
-            Assert.True(entries.ContainsKey("My.Plugin.spec"));
+            Assert.Contains("<plugin>lib/Plugin</plugin>", entries["My.Plugin.spec"]);
         }
 
         /// <summary>

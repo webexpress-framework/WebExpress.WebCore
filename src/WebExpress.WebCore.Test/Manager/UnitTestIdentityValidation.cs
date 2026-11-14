@@ -75,6 +75,42 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that a member of a group with a token store of its own still uses the issuing
+        /// application's store for a sign-in of the group: a refresh token is consumed once for the
+        /// whole group, and a logout in one member ends the renewal in the others.
+        /// </summary>
+        [Fact]
+        public void GroupedApplicationsShareTheIssuersMarkers()
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            var a = fixture.Application;
+            var b = Application(fixture, typeof(TestApplicationB));
+            fixture.Groups["suite"] = [a.ApplicationId, b.ApplicationId];
+            var manager = fixture.Instance();
+            var storeOfB = new MemoryTokenStore();
+            fixture.Hub.IdentityTokenStoreManager.Register(storeOfB, b);
+            var alice = manager.Issue(new Identity(Guid.NewGuid(), "alice"), a);
+            var bob = manager.Issue(new Identity(Guid.NewGuid(), "bob"), a);
+
+            // act
+            var renewedInB = manager.Refresh(alice.RefreshToken, b);
+            var replayedInA = manager.Refresh(alice.RefreshToken, a);
+            manager.RevokeGrant(bob.AccessToken, b);
+            var renewedAfterLogout = manager.Refresh(bob.RefreshToken, a);
+            var ownSignIn = manager.Issue(new Identity(Guid.NewGuid(), "carol"), b);
+            var renewedOwn = manager.Refresh(ownSignIn.RefreshToken, b);
+
+            // validation
+            Assert.NotNull(renewedInB);
+            Assert.Null(replayedInA);
+            Assert.Null(renewedAfterLogout);
+            Assert.NotNull(renewedOwn);
+            Assert.All(storeOfB.Markers, x => Assert.StartsWith("refresh:", x));
+            Assert.Single(storeOfB.Markers);
+        }
+
+        /// <summary>
         /// Tests that without a group a token stays bound to the application it was issued in.
         /// </summary>
         [Fact]
@@ -170,6 +206,31 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that a validator whose construction fails leaves its applications refusing every
+        /// identity instead of unguarded, and that the plugin's other validators and permissions
+        /// are still registered.
+        /// </summary>
+        [Fact]
+        public void FailedValidatorRefusesInsteadOfUnguarding()
+        {
+            // arrange
+            TestFailingIdentityValidator.Armed = true;
+            using var fixture = new AuthenticationFixture();
+            TestFailingIdentityValidator.Armed = false;
+            var token = fixture.Manager.Issue(new Identity(Guid.NewGuid(), "alice"), fixture.Application).AccessToken;
+
+            // act
+            var identity = fixture.Manager.GetCurrentIdentity(fixture.Request($"Cookie: {IdentityManager.AccessCookieName}={token}\r\n"));
+            fixture.Manager.RegisterValidator(new DelegateValidator(_ => true), fixture.Application);
+            var stillRefused = fixture.Manager.GetCurrentIdentity(fixture.Request($"Cookie: {IdentityManager.AccessCookieName}={token}\r\n"));
+
+            // validation
+            Assert.Null(identity);
+            Assert.Null(stillRefused);
+            Assert.NotEmpty(fixture.Hub.IdentityManager.Permissions);
+        }
+
+        /// <summary>
         /// Returns the application of a type.
         /// </summary>
         /// <param name="fixture">The fixture whose hub knows the applications.</param>
@@ -178,6 +239,47 @@ namespace WebExpress.WebCore.Test.Manager
         private static IApplicationContext Application(AuthenticationFixture fixture, Type type)
         {
             return fixture.Hub.ApplicationManager.GetApplications(type).First();
+        }
+
+        /// <summary>
+        /// A token store of one application, to tell its markers from those of the default store.
+        /// </summary>
+        private sealed class MemoryTokenStore : IIdentityTokenStore
+        {
+            private readonly HashSet<string> _markers = [];
+
+            /// <summary>
+            /// Gets the markers written to the store.
+            /// </summary>
+            public IReadOnlyCollection<string> Markers { get { lock (_markers) { return [.. _markers]; } } }
+
+            /// <summary>
+            /// Records a marker unless it exists.
+            /// </summary>
+            /// <param name="tokenId">The marker.</param>
+            /// <param name="expiresAt">The retention deadline, which the test ignores.</param>
+            /// <returns>True when this call created the marker.</returns>
+            public bool TryConsume(string tokenId, DateTimeOffset expiresAt)
+            {
+                lock (_markers) { return _markers.Add(tokenId); }
+            }
+
+            /// <summary>
+            /// Records a denial marker.
+            /// </summary>
+            /// <param name="tokenId">The marker.</param>
+            /// <param name="expiresAt">The retention deadline, which the test ignores.</param>
+            public void Revoke(string tokenId, DateTimeOffset expiresAt) => TryConsume(tokenId, expiresAt);
+
+            /// <summary>
+            /// Reports whether a marker exists.
+            /// </summary>
+            /// <param name="tokenId">The marker.</param>
+            /// <returns>True when it exists.</returns>
+            public bool IsRevoked(string tokenId)
+            {
+                lock (_markers) { return _markers.Contains(tokenId); }
+            }
         }
 
         /// <summary>
