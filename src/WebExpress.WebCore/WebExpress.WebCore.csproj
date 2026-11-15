@@ -3,8 +3,8 @@
 	<PropertyGroup>
 		<OutputType>Library</OutputType>
 		<Title>WebExpress.WebCore</Title>
-		<Version>2.0.1-alpha</Version>
-		<TargetFramework>net10.0</TargetFramework>
+		<Version>2.0.2-alpha</Version>
+		<TargetFramework>net11.0</TargetFramework>
 		<RuntimeIdentifiers>any</RuntimeIdentifiers>
 		<RepositoryUrl>https://github.com/webexpress-framework/WebExpress.git</RepositoryUrl>
 		<Authors>webexpress-framework@outlook.com</Authors>
