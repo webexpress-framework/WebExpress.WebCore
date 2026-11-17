@@ -167,14 +167,20 @@ namespace WebExpress.WebCore.WebIdentity
 
             // the token was verified before, reading it again only takes the claims apart
             var jwt = new JsonWebToken(token);
+            var grant = jwt.TryGetPayloadValue<string>("grant", out var claimedGrant) && !string.IsNullOrEmpty(claimedGrant) ? claimedGrant : null;
             var context = new IdentityValidationContext
             {
                 Identity = identity,
                 Request = request,
                 ApplicationContext = request.ApplicationContext,
-                Grant = jwt.TryGetPayloadValue<string>("grant", out var grant) ? grant : null,
+                Grant = grant,
                 TokenUse = jwt.TryGetPayloadValue<string>("token_use", out var use) ? use : null,
-                IssuedAt = new DateTimeOffset(jwt.IssuedAt, TimeSpan.Zero)
+                TokenId = string.IsNullOrEmpty(jwt.Id) ? null : jwt.Id,
+                IssuedAt = new DateTimeOffset(jwt.IssuedAt, TimeSpan.Zero),
+                ExpiresAt = new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero),
+                GrantExpiresAt = grant is not null && jwt.TryGetPayloadValue<long>("grant_exp", out var grantExpires)
+                    ? DateTimeOffset.FromUnixTimeSeconds(grantExpires)
+                    : null
             };
 
             foreach (var validator in validators)

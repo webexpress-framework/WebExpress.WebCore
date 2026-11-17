@@ -186,6 +186,49 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that on a renewal the validator learns the claims of the renewed, verified token
+        /// and not those of the access cookie the request still carries, which nobody verified:
+        /// a forged cookie must not set the grant, the token id or the deadlines a revocation is
+        /// measured by. The revoked grant is not renewed afterwards.
+        /// </summary>
+        [Fact]
+        public void RenewalValidatesTheRenewedTokenNotTheCookie()
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            var pair = fixture.Manager.Login(MockIdentityFactory.GetIdentity("Alice"), fixture.Request());
+            var validator = new DelegateValidator(_ => true);
+            fixture.Manager.RegisterValidator(validator, fixture.Application);
+            var forged = Unsigned(new Dictionary<string, object>
+            {
+                ["sub"] = Guid.NewGuid().ToString(),
+                ["token_use"] = "access",
+                ["jti"] = "forged",
+                ["grant"] = "forged",
+                ["grant_exp"] = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds(),
+                ["exp"] = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds()
+            });
+            var cookies = $"Cookie: {IdentityManager.AccessCookieName}={forged}; {IdentityManager.RefreshCookieName}={pair.RefreshToken}\r\n";
+
+            // act
+            var renewed = fixture.Manager.Refresh(fixture.Request(cookies, "POST", IdentityManager.RefreshPath));
+            var context = validator.Last;
+            fixture.Manager.RevokeGrant(renewed.AccessToken, fixture.Application);
+            var renewedAfterRevocation = fixture.Manager.Refresh(renewed.RefreshToken, fixture.Application);
+
+            // validation
+            var issued = new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(renewed.AccessToken);
+            Assert.True(issued.TryGetPayloadValue<string>("grant", out var grant));
+            Assert.True(issued.TryGetPayloadValue<long>("grant_exp", out var grantExpires));
+            Assert.Equal(grant, context.Grant);
+            Assert.Equal(issued.Id, context.TokenId);
+            Assert.Equal(new DateTimeOffset(issued.ValidTo, TimeSpan.Zero), context.ExpiresAt);
+            Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(grantExpires), context.GrantExpiresAt);
+            Assert.True(context.GrantExpiresAt > DateTimeOffset.UtcNow);
+            Assert.Null(renewedAfterRevocation);
+        }
+
+        /// <summary>
         /// Tests that a validator a plugin defines is discovered for the plugin's applications.
         /// </summary>
         [Fact]
@@ -239,6 +282,19 @@ namespace WebExpress.WebCore.Test.Manager
         private static IApplicationContext Application(AuthenticationFixture fixture, Type type)
         {
             return fixture.Hub.ApplicationManager.GetApplications(type).First();
+        }
+
+        /// <summary>
+        /// Builds a token with the given claims and no signature, as an attacker can put into a
+        /// cookie without knowing the signing key.
+        /// </summary>
+        /// <param name="claims">The claims of the payload.</param>
+        /// <returns>The serialized token.</returns>
+        private static string Unsigned(IDictionary<string, object> claims)
+        {
+            static string Encode(object value) => Microsoft.IdentityModel.Tokens.Base64UrlEncoder.Encode(System.Text.Json.JsonSerializer.Serialize(value));
+
+            return $"{Encode(new Dictionary<string, string> { ["alg"] = "none", ["typ"] = "JWT" })}.{Encode(claims)}.";
         }
 
         /// <summary>
