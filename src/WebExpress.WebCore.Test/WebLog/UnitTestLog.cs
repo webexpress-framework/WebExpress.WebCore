@@ -252,7 +252,7 @@ namespace WebExpress.WebCore.Test.WebLog
             var log = new Log { LogMode = LogMode.Off };
             var lines = string.Join(Environment.NewLine, Enumerable.Range(0, 20).Select(x => $"console-line-{x}"));
             var originalOutput = Console.Out;
-            using var output = new SlowWriter(TimeSpan.FromMilliseconds(500));
+            using var output = new SlowWriter(TimeSpan.FromMilliseconds(500), "console-line-");
             var stopwatch = new System.Diagnostics.Stopwatch();
 
             try
@@ -285,18 +285,26 @@ namespace WebExpress.WebCore.Test.WebLog
         }
 
         /// <summary>
-        /// A console whose every write takes a while, as a redirected or captured console does.
+        /// A console whose writes of the test's own entries take a while, as a redirected or
+        /// captured console does. The console is shared by the whole process, so entries other
+        /// tests log meanwhile pass through it as well; they are written at once, or each of their
+        /// blocks would hold up the test's entry until the flush gives up.
         /// </summary>
-        /// <param name="delay">The time a write takes.</param>
-        private sealed class SlowWriter(TimeSpan delay) : StringWriter
+        /// <param name="delay">The time a write of the test's entries takes.</param>
+        /// <param name="marker">The text that identifies the test's entries.</param>
+        private sealed class SlowWriter(TimeSpan delay, string marker) : StringWriter
         {
             /// <summary>
-            /// Writes a block of entries after the delay.
+            /// Writes a block of entries, after the delay if it holds the test's entries.
             /// </summary>
             /// <param name="value">The block.</param>
             public override void Write(string value)
             {
-                Thread.Sleep(delay);
+                if (value?.Contains(marker, StringComparison.Ordinal) == true)
+                {
+                    Thread.Sleep(delay);
+                }
+
                 base.Write(value);
             }
         }
