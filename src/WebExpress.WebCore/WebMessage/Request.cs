@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using WebExpress.WebCore.WebHtml;
 using WebExpress.WebCore.WebParameter;
 
@@ -35,13 +37,18 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         internal const int InitialContentBufferSize = 64 * 1024;
 
+        private readonly Stream _body;
+        private readonly long? _contentLength;
+        private bool _contentRead;
+
         /// <summary>
         /// Gets the content.
         /// </summary>
         public byte[] Content { get; private set; }
 
         /// <summary>
-        /// Initializes a new instance of the class.
+        /// Initializes a new instance of the class. The body is not read yet; see
+        /// <see cref="ReadContentAsync"/>.
         /// </summary>
         /// <param name="contextFeatures">Initial set of features.</param>
         /// <param name="header">The header.</param>
@@ -51,7 +58,31 @@ namespace WebExpress.WebCore.WebMessage
         {
             var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
 
-            Content = GetContent(requestFeature.Body, Header.ContentLength);
+            _body = requestFeature.Body;
+            _contentLength = requestFeature.Headers.ContentLength;
+        }
+
+        /// <summary>
+        /// Reads the request body and adds the parameters it carries.
+        /// </summary>
+        /// <remarks>
+        /// Kept apart from the constructor because a context is created synchronously while the
+        /// body may still be arriving: reading it there blocks a pool thread per upload and fails
+        /// outright once Kestrel disallows synchronous IO.
+        /// </remarks>
+        /// <param name="cancellationToken">Signals that the client gave up on the request.</param>
+        /// <returns>A task that completes once the body has been read and parsed.</returns>
+        internal async Task ReadContentAsync(CancellationToken cancellationToken)
+        {
+            // a context built with its body already read reaches the pipeline as well; a second
+            // read would find the stream drained and discard the content
+            if (_contentRead)
+            {
+                return;
+            }
+
+            _contentRead = true;
+            Content = await GetContentAsync(_body, _contentLength, cancellationToken).ConfigureAwait(false);
 
             ParseRequestParams();
         }
@@ -59,12 +90,17 @@ namespace WebExpress.WebCore.WebMessage
         /// <summary>
         /// Returns the content.
         /// </summary>
-        /// <param name="body">The content of a request.</param>
-        /// <param name="contentLength">The number of bytes sent in the body or zero.</param>
+        /// <param name="body">The content of a request, or null when there is none.</param>
+        /// <param name="contentLength">
+        /// The number of bytes the client announced, or null when it announced none - a chunked
+        /// HTTP/1.1 body or an HTTP/2 or HTTP/3 body without content-length, which then runs to
+        /// the end of the stream. Kestrel's MaxRequestBodySize bounds such a body.
+        /// </param>
+        /// <param name="cancellationToken">Signals that the client gave up on the request.</param>
         /// <returns>The content as a byte array, or null if the body is empty.</returns>
-        internal static byte[] GetContent(Stream body, long? contentLength)
+        internal static async Task<byte[]> GetContentAsync(Stream body, long? contentLength, CancellationToken cancellationToken)
         {
-            if (!contentLength.HasValue || contentLength.Value <= 0)
+            if (body is null || contentLength <= 0)
             {
                 return null;
             }
@@ -72,7 +108,7 @@ namespace WebExpress.WebCore.WebMessage
             // the announced length is client-controlled, so it only caps the read; memory is
             // committed as bytes actually arrive, otherwise a slow client announcing a large
             // body would pin that much memory per connection before sending anything
-            var length = (int)Math.Min(contentLength.Value, int.MaxValue);
+            var length = (int)Math.Min(contentLength ?? int.MaxValue, int.MaxValue);
             var buffer = new byte[Math.Min(length, InitialContentBufferSize)];
 
             var offset = 0;
@@ -83,7 +119,7 @@ namespace WebExpress.WebCore.WebMessage
                     Array.Resize(ref buffer, (int)Math.Min((long)buffer.Length * 2, length));
                 }
 
-                var read = body.Read(buffer, offset, buffer.Length - offset);
+                var read = await body.ReadAsync(buffer.AsMemory(offset, buffer.Length - offset), cancellationToken).ConfigureAwait(false);
                 if (read == 0)
                 {
                     break;
@@ -146,10 +182,17 @@ namespace WebExpress.WebCore.WebMessage
         /// </param>
         private void ParseMultipart(string[] contentTypeParts)
         {
-            // extract boundary
+            // a boundary with characters such as ':' or '=' must be quoted (RFC 2046), and the
+            // quotes are not part of the delimiter in the body
             var boundary = contentTypeParts
                 .FirstOrDefault(x => x.StartsWith("boundary=", StringComparison.OrdinalIgnoreCase))
-                ?["boundary=".Length..];
+                ?["boundary=".Length..]
+                .Trim();
+
+            if (boundary is { Length: >= 2 } && boundary[0] == '"' && boundary[^1] == '"')
+            {
+                boundary = boundary[1..^1];
+            }
 
             if (string.IsNullOrWhiteSpace(boundary))
             {

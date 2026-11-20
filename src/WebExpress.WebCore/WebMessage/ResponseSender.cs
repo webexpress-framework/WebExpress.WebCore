@@ -102,7 +102,7 @@ namespace WebExpress.WebCore.WebMessage
 
                 if (response.Header.WWWAuthenticate)
                 {
-                    responseFeature.Headers.WWWAuthenticate = "Basic realm=\"Bereich\"";
+                    responseFeature.Headers.WWWAuthenticate = ResponseHeaderFields.BearerChallenge;
                 }
 
                 if (response.Header.Cookies.Count != 0)

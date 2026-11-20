@@ -178,6 +178,24 @@ namespace WebExpress.WebCore.Test.Message
         }
 
         /// <summary>
+        /// Tests that a quoted multipart boundary - required once it contains characters such
+        /// as ':' (RFC 2046) - is matched without its quotes, so the fields are not lost.
+        /// </summary>
+        /// <param name="boundary">The boundary parameter as the content type carries it.</param>
+        [Theory]
+        [InlineData("\"wx:boundary\"")]
+        [InlineData("wxboundary")]
+        public void MultipartWithQuotedBoundary(string boundary)
+        {
+            var delimiter = boundary.Trim('"');
+            var body = $"--{delimiter}\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--{delimiter}--\r\n";
+
+            var request = Post($"multipart/form-data; boundary={boundary}", body);
+
+            Assert.Equal("1", GetParameterValue(request, "a")?.Trim());
+        }
+
+        /// <summary>
         /// Builds a POST request with the given body.
         /// </summary>
         /// <param name="contentType">The content type of the body.</param>

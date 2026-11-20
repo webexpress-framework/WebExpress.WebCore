@@ -38,9 +38,14 @@ namespace WebExpress.WebCore.WebMessage
         public string ContentLanguage { get; private set; }
 
         /// <summary>
-        /// Gets the encoding of the content.
+        /// Gets the content codings applied to the body (for example "gzip"), as the
+        /// Content-Encoding header lists them; null when the body is sent as is.
         /// </summary>
-        public Encoding ContentEncoding { get; private set; }
+        /// <remarks>
+        /// A content coding is a compression, not a character set: the charset of a text body
+        /// travels as a parameter of the Content-Type header.
+        /// </remarks>
+        public string ContentEncoding { get; private set; }
 
         /// <summary>
         /// Gets the user agent.
@@ -153,7 +158,7 @@ namespace WebExpress.WebCore.WebMessage
             ContentType = requestFeature.Headers.ContentType;
             ContentLength = requestFeature.Headers.ContentLength ?? 0;
             ContentLanguage = requestFeature.Headers.ContentLanguage;
-            ContentEncoding = requestFeature.Headers.ContentEncoding.Count != 0 ? Encoding.GetEncoding(requestFeature.Headers.ContentEncoding) : Encoding.Default;
+            ContentEncoding = requestFeature.Headers.ContentEncoding.Count != 0 ? requestFeature.Headers.ContentEncoding.ToString() : null;
             Accept = requestFeature.Headers.Accept;
             AcceptEncoding = requestFeature.Headers.AcceptEncoding;
             AcceptLanguage = requestFeature.Headers.AcceptLanguage.SelectMany(x => x.Split(';', StringSplitOptions.RemoveEmptyEntries));

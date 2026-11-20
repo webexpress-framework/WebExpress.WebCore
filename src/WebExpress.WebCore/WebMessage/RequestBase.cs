@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
-using System.Threading.Tasks;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebParameter;
@@ -131,7 +130,6 @@ namespace WebExpress.WebCore.WebMessage
             var connectionFeature = contextFeatures.Get<IHttpConnectionFeature>();
             var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
             var requestIdentifierFeature = contextFeatures.Get<IHttpRequestIdentifierFeature>();
-            //var sessionFeature = contextFeatures.Get<ISessionFeature>();
 
             HttpServerContext = httpServerContext;
             RequestTraceIdentifier = requestIdentifierFeature.TraceIdentifier;
@@ -156,7 +154,9 @@ namespace WebExpress.WebCore.WebMessage
                 "DELETE" => RequestMethod.DELETE,
                 "HEAD" => RequestMethod.HEAD,
                 "PATCH" => RequestMethod.PATCH,
-                _ => RequestMethod.GET
+                // a method the framework does not implement must not reach a GET handler, which
+                // would answer an OPTIONS preflight or a PROPFIND with the resource itself
+                _ => RequestMethod.NONE
             };
 
             Header = header;
@@ -190,7 +190,8 @@ namespace WebExpress.WebCore.WebMessage
         {
             query = query.TrimStart('?');
 
-            Parallel.ForEach(query.Split('&'), (param) =>
+            // in order, so a repeated key always resolves to its last occurrence
+            foreach (var param in query.Split('&'))
             {
                 if (!string.IsNullOrWhiteSpace(param))
                 {
@@ -202,7 +203,7 @@ namespace WebExpress.WebCore.WebMessage
 
                     AddParameter(new Parameter(key, value, ParameterScope.Parameter));
                 }
-            });
+            }
         }
 
         /// <summary>

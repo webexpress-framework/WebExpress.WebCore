@@ -114,5 +114,39 @@ namespace WebExpress.WebCore.Test.Message
             Assert.Equal("C++ 100%", parameter.Value);
             Assert.Equal("a=C%2B%2B%20100%25", parameter.ToString());
         }
+
+        /// <summary>
+        /// Tests that a key repeated in the query always resolves to its last occurrence. The
+        /// query was parsed in parallel once, so which value won changed from request to request.
+        /// </summary>
+        [Fact]
+        public void RepeatedQueryKeyTakesTheLastValue()
+        {
+            var query = string.Join("&", Enumerable.Range(0, 200).Select(x => $"page={x}"));
+
+            for (var i = 0; i < 20; i++)
+            {
+                var request = UnitTestFixture.CreateRequestMock($"GET /a?{query} HTTP/1.1\r\n\r\n");
+
+                Assert.Equal("199", request.GetParameter("page")?.Value);
+            }
+        }
+
+        /// <summary>
+        /// Tests that a method the framework does not implement is not taken for a GET, which
+        /// would answer an OPTIONS preflight or a PROPFIND with the resource itself.
+        /// </summary>
+        /// <param name="method">The request method.</param>
+        [Theory]
+        [InlineData("OPTIONS")]
+        [InlineData("PROPFIND")]
+        [InlineData("CONNECT")]
+        [InlineData("TRACE")]
+        public void UnknownMethodIsNoGet(string method)
+        {
+            var request = UnitTestFixture.CreateRequestMock($"{method} /a HTTP/1.1\r\n\r\n");
+
+            Assert.Equal(WebMessage.RequestMethod.NONE, request.Method);
+        }
     }
 }

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http.Features;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using System;
 using System.Net;
 using System.Text;
@@ -70,18 +71,17 @@ namespace WebExpress.WebCore.WebMessage
             var connectionFeature = contextFeatures.Get<IHttpConnectionFeature>();
             var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
             var header = new RequestHeaderFields(contextFeatures);
-            var baseUri = new UriBuilder(requestFeature.Scheme, HttpContext.HostNameOf(header.Host), connectionFeature.LocalPort).Uri;
+            var requestHost = new HostString(header.Host);
+
+            // an omitted host port denotes the scheme default, never the internal listener port
+            var baseUri = new UriBuilder(requestFeature.Scheme, HttpContext.HostNameOf(header.Host), requestHost.Port ?? -1).Uri;
 
             Features = contextFeatures;
             HttpServerContext = httpServerContext;
             Id = connectionFeature.ConnectionId;
             LocalEndPoint = new IPEndPoint(connectionFeature.LocalIpAddress, connectionFeature.LocalPort);
             RemoteEndPoint = new IPEndPoint(connectionFeature.RemoteIpAddress, connectionFeature.RemotePort);
-
-            Encoding = requestFeature.Headers.ContentEncoding.Count != 0
-                ? Encoding.GetEncoding(requestFeature.Headers.ContentEncoding)
-                : Encoding.Default;
-            Uri = new Uri(baseUri, requestFeature.RawTarget);
+            Uri = HttpContext.ResolveTarget(baseUri, requestFeature.RawTarget);
 
             // always initialize as websocket-request for this context
             Request = new RequestWebSocket(contextFeatures, header, httpServerContext);

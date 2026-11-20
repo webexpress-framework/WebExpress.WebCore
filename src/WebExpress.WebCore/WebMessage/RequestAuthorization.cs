@@ -72,7 +72,9 @@ namespace WebExpress.WebCore.WebMessage
                     {
                         // decode the base64 string
                         var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(data));
-                        var split = decoded.Split(':');
+                        // only the user id is barred from containing a colon (RFC 7617), the
+                        // password may hold any number of them
+                        var split = decoded.Split(':', 2);
 
                         if (split.Length > 0)
                         {

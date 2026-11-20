@@ -32,7 +32,7 @@ namespace WebExpress.WebCore.WebMessage
             Add("Content-Type", header.ContentType);
             Add("Content-Length", header.ContentLength > 0 ? header.ContentLength.ToString() : null);
             Add("Content-Language", header.ContentLanguage);
-            Add("Content-Encoding", header.ContentEncoding?.WebName);
+            Add("Content-Encoding", header.ContentEncoding);
             Add("User-Agent", header.UserAgent);
             Add("Referer", header.Referer);
 

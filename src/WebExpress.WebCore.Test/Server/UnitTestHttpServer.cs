@@ -505,5 +505,24 @@ namespace WebExpress.WebCore.Test.Server
             // validation
             Assert.Equal(status, response.StatusCode);
         }
+
+        /// <summary>
+        /// Tests that a route belongs to an application only by whole segments, so the status
+        /// page of "/app" is never chosen for "/application/x".
+        /// </summary>
+        /// <param name="route">The route of the request.</param>
+        /// <param name="applicationRoute">The route of the application.</param>
+        /// <param name="expected">Whether the route belongs to the application.</param>
+        [Theory]
+        [InlineData("/app", "/app", true)]
+        [InlineData("/app/x", "/app", true)]
+        [InlineData("/app/x", "/app/", true)]
+        [InlineData("/application/x", "/app", false)]
+        [InlineData("/x", "/", true)]
+        [InlineData("/x", "", true)]
+        public void RouteBelongsToApplicationBySegments(string route, string applicationRoute, bool expected)
+        {
+            Assert.Equal(expected, HttpServer.IsRouteBelow(route, applicationRoute));
+        }
     }
 }

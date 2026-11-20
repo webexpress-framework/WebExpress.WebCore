@@ -39,9 +39,21 @@ namespace WebExpress.WebCore.WebMessage
         public string ContentDisposition { get; set; }
 
         /// <summary>
-        /// Gets or sets a value indicating whether basic authentication (as per RFC 2617) is required.
+        /// Gets or sets a value indicating whether the response challenges the client to
+        /// authenticate with a bearer token (RFC 6750).
         /// </summary>
+        /// <remarks>
+        /// The challenge is never Basic: the server does not accept Basic credentials, yet a
+        /// browser answers a Basic challenge with a login dialog and then sends whatever was typed
+        /// with every request - and an Authorization header takes precedence over the sign-in
+        /// cookie, so the user stays signed out until the browser is closed.
+        /// </remarks>
         public bool WWWAuthenticate { get; set; }
+
+        /// <summary>
+        /// The challenge sent when <see cref="WWWAuthenticate"/> is set.
+        /// </summary>
+        internal const string BearerChallenge = "Bearer";
 
         /// <summary>
         /// Gets or sets the location.
@@ -140,7 +152,7 @@ namespace WebExpress.WebCore.WebMessage
 
             if (WWWAuthenticate)
             {
-                sb.AppendLine("WWW-Authenticate: Basic realm=\"Bereich\"");
+                sb.AppendLine("WWW-Authenticate: " + BearerChallenge);
             }
 
             if (!string.IsNullOrWhiteSpace(Location))
