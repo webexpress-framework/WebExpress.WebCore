@@ -24,7 +24,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseBadRequest(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>400</title></head><body>400 - Bad Request</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>400</title></head><body>400 - Bad Request</body></html>");
             Reason = "Bad Request";
 
             Header.ContentType = "text/html";

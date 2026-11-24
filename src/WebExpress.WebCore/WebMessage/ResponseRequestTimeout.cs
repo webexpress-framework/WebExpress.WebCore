@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseRequestTimeout(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>408</title></head><body>408 - Request Timeout</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>408</title></head><body>408 - Request Timeout</body></html>");
             Reason = "Request Timeout";
 
             Header.ContentType = "text/html";

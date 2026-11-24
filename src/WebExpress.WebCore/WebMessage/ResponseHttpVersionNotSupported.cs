@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseHttpVersionNotSupported(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>505</title></head><body>505 - HTTP Version Not Supported</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>505</title></head><body>505 - HTTP Version Not Supported</body></html>");
             Reason = "HTTP Version Not Supported";
 
             Header.ContentType = "text/html";

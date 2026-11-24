@@ -41,10 +41,10 @@ namespace WebExpress.WebCore.Test.Message
         public void MessageContent()
         {
             // act
-            var response = new ResponseUnauthorized(new StatusMessage("Authentication required."));
+            var response = new ResponseUnauthorized(new StatusMessage("Authentication required <script>."));
 
-            // validation
-            Assert.Equal("Authentication required.", response.Content);
+            // validation: the message is text, written encoded into the body
+            Assert.Equal("<html><body><p>Authentication required &lt;script&gt;.</p></body></html>", response.Content);
             Assert.Equal("text/html", response.Header.ContentType);
         }
 

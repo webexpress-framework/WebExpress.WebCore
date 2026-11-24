@@ -437,7 +437,9 @@ namespace WebExpress.WebCore.WebHtml
             {
                 nl = false;
                 closeTag = true;
-                builder.Append(text);
+                // the combined values are text and are encoded like every text node; appended as
+                // they are, an element holding only text wrote user input into the page as markup
+                HtmlText.Encode(builder, text);
             }
             else
             {
@@ -485,6 +487,13 @@ namespace WebExpress.WebCore.WebHtml
             builder.Append(ElementName);
             foreach (var attribute in Attributes)
             {
+                // a name cannot be escaped; one that could end the tag or start another attribute
+                // is left out rather than written
+                if (!HtmlName.IsValidAttributeName(attribute.Name))
+                {
+                    continue;
+                }
+
                 builder.Append(' ');
                 attribute.ToString(builder, 0);
             }

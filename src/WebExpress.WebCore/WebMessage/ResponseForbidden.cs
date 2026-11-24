@@ -24,7 +24,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseForbidden(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>403</title></head><body>403 - Forbidden</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>403</title></head><body>403 - Forbidden</body></html>");
             Reason = "Forbidden";
 
             Header.ContentType = "text/html";

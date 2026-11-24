@@ -5,11 +5,15 @@ namespace WebExpress.WebCore.WebHtml
     /// <summary>
     /// A node that holds a piece of plain text placed between or inside HTML elements (a text node).
     /// Use it to add textual content to the page; for ready-made markup use <see cref="HtmlRaw"/> instead.
-    /// The value is written verbatim, not HTML-encoded: the parser stores text with its entity references
-    /// intact so a document round-trips unchanged, and callers that already encode would otherwise see
-    /// their text double-encoded. Untrusted input must therefore be encoded by the caller (for example
-    /// with <see cref="System.Net.WebUtility.HtmlEncode(string)"/>), otherwise it can inject markup.
     /// </summary>
+    /// <remarks>
+    /// The value is plain text and is HTML-encoded when it is written: <c>&lt;</c>, <c>&gt;</c> and
+    /// <c>&amp;</c> become entity references, so text from users can never become markup. The
+    /// value used to be written verbatim and left the encoding to every caller - over a hundred
+    /// places that each had to remember it, and any that forgot turned user input into script.
+    /// The parser stores the text it reads decoded, so a parsed document written out again keeps
+    /// its entities. A caller holding markup it trusts writes it with <see cref="HtmlRaw"/>.
+    /// </remarks>
     public class HtmlText : IHtmlNode
     {
         /// <summary>
@@ -40,7 +44,31 @@ namespace WebExpress.WebCore.WebHtml
         /// <param name="deep">The call depth.</param>
         public virtual void ToString(StringBuilder builder, int deep)
         {
-            builder.Append(Value);
+            Encode(builder, Value);
+        }
+
+        /// <summary>
+        /// Appends text HTML-encoded for the content of an element.
+        /// </summary>
+        /// <param name="builder">The string builder.</param>
+        /// <param name="value">The text.</param>
+        public static void Encode(StringBuilder builder, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return;
+            }
+
+            foreach (var c in value)
+            {
+                switch (c)
+                {
+                    case '&': builder.Append("&amp;"); break;
+                    case '<': builder.Append("&lt;"); break;
+                    case '>': builder.Append("&gt;"); break;
+                    default: builder.Append(c); break;
+                }
+            }
         }
     }
 }

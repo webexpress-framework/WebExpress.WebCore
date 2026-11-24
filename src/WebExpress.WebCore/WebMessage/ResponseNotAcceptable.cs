@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseNotAcceptable(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>406</title></head><body>406 - Not Acceptable</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>406</title></head><body>406 - Not Acceptable</body></html>");
             Reason = "Not Acceptable";
 
             Header.ContentType = "text/html";

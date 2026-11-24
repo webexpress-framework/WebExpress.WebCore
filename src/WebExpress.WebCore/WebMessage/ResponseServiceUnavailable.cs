@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseServiceUnavailable(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>503</title></head><body>503 - Service Unavailable</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>503</title></head><body>503 - Service Unavailable</body></html>");
             Reason = "Service Unavailable";
 
             Header.ContentType = "text/html";

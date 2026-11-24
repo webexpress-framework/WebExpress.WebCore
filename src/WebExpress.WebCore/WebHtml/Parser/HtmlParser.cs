@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 
 namespace WebExpress.WebCore.WebHtml.Parser
 {
@@ -121,8 +122,19 @@ namespace WebExpress.WebCore.WebHtml.Parser
                     case HtmlTokenType.Text:
                         if (!string.IsNullOrEmpty(token.Value))
                         {
-                            Target().Add(new HtmlText(token.Value));
+                            // the content of script, style and the other raw text elements is
+                            // no html and must neither be decoded nor encoded; everything else is
+                            // stored decoded, since HtmlText encodes what it writes
+                            Target().Add(open.Count > 0 && IsRawText(open[^1].TagName)
+                                ? new HtmlRaw(token.Value)
+                                : new HtmlText(WebUtility.HtmlDecode(token.Value)));
                         }
+                        break;
+
+                    case HtmlTokenType.SelfClosingTag or HtmlTokenType.StartTag or HtmlTokenType.EndTag
+                        when !HtmlName.IsValidElementName(token.TagName):
+                        // a name that could not be written back safely is dropped; its content
+                        // stays with the enclosing element
                         break;
 
                     case HtmlTokenType.SelfClosingTag:
@@ -158,6 +170,16 @@ namespace WebExpress.WebCore.WebHtml.Parser
             return roots;
         }
 
+        /// <summary>
+        /// Tells whether an element holds raw text, whose content the browser reads literally.
+        /// </summary>
+        /// <param name="tagName">The name of the element.</param>
+        /// <returns>True for script, style, xmp, iframe, noembed, noframes and plaintext.</returns>
+        private static bool IsRawText(string tagName)
+        {
+            return tagName?.ToLowerInvariant() is "script" or "style" or "xmp" or "iframe" or "noembed" or "noframes" or "plaintext";
+        }
+
         // ------------------------------------------------------------------
         // Attribute mapping
         // ------------------------------------------------------------------
@@ -171,6 +193,11 @@ namespace WebExpress.WebCore.WebHtml.Parser
 
             foreach (var attr in attributes)
             {
+                if (!HtmlName.IsValidAttributeName(attr.Name))
+                {
+                    continue;
+                }
+
                 if (attr.IsBoolean)
                 {
                     element.AddUserAttribute(attr.Name);

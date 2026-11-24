@@ -36,8 +36,10 @@ namespace WebExpress.WebCore.WebHtml
         /// <param name="deep">The call depth.</param>
         public virtual void ToString(StringBuilder builder, int deep)
         {
+            // a "--" inside the text could end the comment early - at "-->" or "--!>" - and turn
+            // the rest into markup, so no two dashes are written next to each other
             builder.Append("<!-- ");
-            builder.Append(Text);
+            builder.Append(Text?.Replace("-", "&#45;"));
             builder.Append(" -->");
         }
     }

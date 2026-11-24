@@ -1075,9 +1075,9 @@ namespace WebExpress.WebCore
                 );
             }
 
-            message = $"<html><head><title>{response.Status}</title></head><body>" +
-                      $"<p>{message}<br/><p>" +
-                      $"</body></html>";
+            // the message is text and is encoded with its line breaks kept
+            message = StatusMessage.ToHtml(new StatusMessage(message ?? string.Empty), null)
+                .Replace("<html><body>", $"<html><head><title>{response.Status}</title></head><body>");
 
             response.Content = message;
             response.Header.ContentLength = message.Length;
@@ -1310,7 +1310,7 @@ namespace WebExpress.WebCore
         }
 
         /// <summary>
-        /// Renders an exception as the html fragment a status page shows.
+        /// Describes an exception as the text a status page shows; the page encodes it.
         /// </summary>
         /// <remarks>
         /// The details are shown only when <see cref="SecuritySettings.DetailedErrors"/> asks for
@@ -1322,7 +1322,7 @@ namespace WebExpress.WebCore
         /// exists to report the first failure.
         /// </remarks>
         /// <param name="ex">The exception to describe.</param>
-        /// <returns>The html fragment.</returns>
+        /// <returns>The text.</returns>
         private string Describe(Exception ex)
         {
             if (!(Settings?.Security?.DetailedErrors ?? false))
@@ -1330,10 +1330,11 @@ namespace WebExpress.WebCore
                 return "The server could not complete the request. The cause has been logged.";
             }
 
-            return $"<h4>Message</h4>{EncodeHtml(ex.Message)}<br/><br/>" +
-                $"<h5>Source</h5>{EncodeHtml(ex.Source)}<br/><br/>" +
-                $"<h5>StackTrace</h5>{EncodeHtml(ex.StackTrace)}<br/><br/>" +
-                $"<h5>InnerException</h5>{EncodeHtml(ex.InnerException?.ToString())}";
+            return string.Join("\n",
+                "Message", ex.Message, "",
+                "Source", ex.Source, "",
+                "StackTrace", ex.StackTrace, "",
+                "InnerException", ex.InnerException?.ToString());
         }
 
         /// <summary>
@@ -1349,20 +1350,9 @@ namespace WebExpress.WebCore
         {
             var message = Settings?.Security?.DetailedErrors ?? false
                 ? Describe(ex)
-                : EncodeHtml(ex.Message);
+                : ex.Message;
 
             return CreateStatusPage<ResponseBadRequest>(message, request, searchResult);
-        }
-
-        /// <summary>
-        /// Encodes text for an error page. Exception messages routinely quote request data such as
-        /// the path or a parameter, which must not become markup.
-        /// </summary>
-        /// <param name="text">The text to encode, possibly null.</param>
-        /// <returns>The encoded text with line breaks kept, or null.</returns>
-        private static string EncodeHtml(string text)
-        {
-            return WebUtility.HtmlEncode(text)?.Replace("\n", "<br/>\n");
         }
 
         /// <summary>
@@ -1438,8 +1428,8 @@ namespace WebExpress.WebCore
                     // kestrel rejects a body over MaxRequestBodySize or a malformed chunked one;
                     // the client is told why instead of seeing an internal error
                     var rejected = ex.StatusCode == Microsoft.AspNetCore.Http.StatusCodes.Status413PayloadTooLarge
-                        ? CreateStatusPage<ResponsePayloadTooLarge>(EncodeHtml(ex.Message), httpContext.Request)
-                        : CreateStatusPage<ResponseBadRequest>(EncodeHtml(ex.Message), httpContext.Request);
+                        ? CreateStatusPage<ResponsePayloadTooLarge>(ex.Message, httpContext.Request)
+                        : CreateStatusPage<ResponseBadRequest>(ex.Message, httpContext.Request);
 
                     await SendAsync(httpContext, rejected);
 

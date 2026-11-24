@@ -37,7 +37,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseMovedPermanently(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>301</title></head><body>301 - Moved Permanently</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>301</title></head><body>301 - Moved Permanently</body></html>");
             Reason = "Moved Permanently";
 
             Header.ContentType = "text/html";

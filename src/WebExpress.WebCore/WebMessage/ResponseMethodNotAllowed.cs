@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseMethodNotAllowed(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>405</title></head><body>405 - Method Not Allowed</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>405</title></head><body>405 - Method Not Allowed</body></html>");
             Reason = "Method Not Allowed";
 
             Header.ContentType = "text/html";

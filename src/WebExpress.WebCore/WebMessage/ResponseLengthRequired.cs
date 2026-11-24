@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseLengthRequired(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>411</title></head><body>411 - Length Required</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>411</title></head><body>411 - Length Required</body></html>");
             Reason = "Length Required";
 
             Header.ContentType = "text/html";

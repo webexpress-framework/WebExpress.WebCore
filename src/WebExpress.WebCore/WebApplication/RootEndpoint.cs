@@ -81,7 +81,7 @@ namespace WebExpress.WebCore.WebApplication
                 : "webexpress.webcore:root.introduction");
             var document = new HtmlElementRootHtml();
             document.AddUserAttribute("lang", request.Culture.TwoLetterISOLanguageName);
-            document.Head.Title = WebUtility.HtmlEncode(title + " | WebExpress");
+            document.Head.Title = title + " | WebExpress";
             document.Head.Meta = [new("viewport", "width=device-width, initial-scale=1")];
             document.Head.Styles = ["""
                 :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
@@ -113,8 +113,8 @@ namespace WebExpress.WebCore.WebApplication
                 var path = application.Route.ToString();
                 var link = new HtmlElementTextSemanticsA
                 (
-                    new HtmlElementTextSemanticsStrong(WebUtility.HtmlEncode(name)),
-                    new HtmlElementTextSemanticsSpan(new HtmlText(WebUtility.HtmlEncode(path))) { Class = "wx-root-path" }
+                    new HtmlElementTextSemanticsStrong(name),
+                    new HtmlElementTextSemanticsSpan(new HtmlText(path)) { Class = "wx-root-path" }
                 )
                 {
                     Href = path
@@ -125,8 +125,8 @@ namespace WebExpress.WebCore.WebApplication
             document.Body.Add(new HtmlElementSectionMain
             (
                 new HtmlElementTextContentP("WebExpress") { Class = "wx-root-brand" },
-                new HtmlElementSectionH1(WebUtility.HtmlEncode(title)),
-                new HtmlElementTextContentP(WebUtility.HtmlEncode(introduction)),
+                new HtmlElementSectionH1(title),
+                new HtmlElementTextContentP(introduction),
                 list
             ));
 

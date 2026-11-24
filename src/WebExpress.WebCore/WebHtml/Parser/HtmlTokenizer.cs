@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -192,11 +192,25 @@ namespace WebExpress.WebCore.WebHtml.Parser
             _position += 2; // consume '--'
             var builder = new StringBuilder();
 
+            // a comment ends where a browser ends it, also at "--!>" and at the abrupt "<!-->" and
+            // "<!--->"; ending it later hid markup the browser renders from everything that reads
+            // the parsed tree, a sanitizer included
+            if (Current == '>' || (Current == '-' && Peek() == '>'))
+            {
+                _position += Current == '>' ? 1 : 2;
+                return new HtmlToken(HtmlTokenType.Comment, string.Empty);
+            }
+
             while (_position < _input.Length)
             {
                 if (Current == '-' && Peek() == '-' && Peek(2) == '>')
                 {
                     _position += 3; // consume '-->'
+                    break;
+                }
+                if (Current == '-' && Peek() == '-' && Peek(2) == '!' && Peek(3) == '>')
+                {
+                    _position += 4; // consume '--!>'
                     break;
                 }
                 builder.Append(Current);
@@ -218,7 +232,7 @@ namespace WebExpress.WebCore.WebHtml.Parser
             SkipWhitespace();
 
             var nameBuilder = new StringBuilder();
-            while (_position < _input.Length && Current != '>' && !char.IsWhiteSpace(Current))
+            while (_position < _input.Length && Current != '>' && !IsHtmlWhitespace(Current))
             {
                 nameBuilder.Append(Current);
                 _position++;
@@ -340,7 +354,7 @@ namespace WebExpress.WebCore.WebHtml.Parser
         private string ReadTagName()
         {
             var builder = new StringBuilder();
-            while (_position < _input.Length && !char.IsWhiteSpace(Current) &&
+            while (_position < _input.Length && !IsHtmlWhitespace(Current) &&
                    Current != '>' && Current != '/' && Current != '\0')
             {
                 builder.Append(Current);
@@ -426,7 +440,7 @@ namespace WebExpress.WebCore.WebHtml.Parser
         {
             var builder = new StringBuilder();
             while (_position < _input.Length && Current != '=' && Current != '>' &&
-                   Current != '/' && !char.IsWhiteSpace(Current) && Current != '\0')
+                   Current != '/' && !IsHtmlWhitespace(Current) && Current != '\0')
             {
                 builder.Append(Current);
                 _position++;
@@ -465,7 +479,7 @@ namespace WebExpress.WebCore.WebHtml.Parser
 
             // unquoted value – read until whitespace or '>'
             var unquotedBuilder = new StringBuilder();
-            while (_position < _input.Length && !char.IsWhiteSpace(Current) &&
+            while (_position < _input.Length && !IsHtmlWhitespace(Current) &&
                    Current != '>' && Current != '\0')
             {
                 unquotedBuilder.Append(Current);
@@ -496,11 +510,27 @@ namespace WebExpress.WebCore.WebHtml.Parser
         }
 
         /// <summary>
+        /// Tells whether a character is whitespace in the sense of the HTML tokenizer.
+        /// </summary>
+        /// <remarks>
+        /// Only these five characters separate a tag name and attributes. <see cref="char.IsWhiteSpace"/>
+        /// also accepts Unicode spaces such as U+00A0, which a browser reads as part of a name:
+        /// <c>&lt;img&#xA0;src=x&#xA0;onerror=...&gt;</c> is one inert element to the browser but
+        /// was split into an image with an event handler here, and written out as one.
+        /// </remarks>
+        /// <param name="c">The character.</param>
+        /// <returns>True for space, tab, line feed, form feed and carriage return.</returns>
+        private static bool IsHtmlWhitespace(char c)
+        {
+            return c is ' ' or '\t' or '\n' or '\f' or '\r';
+        }
+
+        /// <summary>
         /// Skips whitespace starting at the current position.
         /// </summary>
         private void SkipWhitespace()
         {
-            while (_position < _input.Length && char.IsWhiteSpace(Current))
+            while (_position < _input.Length && IsHtmlWhitespace(Current))
             {
                 _position++;
             }
