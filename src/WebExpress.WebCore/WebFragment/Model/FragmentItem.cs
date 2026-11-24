@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Threading;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebCondition;
@@ -21,7 +22,11 @@ namespace WebExpress.WebCore.WebFragment.Model
         private IFragmentBase _instance;
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
-        private static readonly ConcurrentDictionary<Type, Delegate> _delegateCache = new();
+        // one compiled call per fragment class, shared by all items and requests. It takes the
+        // instance as its first argument: a delegate that captured the instance of the first
+        // request rendered every later request on that foreign instance - its state leaked
+        // across requests and users, and concurrent requests rendered on it at the same time.
+        private static readonly ConcurrentDictionary<Type, Func<object, object, object, IHtmlNode>> _delegateCache = new();
 
         /// <summary>
         /// Gets or sets the context of the associated plugin.
@@ -86,9 +91,12 @@ namespace WebExpress.WebCore.WebFragment.Model
         public TFragment CreateInstance<TFragment>(IPageContext pageContext = null)
             where TFragment : IFragmentBase
         {
-            var instance = _instance;
+            if (Cache && _instance is not null)
+            {
+                return (TFragment)_instance;
+            }
 
-            instance ??= ComponentActivator.CreateInstance<IFragmentBase, IFragmentContext>
+            var instance = ComponentActivator.CreateInstance<IFragmentBase, IFragmentContext>
             (
                 FragmentClass,
                 FragmentContext,
@@ -100,7 +108,8 @@ namespace WebExpress.WebCore.WebFragment.Model
 
             if (Cache)
             {
-                _instance = instance;
+                // two requests may create an instance at once; both use the one that is kept
+                instance = Interlocked.CompareExchange(ref _instance, instance, null) ?? instance;
             }
 
             return (TFragment)instance;
@@ -120,44 +129,51 @@ namespace WebExpress.WebCore.WebFragment.Model
         {
             if (FragmentContext.Check(renderContext?.Request))
             {
-                var instance = CreateInstance<IFragmentBase>();
+                var instance = CreateInstance<IFragmentBase>(renderContext?.PageContext);
+                var render = _delegateCache.GetOrAdd(FragmentClass, CompileRender);
 
-                if (!_delegateCache.TryGetValue(FragmentClass, out var del))
-                {
-                    // create and compile the expression
-                    var renderContextType = FragmentClass.GetInterface(typeof(IFragment<,>).Name).GetGenericArguments()[0];
-                    var visualTreeType = FragmentClass.GetInterface(typeof(IFragment<,>).Name).GetGenericArguments()[1];
-                    var renderContextParam = Expression.Parameter(renderContextType, "renderContext");
-                    var visualTreeParam = Expression.Parameter(visualTreeType, "visualTree");
-                    var renderMethod = FragmentClass.GetMethod("Render", [renderContextType, visualTreeType]);
-                    var callProzessMethod = Expression.Call
-                    (
-                        Expression.Constant(instance),
-                        renderMethod,
-                        renderContextParam,
-                        visualTreeParam
-                    );
-                    var lambda = Expression.Lambda(callProzessMethod, renderContextParam, visualTreeParam)
-                        .Compile();
-
-                    _delegateCache[FragmentClass] = lambda;
-                    del = lambda;
-                }
-
-                // execute the cached delegate
-                var html = del.DynamicInvoke(renderContext, visualTree) as IHtmlNode;
-
-                return html;
+                return render(instance, renderContext, visualTree);
             }
 
             return null;
         }
 
         /// <summary>
-        /// Performs application-specific tasks related to sharing, returning, or resetting unmanaged resources.
+        /// Compiles the call of the fragment's render method with the instance, the render context
+        /// and the visual tree as arguments.
+        /// </summary>
+        /// <param name="fragmentClass">The fragment class.</param>
+        /// <returns>The compiled call.</returns>
+        private static Func<object, object, object, IHtmlNode> CompileRender(Type fragmentClass)
+        {
+            var arguments = fragmentClass.GetInterface(typeof(IFragment<,>).Name).GetGenericArguments();
+            var renderMethod = fragmentClass.GetMethod("Render", [arguments[0], arguments[1]]);
+            var instanceParam = Expression.Parameter(typeof(object), "instance");
+            var renderContextParam = Expression.Parameter(typeof(object), "renderContext");
+            var visualTreeParam = Expression.Parameter(typeof(object), "visualTree");
+            var call = Expression.Call
+            (
+                Expression.Convert(instanceParam, fragmentClass),
+                renderMethod,
+                Expression.Convert(renderContextParam, arguments[0]),
+                Expression.Convert(visualTreeParam, arguments[1])
+            );
+
+            return Expression.Lambda<Func<object, object, object, IHtmlNode>>
+            (
+                Expression.TypeAs(call, typeof(IHtmlNode)),
+                instanceParam,
+                renderContextParam,
+                visualTreeParam
+            ).Compile();
+        }
+
+        /// <summary>
+        /// Releases the instance kept for a cached fragment, so a removed plugin leaves none behind.
         /// </summary>
         public void Dispose()
         {
+            (Interlocked.Exchange(ref _instance, null) as IDisposable)?.Dispose();
         }
 
         /// <summary>
