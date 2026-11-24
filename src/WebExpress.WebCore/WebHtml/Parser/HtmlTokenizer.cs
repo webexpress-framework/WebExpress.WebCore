@@ -158,7 +158,9 @@ namespace WebExpress.WebCore.WebHtml.Parser
                 return ReadComment();
             }
 
-            if (_input.IndexOf("DOCTYPE", _position, StringComparison.OrdinalIgnoreCase) == _position)
+            // compared in place: searching the rest of the input for "DOCTYPE" on every "<!" made a
+            // document full of unknown bang constructs quadratic in its length
+            if (_input.AsSpan(_position).StartsWith("DOCTYPE", StringComparison.OrdinalIgnoreCase))
             {
                 return ReadDoctype();
             }
