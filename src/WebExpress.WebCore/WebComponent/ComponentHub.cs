@@ -453,7 +453,7 @@ namespace WebExpress.WebCore.WebComponent
 
             // initialize the component entry as an empty list for easier manipulation
             var componentList = new List<ComponentItem>();
-            _dictionary.Add(pluginContext, componentList);
+            _dictionary.TryAdd(pluginContext, []);
 
             foreach (var type in assembly
                 .GetExportedTypes()
@@ -474,6 +474,10 @@ namespace WebExpress.WebCore.WebComponent
                         ComponentInstance = componentInstance
                     });
 
+                    // a request may be reading the stored list right now, so the grown list is
+                    // stored as a new copy instead of being changed in place
+                    _dictionary[pluginContext] = [.. componentList];
+
                     _httpServerContext?.Log?.Debug
                     (
                         _internationalizationManager.Translate("webexpress.webcore:componentmanager.register", id)
@@ -491,8 +495,7 @@ namespace WebExpress.WebCore.WebComponent
                 }
             }
 
-            // make sure the dictionary uses IEnumerable as value type, if the dictionary requires it
-            _dictionary[pluginContext] = componentList;
+            _dictionary[pluginContext] = [.. componentList];
 
             Log();
         }
@@ -606,7 +609,7 @@ namespace WebExpress.WebCore.WebComponent
                 }
             }
 
-            _dictionary.Remove(pluginContext);
+            _dictionary.TryRemove(pluginContext, out _);
         }
 
         /// <summary>

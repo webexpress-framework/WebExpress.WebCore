@@ -36,6 +36,33 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Verifies that removing a plugin announces each of its setting pages, so their routes are
+        /// dropped, and takes the categories and groups along. The plugin's setting pages left the
+        /// registry silently and its categories and groups stayed.
+        /// </summary>
+        [Fact]
+        public void RemovingAPluginAnnouncesItsSettingPages()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var plugin = componentHub.PluginManager.GetPlugin(typeof(TestPlugin));
+            var settingPageManager = componentHub.SettingPageManager as WebExpress.WebCore.WebSettingPage.SettingPageManager;
+            var registered = componentHub.SettingPageManager.SettingPages.Count();
+            var removed = new List<WebExpress.WebCore.WebSettingPage.ISettingPageContext>();
+            settingPageManager.RemoveSettingPage += (sender, e) => removed.Add(e);
+
+            // act
+            settingPageManager.Remove(plugin);
+
+            // validation
+            Assert.True(registered > 0);
+            Assert.Equal(registered, removed.Count);
+            Assert.Empty(componentHub.SettingPageManager.SettingPages);
+            Assert.Empty(componentHub.SettingPageManager.SettingCategories);
+            Assert.Empty(componentHub.SettingPageManager.SettingGroups);
+        }
+
+        /// <summary>
         /// Verifies that removing a plugin announces each of its includes and leaves none behind.
         /// </summary>
         [Fact]

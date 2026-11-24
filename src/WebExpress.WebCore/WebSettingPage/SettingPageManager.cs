@@ -653,7 +653,15 @@ namespace WebExpress.WebCore.WebSettingPage
         /// <param name="pluginContext">The context of the plugin that contains the elemets to remove.</param>
         public void Remove(IPluginContext pluginContext)
         {
-            _pageDictionary.Remove(pluginContext);
+            // categories and groups go with their plugin, and every removed page is announced, so
+            // the endpoint registration drops the route of a setting page whose plugin is gone
+            _categoryDictionary.Remove(pluginContext);
+            _groupDictionary.Remove(pluginContext);
+
+            foreach (var settingPageItem in _pageDictionary.Remove(pluginContext))
+            {
+                OnRemoveSettingPage(settingPageItem.SettingPageContext);
+            }
         }
 
         /// <summary>
@@ -662,9 +670,12 @@ namespace WebExpress.WebCore.WebSettingPage
         /// <param name="applicationContext">The context of the application that contains the fragments to remove.</param>
         internal void Remove(IApplicationContext applicationContext)
         {
-            foreach (var settingPageContext in _pageDictionary.Remove(applicationContext))
+            _categoryDictionary.Remove(applicationContext);
+            _groupDictionary.Remove(applicationContext);
+
+            foreach (var settingPageItem in _pageDictionary.Remove(applicationContext))
             {
-                OnRemoveSettingPage(settingPageContext);
+                OnRemoveSettingPage(settingPageItem.SettingPageContext);
             }
         }
 

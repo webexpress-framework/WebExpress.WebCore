@@ -232,7 +232,7 @@ namespace WebExpress.WebCore.WebPlugin
 
                         if (hasUnfulfilledDependencies)
                         {
-                            _unfulfilledDependencies.Add(id, new PluginItem()
+                            _unfulfilledDependencies.TryAdd(id, new PluginItem()
                             {
                                 PluginLoadContext = loadContext,
                                 PluginClass = assembly.ExportedTypes.FirstOrDefault() ?? typeof(IPlugin),
@@ -244,7 +244,7 @@ namespace WebExpress.WebCore.WebPlugin
                         }
                         else
                         {
-                            _dictionary.Add(id, new PluginItem()
+                            _dictionary.TryAdd(id, new PluginItem()
                             {
                                 PluginLoadContext = loadContext,
                                 PluginClass = assembly.ExportedTypes.FirstOrDefault() ?? typeof(IPlugin),
@@ -363,7 +363,7 @@ namespace WebExpress.WebCore.WebPlugin
 
                     if (hasUnfulfilledDependencies)
                     {
-                        _unfulfilledDependencies.Add(id, new PluginItem()
+                        _unfulfilledDependencies.TryAdd(id, new PluginItem()
                         {
                             PluginLoadContext = loadContext,
                             PluginClass = type,
@@ -375,7 +375,7 @@ namespace WebExpress.WebCore.WebPlugin
                     }
                     else
                     {
-                        _dictionary.Add(id, new PluginItem()
+                        _dictionary.TryAdd(id, new PluginItem()
                         {
                             PluginLoadContext = loadContext,
                             PluginClass = type,
@@ -442,8 +442,8 @@ namespace WebExpress.WebCore.WebPlugin
 
             OnRemovePlugin(pluginContext);
 
-            _dictionary.Remove(pluginContext.PluginId);
-            _unfulfilledDependencies.Remove(pluginContext.PluginId);
+            _dictionary.TryRemove(pluginContext.PluginId, out _);
+            _unfulfilledDependencies.TryRemove(pluginContext.PluginId, out _);
 
             Release(pluginItem);
 
@@ -521,8 +521,8 @@ namespace WebExpress.WebCore.WebPlugin
                     if (!hasUnfulfilledDependencies)
                     {
                         fulfilledDependencies = true;
-                        _unfulfilledDependencies.Remove(unfulfilledDependencies.Key);
-                        _dictionary.Add(unfulfilledDependencies.Key, unfulfilledDependencies.Value);
+                        _unfulfilledDependencies.TryRemove(unfulfilledDependencies.Key, out _);
+                        _dictionary.TryAdd(unfulfilledDependencies.Key, unfulfilledDependencies.Value);
 
                         OnAddPlugin(unfulfilledDependencies.Value.PluginContext);
 

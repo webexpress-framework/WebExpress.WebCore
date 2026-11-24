@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections.Concurrent;
 using WebExpress.WebCore.WebComponent;
 
 namespace WebExpress.WebCore.WebPlugin.Model
@@ -8,7 +8,11 @@ namespace WebExpress.WebCore.WebPlugin.Model
     /// Key = PluginId
     /// Value = Plugin-Metadaten
     /// </summary>
-    internal class PluginDictionary : Dictionary<IComponentId, PluginItem>
+    /// <remarks>
+    /// Concurrent, because the package scan loads and unloads plugins while requests and the other
+    /// managers look them up; a plain dictionary written during a read can throw or loop forever.
+    /// </remarks>
+    internal class PluginDictionary : ConcurrentDictionary<IComponentId, PluginItem>
     {
     }
 }
