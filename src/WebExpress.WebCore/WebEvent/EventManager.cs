@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
@@ -23,6 +24,11 @@ namespace WebExpress.WebCore.WebEvent
         private readonly IHttpServerContext _httpServerContext;
         private readonly EventDictionary _dictionary = [];
 
+        // the package scan registers and removes handlers on its own thread while requests raise
+        // events; every access to the dictionary is taken under this lock and every result is a
+        // copy, so a handler runs outside it
+        private readonly Lock _lock = new();
+
         /// <summary>
         /// An event that fires when an event handler is added.
         /// </summary>
@@ -36,11 +42,20 @@ namespace WebExpress.WebCore.WebEvent
         /// <summary>
         /// Gets the collection of events.
         /// </summary>
-        public IEnumerable<IEventHandlerContext> EventHandlers => _dictionary.Values
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x)
-            .Select(x => x.EventHandlerContext);
+        public IEnumerable<IEventHandlerContext> EventHandlers
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return [.. _dictionary.Values
+                        .SelectMany(x => x.Values)
+                        .SelectMany(x => x.Values)
+                        .SelectMany(x => x)
+                        .Select(x => x.EventHandlerContext)];
+                }
+            }
+        }
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -77,8 +92,7 @@ namespace WebExpress.WebCore.WebEvent
         public IEnumerable<IEventHandlerContext> GetEventHandlers<TEvent>(IApplicationContext applicationContext)
             where TEvent : IEvent
         {
-            return _dictionary.GetEventHandlerItems<TEvent>(applicationContext)
-                .Select(x => x.EventHandlerContext);
+            return GetEventHandlers(applicationContext, typeof(TEvent));
         }
 
         /// <summary>
@@ -89,8 +103,11 @@ namespace WebExpress.WebCore.WebEvent
         /// <returns>An IEnumerable of event handler contexts.</returns>
         public IEnumerable<IEventHandlerContext> GetEventHandlers(IApplicationContext applicationContext, Type eventType)
         {
-            return _dictionary.GetEventHandlerItems(applicationContext, eventType)
-                .Select(x => x.EventHandlerContext);
+            lock (_lock)
+            {
+                return [.. _dictionary.GetEventHandlerItems(applicationContext, eventType)
+                    .Select(x => x.EventHandlerContext)];
+            }
         }
 
         /// <summary>
@@ -103,7 +120,12 @@ namespace WebExpress.WebCore.WebEvent
         public void RaiseEvent<TEvent>(IApplicationContext applicationContext, object sender, IEventArgument argument)
             where TEvent : IEvent
         {
-            var eventHandlers = _dictionary.GetEventHandlerItems<TEvent>(applicationContext);
+            List<EventItem> eventHandlers;
+
+            lock (_lock)
+            {
+                eventHandlers = [.. _dictionary.GetEventHandlerItems<TEvent>(applicationContext)];
+            }
 
             foreach (var eventHandler in eventHandlers)
             {
@@ -117,9 +139,12 @@ namespace WebExpress.WebCore.WebEvent
         /// <param name="pluginContext">The context of the plugin whose jobs are to be associated.</param>
         private void Register(IPluginContext pluginContext)
         {
-            if (_dictionary.ContainsKey(pluginContext))
+            lock (_lock)
             {
-                return;
+                if (pluginContext is null || _dictionary.ContainsKey(pluginContext))
+                {
+                    return;
+                }
             }
 
             Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
@@ -133,7 +158,14 @@ namespace WebExpress.WebCore.WebEvent
         {
             foreach (var pluginContext in _componentHub?.PluginManager?.GetPlugins(applicationContext))
             {
-                if (_dictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext))
+                bool known;
+
+                lock (_lock)
+                {
+                    known = _dictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
+                }
+
+                if (known)
                 {
                     continue;
                 }
@@ -185,7 +217,8 @@ namespace WebExpress.WebCore.WebEvent
                         )
                     );
 
-                    break;
+                    // only this handler is skipped; a break dropped every handler after it
+                    continue;
                 }
 
                 // assign the event to existing applications
@@ -199,12 +232,19 @@ namespace WebExpress.WebCore.WebEvent
                         ApplicationContext = applicationContext
                     };
 
-                    if (_dictionary.AddEventItem
-                    (
-                        pluginContext,
-                        applicationContext,
-                        new EventItem(_componentHub, _httpServerContext, pluginContext, applicationContext, eventHandlerContext, eventHandlerType, eventType)
-                    ))
+                    bool added;
+
+                    lock (_lock)
+                    {
+                        added = _dictionary.AddEventItem
+                        (
+                            pluginContext,
+                            applicationContext,
+                            new EventItem(_componentHub, _httpServerContext, pluginContext, applicationContext, eventHandlerContext, eventHandlerType, eventType)
+                        );
+                    }
+
+                    if (added)
                     {
                         OnAddEventHandler(eventHandlerContext);
 
@@ -242,17 +282,28 @@ namespace WebExpress.WebCore.WebEvent
         /// <param name="pluginContext">The context of the plugin that contains the events to remove.</param>
         internal void Remove(IPluginContext pluginContext)
         {
-            // the plugin has not been registered in the manager
-            if (_dictionary.TryGetValue(pluginContext, out var value))
+            if (pluginContext is null)
             {
-                foreach (var eventHandlerItem in value
-                    .SelectMany(x => x.Value)
-                    .SelectMany(x => x.Value))
+                return;
+            }
+
+            List<EventItem> removed;
+
+            lock (_lock)
+            {
+                // the plugin has not been registered in the manager
+                if (!_dictionary.Remove(pluginContext, out var value))
                 {
-                    eventHandlerItem.Dispose();
+                    return;
                 }
 
-                _dictionary.Remove(pluginContext);
+                removed = [.. value.Values.SelectMany(x => x.Values).SelectMany(x => x)];
+            }
+
+            foreach (var eventHandlerItem in removed)
+            {
+                OnRemoveEventHandler(eventHandlerItem.EventHandlerContext);
+                eventHandlerItem.Dispose();
             }
         }
 
@@ -267,18 +318,23 @@ namespace WebExpress.WebCore.WebEvent
                 return;
             }
 
-            foreach (var pluginDict in _dictionary.Values)
+            var removed = new List<EventItem>();
+
+            lock (_lock)
             {
-                foreach (var appDict in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
+                foreach (var pluginDict in _dictionary.Values)
                 {
-                    foreach (var eventHandlerItem in appDict.Values.SelectMany(x => x))
+                    if (pluginDict.Remove(applicationContext, out var appDict))
                     {
-                        OnRemoveEventHandler(eventHandlerItem.EventHandlerContext);
-                        eventHandlerItem.Dispose();
+                        removed.AddRange(appDict.Values.SelectMany(x => x));
                     }
                 }
+            }
 
-                pluginDict.Remove(applicationContext);
+            foreach (var eventHandlerItem in removed)
+            {
+                OnRemoveEventHandler(eventHandlerItem.EventHandlerContext);
+                eventHandlerItem.Dispose();
             }
         }
 

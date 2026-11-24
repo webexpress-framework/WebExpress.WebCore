@@ -14,7 +14,11 @@ namespace WebExpress.WebCore.WebTask
     {
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
-        private readonly TaskDictionary _dictionary = [];
+        private readonly TaskDictionary _dictionary = new();
+
+        // serializes the creation of a task, so two requests asking for one id get the same task
+        // and its handlers are subscribed exactly once
+        private readonly System.Threading.Lock _lock = new();
 
         /// <summary>
         /// Event is triggered when a task's changes.
@@ -24,7 +28,7 @@ namespace WebExpress.WebCore.WebTask
         /// <summary>
         /// Gets the collection of tasks.
         /// </summary>
-        public IEnumerable<ITask> Tasks => _dictionary.Values;
+        public IEnumerable<ITask> Tasks => [.. _dictionary.Values];
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -50,7 +54,7 @@ namespace WebExpress.WebCore.WebTask
         /// <returns>True if this task already exists, false otherwise.</returns>
         public bool ContainsTask(string id)
         {
-            return _dictionary.ContainsKey(id?.ToLower());
+            return id is not null && _dictionary.ContainsKey(id);
         }
 
         /// <summary>
@@ -60,12 +64,7 @@ namespace WebExpress.WebCore.WebTask
         /// <returns>The task or null.</returns>
         public ITask GetTask(string id)
         {
-            if (_dictionary.ContainsKey(id?.ToLower()))
-            {
-                return _dictionary[id?.ToLower()];
-            }
-
-            return null;
+            return id is not null && _dictionary.TryGetValue(id, out var task) ? task : null;
         }
 
         /// <summary>
@@ -76,22 +75,25 @@ namespace WebExpress.WebCore.WebTask
         /// <returns>The task or null.</returns>
         public ITask CreateTask(string id, params object[] args)
         {
-            var key = id?.ToLower();
+            ArgumentNullException.ThrowIfNull(id);
 
-            if (_dictionary.TryGetValue(key, out var value))
+            lock (_lock)
             {
-                return value;
+                if (_dictionary.TryGetValue(id, out var value))
+                {
+                    return value;
+                }
+
+                var task = ComponentActivator.CreateInstance<Task>(_httpServerContext, _componentHub, [id, args]);
+                task.Lifetime = _httpServerContext.Lifetime;
+
+                // register events for the newly created task
+                SubscribeTaskEvents(task);
+
+                _dictionary[id] = task;
+
+                return task;
             }
-
-            var task = ComponentActivator.CreateInstance<Task>(_httpServerContext, _componentHub, [id, args]);
-            task.Lifetime = _httpServerContext.Lifetime;
-
-            // register events for the newly created task
-            SubscribeTaskEvents(task);
-
-            _dictionary.Add(key, task);
-
-            return task;
         }
 
         /// <summary>
@@ -117,24 +119,27 @@ namespace WebExpress.WebCore.WebTask
         public ITask CreateTask<TTask>(string id, EventHandler<TaskEventArgs> handler, params object[] args)
             where TTask : Task
         {
-            var key = id?.ToLower();
+            ArgumentNullException.ThrowIfNull(id);
 
-            if (_dictionary.TryGetValue(key, out var value))
+            lock (_lock)
             {
-                return value;
+                if (_dictionary.TryGetValue(id, out var value))
+                {
+                    return value;
+                }
+
+                var task = ComponentActivator.CreateInstance<TTask>(_httpServerContext, _componentHub, [id, args]);
+                task.Lifetime = _httpServerContext.Lifetime;
+
+                // register events for the newly created task
+                SubscribeTaskEvents(task);
+
+                _dictionary[id] = task;
+
+                task.Process += handler;
+
+                return task;
             }
-
-            var task = ComponentActivator.CreateInstance<TTask>(_httpServerContext, _componentHub, [id, args]);
-            task.Lifetime = _httpServerContext.Lifetime;
-
-            // register events for the newly created task
-            SubscribeTaskEvents(task);
-
-            _dictionary.Add(key, task);
-
-            task.Process += handler;
-
-            return task;
         }
 
         /// <summary>
@@ -148,15 +153,12 @@ namespace WebExpress.WebCore.WebTask
                 return;
             }
 
-            var key = task.Id.ToLower();
-
-            if (_dictionary.TryGetValue(key, out var storedTask) && storedTask is Task t)
+            // only the stored instance is removed, never a newer task that took over the id
+            if (_dictionary.TryRemove(new KeyValuePair<string, ITask>(task.Id, task)) && task is Task t)
             {
                 // unregister events to prevent memory leaks
                 UnsubscribeTaskEvents(t);
             }
-
-            _dictionary.Remove(key);
         }
 
         /// <summary>

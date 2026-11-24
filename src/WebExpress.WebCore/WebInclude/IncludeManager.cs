@@ -20,7 +20,7 @@ namespace WebExpress.WebCore.WebInclude
     {
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
-        private readonly IncludeDictionary _dictionary = [];
+        private readonly IncludeDictionary _dictionary = new();
 
         /// <summary>
         /// An event that fires when an include is added.
@@ -35,10 +35,7 @@ namespace WebExpress.WebCore.WebInclude
         /// <summary>
         /// Gets all include contexts.
         /// </summary>
-        public IEnumerable<IIncludeContext> Includes => _dictionary.Values
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x.Values)
-            .Select(x => x.IncludeContext);
+        public IEnumerable<IIncludeContext> Includes => [.. _dictionary.All.Select(x => x.IncludeContext)];
 
         /// <summary>
         /// Initializes a new instance of the include manager.
@@ -73,7 +70,7 @@ namespace WebExpress.WebCore.WebInclude
                 return;
             }
 
-            if (_dictionary.ContainsKey(pluginContext))
+            if (_dictionary.Contains(pluginContext))
             {
                 return;
             }
@@ -94,7 +91,7 @@ namespace WebExpress.WebCore.WebInclude
 
             foreach (var pluginContext in _componentHub?.PluginManager?.GetPlugins(applicationContext))
             {
-                if (_dictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext))
+                if (_dictionary.Contains(pluginContext, applicationContext))
                 {
                     continue;
                 }
@@ -274,24 +271,19 @@ namespace WebExpress.WebCore.WebInclude
                 return;
             }
 
-            if (_dictionary.TryGetValue(pluginContext, out var value))
+            // removed first and announced afterwards, outside the registry's lock
+            foreach (var includeItem in _dictionary.Remove(pluginContext))
             {
-                foreach (var includeItem in value.Values.SelectMany(x => x.Values))
-                {
-                    OnRemoveInclude(includeItem.IncludeContext);
+                OnRemoveInclude(includeItem.IncludeContext);
+                includeItem.Dispose();
 
-                    _httpServerContext?.Log?.Debug(
-                            I18N.Translate(
-                                "webexpress.webcore:includemanager.removeinclude",
-                                includeItem.IncludeId,
-                                includeItem.ApplicationContext.ApplicationId
-                            )
-                        );
-
-                    includeItem.Dispose();
-                }
-
-                _dictionary.Remove(pluginContext);
+                _httpServerContext?.Log?.Debug(
+                    I18N.Translate(
+                        "webexpress.webcore:includemanager.removeinclude",
+                        includeItem.IncludeId,
+                        includeItem.ApplicationContext.ApplicationId
+                    )
+                );
             }
         }
 
@@ -306,26 +298,18 @@ namespace WebExpress.WebCore.WebInclude
                 return;
             }
 
-            foreach (var pluginDict in _dictionary.Values)
+            foreach (var includeItem in _dictionary.Remove(applicationContext))
             {
-                foreach (var appDict in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
-                {
-                    foreach (var includeItem in appDict.Values)
-                    {
-                        OnRemoveInclude(includeItem.IncludeContext);
-                        includeItem.Dispose();
+                OnRemoveInclude(includeItem.IncludeContext);
+                includeItem.Dispose();
 
-                        _httpServerContext?.Log?.Debug(
-                            I18N.Translate(
-                                "webexpress.webcore:includemanager.removeinclude",
-                                includeItem.IncludeId,
-                                includeItem.ApplicationContext.ApplicationId
-                            )
-                        );
-                    }
-                }
-
-                pluginDict.Remove(applicationContext);
+                _httpServerContext?.Log?.Debug(
+                    I18N.Translate(
+                        "webexpress.webcore:includemanager.removeinclude",
+                        includeItem.IncludeId,
+                        includeItem.ApplicationContext.ApplicationId
+                    )
+                );
             }
         }
 
@@ -341,11 +325,7 @@ namespace WebExpress.WebCore.WebInclude
                 return [];
             }
 
-            return _dictionary.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .Where(x => x.IncludeContext.ApplicationContext.Equals(applicationContext))
-                .Select(x => x.IncludeContext);
+            return [.. _dictionary.GetItems(applicationContext).Select(x => x.IncludeContext)];
         }
 
         /// <summary>
@@ -361,12 +341,7 @@ namespace WebExpress.WebCore.WebInclude
                 return [];
             }
 
-            return _dictionary.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .Where(x => x.IncludeClass.Equals(includeType))
-                .Where(x => x.IncludeContext.ApplicationContext.Equals(applicationContext))
-                .Select(x => x.IncludeContext);
+            return [.. _dictionary.GetItems(applicationContext, includeType).Select(x => x.IncludeContext)];
         }
 
         /// <summary>

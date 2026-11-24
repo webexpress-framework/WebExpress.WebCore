@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebPlugin;
 
@@ -11,17 +12,30 @@ namespace WebExpress.WebCore.WebPage.Model
     /// key = plugin context
     /// value = application context { key = page type, value = page item }
     /// </summary>
+    /// <remarks>
+    /// The package scan adds and removes pages on its own thread while requests look them up, and
+    /// a dictionary written during a read can throw or loop forever. Every member therefore runs
+    /// under one lock and returns a list taken under it, never a query that would read the
+    /// dictionary later, outside the lock.
+    /// </remarks>
     internal class PageDictionary
     {
         private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, Dictionary<Type, PageItem>>> _dict = [];
+        private readonly Lock _lock = new();
 
         /// <summary>
         /// Gets all page contexts.
         /// </summary>
-        public IEnumerable<IPageContext> All => _dict.Values
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x.Values)
-            .Select(x => x.PageContext);
+        public IEnumerable<IPageContext> All
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return [.. Items().Select(x => x.PageContext)];
+                }
+            }
+        }
 
         /// <summary>
         /// Adds a page item to the dictionary.
@@ -39,213 +53,217 @@ namespace WebExpress.WebCore.WebPage.Model
                 return false;
             }
 
-            if (!_dict.TryGetValue(pluginContext, out Dictionary<IApplicationContext, Dictionary<Type, PageItem>> appContextDict))
+            lock (_lock)
             {
-                appContextDict = ([]);
-                _dict[pluginContext] = appContextDict;
-            }
+                if (!_dict.TryGetValue(pluginContext, out var appContextDict))
+                {
+                    appContextDict = [];
+                    _dict[pluginContext] = appContextDict;
+                }
 
-            if (!appContextDict.TryGetValue(applicationContext, out Dictionary<Type, PageItem> pageDict))
-            {
-                pageDict = ([]);
-                appContextDict[applicationContext] = pageDict;
-            }
+                if (!appContextDict.TryGetValue(applicationContext, out var pageDict))
+                {
+                    pageDict = [];
+                    appContextDict[applicationContext] = pageDict;
+                }
 
-            if (!pageDict.ContainsKey(type))
-            {
-                pageDict[type] = pageItem;
-                return true;
+                return pageDict.TryAdd(type, pageItem);
             }
-
-            return false;
         }
 
         /// <summary>
-        /// Removes all page from the dictionary.
+        /// Removes all pages of a plugin and disposes them.
         /// </summary>
+        /// <remarks>
+        /// The removed items are collected before they leave the dictionary; a query read after the
+        /// removal found nothing, so no page was disposed and no remove event fired, which left the
+        /// endpoints of a removed plugin to anyone listening for the removal.
+        /// </remarks>
         /// <param name="pluginContext">The plugin context.</param>
-        public IEnumerable<IPageContext> RemovePage(IPluginContext pluginContext)
+        /// <returns>The page contexts that were removed.</returns>
+        public IReadOnlyList<IPageContext> RemovePage(IPluginContext pluginContext)
         {
-            var removed = GetPageItems(pluginContext);
+            List<PageItem> removed;
 
-            _dict.Remove(pluginContext);
-
-            foreach (var item in removed)
+            lock (_lock)
             {
-                item.Dispose();
+                if (pluginContext is null || !_dict.Remove(pluginContext, out var appContextDict))
+                {
+                    return [];
+                }
+
+                removed = [.. appContextDict.Values.SelectMany(x => x.Values)];
             }
 
-            return removed.Select(x => x.PageContext);
+            return Dispose(removed);
         }
 
         /// <summary>
-        /// Removes all page from the dictionary.
+        /// Removes all pages of an application and disposes them.
         /// </summary>
         /// <param name="applicationContext">The application context.</param>
-        public IEnumerable<IPageContext> RemovePage(IApplicationContext applicationContext)
+        /// <returns>The page contexts that were removed.</returns>
+        public IReadOnlyList<IPageContext> RemovePage(IApplicationContext applicationContext)
         {
-            var removed = GetPageItems(applicationContext);
+            var removed = new List<PageItem>();
 
-            foreach (var applicationDict in _dict.Values)
+            lock (_lock)
             {
-                applicationDict.Remove(applicationContext);
+                foreach (var (pluginContext, appContextDict) in _dict.ToList())
+                {
+                    if (!appContextDict.Remove(applicationContext, out var pageDict))
+                    {
+                        continue;
+                    }
+
+                    if (appContextDict.Count == 0)
+                    {
+                        _dict.Remove(pluginContext);
+                    }
+
+                    removed.AddRange(pageDict.Values);
+                }
             }
 
-            foreach (var item in removed)
-            {
-                item.Dispose();
-            }
-
-            return removed.Select(x => x.PageContext);
+            return Dispose(removed);
         }
 
         /// <summary>
         /// Returns the page items associated with the specified plugin context.
         /// </summary>
-        /// <param name="pluginContext">The plugin context to retrieve page items for.</param>
-        /// <returns>An IEnumerable of <see cref="PageItem"/> associated with the specified application context.</returns>
+        /// <param name="pluginContext">The plugin context.</param>
+        /// <returns>The page items.</returns>
         public IEnumerable<PageItem> GetPageItems(IPluginContext pluginContext)
         {
-            return _dict.Where(x => x.Key.Equals(pluginContext))
-                .Select(x => x.Value)
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values);
+            lock (_lock)
+            {
+                return pluginContext is not null && _dict.TryGetValue(pluginContext, out var appContextDict)
+                    ? [.. appContextDict.Values.SelectMany(x => x.Values)]
+                    : [];
+            }
         }
 
         /// <summary>
         /// Returns the page items associated with the specified application context.
         /// </summary>
-        /// <param name="applicationContext">The application context to retrieve page items for.</param>
-        /// <returns>An IEnumerable of <see cref="PageItem"/> associated with the specified application context.</returns>
+        /// <param name="applicationContext">The application context.</param>
+        /// <returns>The page items.</returns>
         public IEnumerable<PageItem> GetPageItems(IApplicationContext applicationContext)
         {
-            return _dict.Values
-                .SelectMany(x => x)
-                .Where(x => x.Key.Equals(applicationContext))
-                .SelectMany(x => x.Value)
-                .Select(x => x.Value);
+            lock (_lock)
+            {
+                return [.. _dict.Values
+                    .SelectMany(x => x)
+                    .Where(x => x.Key.Equals(applicationContext))
+                    .SelectMany(x => x.Value.Values)];
+            }
         }
 
         /// <summary>
         /// Returns the page item associated with the specified page context.
         /// </summary>
-        /// <param name="pageContext">The context of the page to retrieve.</param>
-        /// <returns>The <see cref="PageItem"/> associated with the specified page context, or null if no such item exists.</returns>
+        /// <param name="pageContext">The page context.</param>
+        /// <returns>The page item, or null.</returns>
         public PageItem GetPageItem(IPageContext pageContext)
         {
-            return _dict.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .FirstOrDefault(x => x.PageContext.Equals(pageContext));
+            lock (_lock)
+            {
+                return Items().FirstOrDefault(x => x.PageContext.Equals(pageContext));
+            }
         }
 
         /// <summary>
         /// Returns the page items from the dictionary for a specific application context and page type.
         /// </summary>
         /// <param name="applicationContext">The application context.</param>
-        /// <param name="pageType">The type of the page.</param>
-        /// <returns>An IEnumerable of page items.</returns>
+        /// <param name="pageType">The page type.</param>
+        /// <returns>The page items.</returns>
         public IEnumerable<PageItem> GetPageItems(IApplicationContext applicationContext, Type pageType)
         {
-            if (!typeof(IPage).IsAssignableFrom(pageType))
+            if (!typeof(IPage).IsAssignableFrom(pageType) || applicationContext?.PluginContext is null)
             {
                 return [];
             }
 
-            if (_dict.ContainsKey(applicationContext?.PluginContext))
+            lock (_lock)
             {
-                var appContextDict = _dict[applicationContext?.PluginContext];
-
-                if (appContextDict.TryGetValue(applicationContext, out Dictionary<Type, PageItem> pageDict))
-                {
-                    if (pageDict.TryGetValue(pageType, out PageItem value))
-                    {
-                        return [value];
-                    }
-                }
+                return _dict.TryGetValue(applicationContext.PluginContext, out var appContextDict)
+                    && appContextDict.TryGetValue(applicationContext, out var pageDict)
+                    && pageDict.TryGetValue(pageType, out var value)
+                    ? [value]
+                    : [];
             }
-
-            return [];
         }
 
         /// <summary>
         /// Returns an enumeration of all containing page contexts of a plugin.
         /// </summary>
-        /// <param name="pluginContext">A context of a plugin whose pages are to be registered.</param>
-        /// <returns>An enumeration of page contexts.</returns>
+        /// <param name="pluginContext">The plugin context.</param>
+        /// <returns>The page contexts.</returns>
         public IEnumerable<IPageContext> GetPages(IPluginContext pluginContext)
         {
-            if (_dict.TryGetValue(pluginContext, out var pluginResources))
-            {
-                return pluginResources
-                    .SelectMany(x => x.Value)
-                    .Select(x => x.Value.PageContext);
-            }
-
-            return [];
+            return [.. GetPageItems(pluginContext).Select(x => x.PageContext)];
         }
 
         /// <summary>
         /// Returns an enumeration of page contextes.
         /// </summary>
         /// <param name="pageType">The page type.</param>
-        /// <returns>An enumeration of page contextes.</returns>
+        /// <returns>The page contexts.</returns>
         public IEnumerable<IPageContext> GetPages(Type pageType)
         {
-            return _dict.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .Where(x => x.PageClass.Equals(pageType))
-                .Select(x => x.PageContext);
+            lock (_lock)
+            {
+                return [.. Items()
+                    .Where(x => x.PageClass.Equals(pageType))
+                    .Select(x => x.PageContext)];
+            }
         }
 
         /// <summary>
         /// Returns an enumeration of page contextes.
         /// </summary>
         /// <param name="pageType">The page type.</param>
-        /// <param name="applicationContext">The context of the application.</param>
-        /// <returns>An enumeration of page contextes.</returns>
+        /// <param name="applicationContext">The application context.</param>
+        /// <returns>The page contexts.</returns>
         public IEnumerable<IPageContext> GetPages(Type pageType, IApplicationContext applicationContext)
         {
-            return _dict.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .Where(x => x.PageClass.Equals(pageType))
-                .Where(x => x.PageContext.ApplicationContext.Equals(applicationContext))
-                .Select(x => x.PageContext);
+            lock (_lock)
+            {
+                return [.. Items()
+                    .Where(x => x.PageClass.Equals(pageType))
+                    .Where(x => x.PageContext.ApplicationContext.Equals(applicationContext))
+                    .Select(x => x.PageContext)];
+            }
         }
 
         /// <summary>
         /// Returns an enumeration of page contextes.
         /// </summary>
         /// <typeparam name="TPage">The page type.</typeparam>
-        /// <param name="applicationContext">The context of the application.</param>
-        /// <returns>An enumeration of page contextes.</returns>
+        /// <param name="applicationContext">The application context.</param>
+        /// <returns>The page contexts.</returns>
         public IEnumerable<IPageContext> GetPages<TPage>(IApplicationContext applicationContext) where TPage : IPage
         {
-            return _dict.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .Where(x => x.PageClass.Equals(typeof(TPage)))
-                .Where(x => x.PageContext.ApplicationContext.Equals(applicationContext))
-                .Select(x => x.PageContext);
+            return GetPages(typeof(TPage), applicationContext);
         }
 
         /// <summary>
         /// Returns the page context.
         /// </summary>
-        /// <param name="applicationContext">The context of the application.</param>
+        /// <param name="applicationContext">The application context.</param>
         /// <param name="pageId">The page id.</param>
-        /// <returns>An page context or null.</returns>
+        /// <returns>The page context, or null.</returns>
         public IPageContext GetPage(IApplicationContext applicationContext, string pageId)
         {
-            return _dict.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .Where(x => x.PageContext.ApplicationContext.Equals(applicationContext))
-                .Where(x => x.PageContext.EndpointId.Equals(pageId))
-                .Select(x => x.PageContext)
-                .FirstOrDefault();
+            lock (_lock)
+            {
+                return Items()
+                    .Where(x => x.PageContext.ApplicationContext.Equals(applicationContext))
+                    .Where(x => x.PageContext.EndpointId.Equals(pageId))
+                    .Select(x => x.PageContext)
+                    .FirstOrDefault();
+            }
         }
 
         /// <summary>
@@ -253,16 +271,17 @@ namespace WebExpress.WebCore.WebPage.Model
         /// </summary>
         /// <param name="applicationId">The application id.</param>
         /// <param name="pageId">The page id.</param>
-        /// <returns>An page context or null.</returns>
+        /// <returns>The page context, or null.</returns>
         public IPageContext GetPage(string applicationId, string pageId)
         {
-            return _dict.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .Where(x => x.PageContext.ApplicationContext.ApplicationId.Equals(applicationId))
-                .Where(x => x.PageContext.EndpointId.Equals(pageId))
-                .Select(x => x.PageContext)
-                .FirstOrDefault();
+            lock (_lock)
+            {
+                return Items()
+                    .Where(x => x.PageContext.ApplicationContext.ApplicationId.Equals(applicationId))
+                    .Where(x => x.PageContext.EndpointId.Equals(pageId))
+                    .Select(x => x.PageContext)
+                    .FirstOrDefault();
+            }
         }
 
         /// <summary>
@@ -272,7 +291,10 @@ namespace WebExpress.WebCore.WebPage.Model
         /// <returns>True if the plugin context exists in the dictionary, otherwise false.</returns>
         public bool Contains(IPluginContext pluginContext)
         {
-            return _dict.ContainsKey(pluginContext);
+            lock (_lock)
+            {
+                return pluginContext is not null && _dict.ContainsKey(pluginContext);
+            }
         }
 
         /// <summary>
@@ -283,7 +305,38 @@ namespace WebExpress.WebCore.WebPage.Model
         /// <returns>True if the plugin context and application context exist in the dictionary, otherwise false.</returns>
         public bool Contains(IPluginContext pluginContext, IApplicationContext applicationContext)
         {
-            return _dict.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
+            lock (_lock)
+            {
+                return pluginContext is not null && applicationContext is not null
+                    && _dict.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
+            }
+        }
+
+        /// <summary>
+        /// Enumerates all page items; called under the lock only.
+        /// </summary>
+        /// <returns>The page items.</returns>
+        private IEnumerable<PageItem> Items()
+        {
+            return _dict.Values
+                .SelectMany(x => x.Values)
+                .SelectMany(x => x.Values);
+        }
+
+        /// <summary>
+        /// Disposes removed page items outside the lock, so a page's own clean-up cannot block the
+        /// lookups of other requests.
+        /// </summary>
+        /// <param name="removed">The removed page items.</param>
+        /// <returns>Their page contexts.</returns>
+        private static IReadOnlyList<IPageContext> Dispose(List<PageItem> removed)
+        {
+            foreach (var item in removed)
+            {
+                item.Dispose();
+            }
+
+            return [.. removed.Select(x => x.PageContext)];
         }
     }
 }

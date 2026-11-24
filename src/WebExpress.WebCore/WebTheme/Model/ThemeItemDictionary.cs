@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebPlugin;
 
@@ -8,16 +9,29 @@ namespace WebExpress.WebCore.WebTheme.Model
     /// <summary>
     /// Represents a dictionary that stores theme items based on plugin and application contexts.
     /// </summary>
+    /// <remarks>
+    /// The package scan adds and removes themes on its own thread while every page render reads
+    /// them, and a dictionary written during a read can throw or loop forever. Every member
+    /// therefore runs under one lock and returns a list taken under it.
+    /// </remarks>
     internal class ThemeItemDictionary
     {
         private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, List<ThemeItem>>> _dictionary = [];
+        private readonly Lock _lock = new();
 
         /// <summary>
         /// Gets all theme items.
         /// </summary>
-        public IEnumerable<ThemeItem> All => _dictionary.Values
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x);
+        public IEnumerable<ThemeItem> All
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return [.. _dictionary.Values.SelectMany(x => x.Values).SelectMany(x => x)];
+                }
+            }
+        }
 
         /// <summary>
         /// Adds a theme item to the dictionary.
@@ -35,32 +49,32 @@ namespace WebExpress.WebCore.WebTheme.Model
                 return false;
             }
 
-            if (!_dictionary.ContainsKey(pluginContext))
+            lock (_lock)
             {
-                _dictionary[pluginContext] = [];
+                if (!_dictionary.TryGetValue(pluginContext, out var appContextDict))
+                {
+                    appContextDict = [];
+                    _dictionary[pluginContext] = appContextDict;
+                }
+
+                if (!appContextDict.TryGetValue(applicationContext, out var themeList))
+                {
+                    themeList = [];
+                    appContextDict[applicationContext] = themeList;
+                }
+
+                themeList.RemoveAll(x => x.ThemeContext?.ThemeId == themeItem.ThemeContext.ThemeId);
+                themeList.Add(themeItem);
+
+                return true;
             }
-
-            var appContextDict = _dictionary[pluginContext];
-
-            if (!appContextDict.TryGetValue(applicationContext, out List<ThemeItem> value))
-            {
-                value = [];
-                appContextDict[applicationContext] = value;
-            }
-
-            var assetList = value;
-
-            assetList.RemoveAll(x => x.ThemeContext?.ThemeId == themeItem.ThemeContext.ThemeId);
-            assetList.Add(themeItem);
-
-            return true;
         }
 
         /// <summary>
-        /// Removes all resources associated with the specified plugin context.
+        /// Removes all themes associated with the specified plugin context and disposes them.
         /// </summary>
         /// <param name="pluginContext">The context of the plugin that contains the resources to remove.</param>
-        /// <returns>An enumeration of theme contexts that were removed.</returns>
+        /// <returns>The theme contexts that were removed.</returns>
         public IEnumerable<IThemeContext> Remove(IPluginContext pluginContext)
         {
             if (pluginContext is null)
@@ -68,31 +82,27 @@ namespace WebExpress.WebCore.WebTheme.Model
                 return [];
             }
 
-            // the plugin has not been registered in the manager
-            if (_dictionary.TryGetValue(pluginContext, out var value))
-            {
-                var items = value.Values
-                    .SelectMany(x => x)
-                    .ToList();
+            List<ThemeItem> items;
 
-                foreach (var assetItem in items)
+            lock (_lock)
+            {
+                // the plugin has not been registered in the manager
+                if (!_dictionary.Remove(pluginContext, out var value))
                 {
-                    assetItem.Dispose();
+                    return [];
                 }
 
-                _dictionary.Remove(pluginContext);
-
-                return items.Select(x => x.ThemeContext);
+                items = [.. value.Values.SelectMany(x => x)];
             }
 
-            return [];
+            return Dispose(items);
         }
 
         /// <summary>
-        /// Removes all themes associated with the specified application context.
+        /// Removes all themes associated with the specified application context and disposes them.
         /// </summary>
         /// <param name="applicationContext">The context of the application that contains the resources to remove.</param>
-        /// <returns>An enumeration of theme contexts that were removed.</returns>
+        /// <returns>The theme contexts that were removed.</returns>
         internal IEnumerable<IThemeContext> Remove(IApplicationContext applicationContext)
         {
             if (applicationContext is null)
@@ -100,23 +110,20 @@ namespace WebExpress.WebCore.WebTheme.Model
                 return [];
             }
 
-            var removedThemes = new List<IThemeContext>();
+            var items = new List<ThemeItem>();
 
-            foreach (var pluginDict in _dictionary.Values)
+            lock (_lock)
             {
-                foreach (var themeList in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
+                foreach (var pluginDict in _dictionary.Values)
                 {
-                    foreach (var assetItem in themeList)
+                    if (pluginDict.Remove(applicationContext, out var themeList))
                     {
-                        removedThemes.Add(assetItem.ThemeContext);
-                        assetItem.Dispose();
+                        items.AddRange(themeList);
                     }
                 }
-
-                pluginDict.Remove(applicationContext);
             }
 
-            return removedThemes;
+            return Dispose(items);
         }
 
         /// <summary>
@@ -126,7 +133,10 @@ namespace WebExpress.WebCore.WebTheme.Model
         /// <returns>True if the plugin context exists in the dictionary, otherwise false.</returns>
         public bool ContainsPlugin(IPluginContext pluginContext)
         {
-            return _dictionary.ContainsKey(pluginContext);
+            lock (_lock)
+            {
+                return pluginContext is not null && _dictionary.ContainsKey(pluginContext);
+            }
         }
 
         /// <summary>
@@ -137,12 +147,11 @@ namespace WebExpress.WebCore.WebTheme.Model
         /// <returns>True if the application context exists in the dictionary, otherwise false.</returns>
         public bool ContainsApplication(IPluginContext pluginContext, IApplicationContext applicationContext)
         {
-            if (_dictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext))
+            lock (_lock)
             {
-                return true;
+                return pluginContext is not null && applicationContext is not null
+                    && _dictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
             }
-
-            return false;
         }
 
         /// <summary>
@@ -152,19 +161,18 @@ namespace WebExpress.WebCore.WebTheme.Model
         /// <returns>An IEnumerable of theme items</returns>
         public IEnumerable<ThemeItem> GetThemeItems(IApplicationContext applicationContext)
         {
-            if (_dictionary.ContainsKey(applicationContext?.PluginContext))
+            if (applicationContext?.PluginContext is null)
             {
-                var appContextDict = _dictionary[applicationContext?.PluginContext];
-
-                if (appContextDict.TryGetValue(applicationContext, out List<ThemeItem> value))
-                {
-                    var assetList = value;
-
-                    return assetList;
-                }
+                return [];
             }
 
-            return [];
+            lock (_lock)
+            {
+                return _dictionary.TryGetValue(applicationContext.PluginContext, out var appContextDict)
+                    && appContextDict.TryGetValue(applicationContext, out var themeList)
+                    ? [.. themeList]
+                    : [];
+            }
         }
 
         /// <summary>
@@ -174,14 +182,17 @@ namespace WebExpress.WebCore.WebTheme.Model
         /// <returns>An enumeration of theme contexts.</returns>
         public IEnumerable<IThemeContext> GetThemes(IPluginContext pluginContext)
         {
-            if (_dictionary.TryGetValue(pluginContext, out var pluginResources))
+            if (pluginContext is null)
             {
-                return pluginResources
-                    .SelectMany(x => x.Value)
-                    .Select(x => x.ThemeContext);
+                return [];
             }
 
-            return [];
+            lock (_lock)
+            {
+                return _dictionary.TryGetValue(pluginContext, out var pluginResources)
+                    ? [.. pluginResources.SelectMany(x => x.Value).Select(x => x.ThemeContext)]
+                    : [];
+            }
         }
 
         /// <summary>
@@ -191,11 +202,30 @@ namespace WebExpress.WebCore.WebTheme.Model
         /// <returns>An enumeration of theme contextes.</returns>
         public IEnumerable<IThemeContext> GetThemes(IApplicationContext applicationContext)
         {
-            return _dictionary.Values
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x)
-                .Where(x => x.ThemeContext.ApplicationContext.Equals(applicationContext))
-                .Select(x => x.ThemeContext);
+            lock (_lock)
+            {
+                return [.. _dictionary.Values
+                    .SelectMany(x => x.Values)
+                    .SelectMany(x => x)
+                    .Where(x => x.ThemeContext.ApplicationContext.Equals(applicationContext))
+                    .Select(x => x.ThemeContext)];
+            }
+        }
+
+        /// <summary>
+        /// Disposes removed theme items outside the lock, so their clean-up cannot block the
+        /// page renders of other requests.
+        /// </summary>
+        /// <param name="items">The removed theme items.</param>
+        /// <returns>Their theme contexts.</returns>
+        private static List<IThemeContext> Dispose(List<ThemeItem> items)
+        {
+            foreach (var item in items)
+            {
+                item.Dispose();
+            }
+
+            return [.. items.Select(x => x.ThemeContext)];
         }
     }
 }
