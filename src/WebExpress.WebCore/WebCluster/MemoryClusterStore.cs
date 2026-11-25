@@ -113,6 +113,21 @@ namespace WebExpress.WebCore.WebCluster
         }
 
         /// <summary>
+        /// Removes an entry only while it still holds the given value.
+        /// </summary>
+        /// <param name="scope">The group the entry belongs to.</param>
+        /// <param name="key">The key of the entry within its scope.</param>
+        /// <param name="expected">The value the entry must hold.</param>
+        /// <returns>True when the entry held the value and was removed.</returns>
+        public bool RemoveIf(string scope, string key, byte[] expected)
+        {
+            return _entries.TryGetValue((scope, key), out var entry)
+                && IsLive(entry)
+                && entry.Value.AsSpan().SequenceEqual(expected)
+                && _entries.TryRemove(new KeyValuePair<(string, string), Entry>((scope, key), entry));
+        }
+
+        /// <summary>
         /// Returns every live entry of a scope and drops the expired ones on the way.
         /// </summary>
         /// <param name="scope">The group to list.</param>

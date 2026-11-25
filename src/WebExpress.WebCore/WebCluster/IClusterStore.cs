@@ -59,6 +59,24 @@ namespace WebExpress.WebCore.WebCluster
         bool Remove(string scope, string key);
 
         /// <summary>
+        /// Removes an entry only while it still holds the given value, atomically across every
+        /// instance.
+        /// </summary>
+        /// <remarks>
+        /// Releasing a lock read the owner and then removed the entry; in between the lock could
+        /// expire and be taken over, and the release removed the new owner's lock. The default
+        /// keeps that window for stores that cannot compare and delete in one step.
+        /// </remarks>
+        /// <param name="scope">The group the entry belongs to.</param>
+        /// <param name="key">The key of the entry within its scope.</param>
+        /// <param name="expected">The value the entry must hold.</param>
+        /// <returns>True when the entry held the value and was removed.</returns>
+        bool RemoveIf(string scope, string key, byte[] expected)
+        {
+            return Get(scope, key) is { } value && value.AsSpan().SequenceEqual(expected) && Remove(scope, key);
+        }
+
+        /// <summary>
         /// Returns every live entry of a scope. Meant for small scopes - global notifications, the
         /// history of one chat channel - since every entry is read.
         /// </summary>

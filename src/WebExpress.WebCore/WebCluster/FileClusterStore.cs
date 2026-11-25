@@ -185,6 +185,55 @@ namespace WebExpress.WebCore.WebCluster
         /// </summary>
         /// <param name="scope">The group to list.</param>
         /// <returns>The keys and values of the live entries.</returns>
+        /// <summary>
+        /// Removes an entry only while it still holds the given value: the entry is first moved
+        /// aside, so no other instance can replace it while it is compared, and handed back when
+        /// it turns out to be another's.
+        /// </summary>
+        /// <param name="scope">The group the entry belongs to.</param>
+        /// <param name="key">The key of the entry within its scope.</param>
+        /// <param name="expected">The value the entry must hold.</param>
+        /// <returns>True when the entry held the value and was removed.</returns>
+        public bool RemoveIf(string scope, string key, byte[] expected)
+        {
+            var path = EntryPath(scope, key);
+            var taken = path + "." + Guid.NewGuid().ToString("N") + ".stale";
+
+            try
+            {
+                File.Move(path, taken, false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // nothing there, or another instance moved it first
+                return false;
+            }
+
+            var entry = Read(taken);
+
+            if (entry is not null && IsLive(entry.Value.Expires) && entry.Value.Value.AsSpan().SequenceEqual(expected))
+            {
+                TryDelete(taken);
+
+                return true;
+            }
+
+            // not ours: handed back unless a newer entry took the place meanwhile
+            try
+            {
+                if (!TryPublish(taken, path))
+                {
+                    TryDelete(taken);
+                }
+            }
+            catch (IOException)
+            {
+                TryDelete(taken);
+            }
+
+            return false;
+        }
+
         public IEnumerable<KeyValuePair<string, byte[]>> List(string scope)
         {
             var result = new List<KeyValuePair<string, byte[]>>();
