@@ -120,7 +120,23 @@ namespace WebExpress.WebCore.WebIdentity
         /// <returns>The verified access identity, or null when validation fails.</returns>
         public IIdentity ValidateAccessToken(string token, IApplicationContext applicationContext)
         {
-            return ReadIdentity(ValidateToken(token, applicationContext, "access"));
+            var jwt = ValidateToken(token, applicationContext, "access");
+
+            if (jwt is null)
+            {
+                return null;
+            }
+
+            // a revoked grant - signed out, or a replayed refresh credential - ended only its
+            // renewal, and a copied access cookie stayed valid until it expired; it ends now.
+            // without a store nothing can be revoked, and access stays stateless as designed
+            if (jwt.TryGetPayloadValue<string>("grant", out var grant) && !string.IsNullOrEmpty(grant)
+                && CredentialStore(jwt, applicationContext) is { } store && store.IsRevoked("grant:" + grant))
+            {
+                return null;
+            }
+
+            return ReadIdentity(jwt);
         }
 
         /// <summary>

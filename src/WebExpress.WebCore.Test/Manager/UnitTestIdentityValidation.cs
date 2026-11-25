@@ -34,6 +34,7 @@ namespace WebExpress.WebCore.Test.Manager
             var outsideGroup = manager.ValidateAccessToken(pair.AccessToken, c);
             var current = manager.GetCurrentIdentity(request);
             var renewed = manager.Refresh(pair.RefreshToken, b);
+            var renewedAccess = manager.ValidateAccessToken(renewed.AccessToken, a);
             var renewedAgain = manager.Refresh(pair.RefreshToken, a);
 
             // validation
@@ -41,8 +42,10 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.Null(outsideGroup);
             Assert.Equal("alice", current?.Name);
             Assert.NotNull(renewed);
-            Assert.NotNull(manager.ValidateAccessToken(renewed.AccessToken, a));
+            Assert.NotNull(renewedAccess);
             Assert.Null(renewedAgain);
+            // the replay revoked the grant, which ends its access credentials as well
+            Assert.Null(manager.ValidateAccessToken(renewed.AccessToken, a));
         }
 
         /// <summary>

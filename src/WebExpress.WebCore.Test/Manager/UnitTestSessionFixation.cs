@@ -30,5 +30,26 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.NotEqual(before, afterLogin);
             Assert.NotEqual(afterLogin, session.Id);
         }
+
+        /// <summary>
+        /// Verifies that signing out ends the access credential at once: a copied access cookie
+        /// stayed valid until it expired, since the revoked grant only stopped its renewal.
+        /// </summary>
+        [Fact]
+        public void LogoutEndsTheAccessCredential()
+        {
+            // arrange
+            using var fixture = new AuthenticationFixture();
+            var pair = fixture.Manager.Issue(MockIdentityFactory.GetIdentity("Alice"), fixture.Application);
+            var request = fixture.Request($"Cookie: {WebExpress.WebCore.WebIdentity.IdentityManager.AccessCookieName}={pair.AccessToken}\r\n");
+            var before = fixture.Manager.ValidateAccessToken(pair.AccessToken, fixture.Application);
+
+            // act
+            fixture.Manager.Logout(request);
+
+            // validation
+            Assert.NotNull(before);
+            Assert.Null(fixture.Manager.ValidateAccessToken(pair.AccessToken, fixture.Application));
+        }
     }
 }
