@@ -1188,6 +1188,12 @@ namespace WebExpress.WebCore
             // failure while that response is being sent must not be counted a second time
             var stopwatch = Stopwatch.StartNew();
 
+            // resolved once through the trusted proxies, so every limit downstream keys on the client
+            if (httpContext?.Request is RequestBase resolved)
+            {
+                resolved.ClientAddress = ClientResolver.Resolve(resolved);
+            }
+
             try
             {
                 if (_isStopping)

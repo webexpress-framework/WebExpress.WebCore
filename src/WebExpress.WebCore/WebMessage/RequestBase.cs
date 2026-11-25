@@ -78,6 +78,18 @@ namespace WebExpress.WebCore.WebMessage
         public EndPoint RemoteEndPoint { get; private set; }
 
         /// <summary>
+        /// Gets the address of the client the request came from, resolved by the server through
+        /// its trusted proxies; without a resolution, the address of the connection.
+        /// </summary>
+        public IPAddress ClientAddress
+        {
+            get => _clientAddress ?? (RemoteEndPoint as IPEndPoint)?.Address;
+            internal set => _clientAddress = value;
+        }
+
+        private IPAddress _clientAddress;
+
+        /// <summary>
         /// Gets a boolean value that indicates whether the tcp connection used to send the request uses the secure sockets layer (ssl) protocol.
         /// </summary>
         public bool IsSecureConnection { get; private set; }

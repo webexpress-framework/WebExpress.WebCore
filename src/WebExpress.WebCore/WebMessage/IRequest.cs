@@ -65,6 +65,13 @@ namespace WebExpress.WebCore.WebMessage
         EndPoint RemoteEndPoint { get; }
 
         /// <summary>
+        /// Gets the address of the client the request came from: behind a trusted proxy the
+        /// forwarded origin, otherwise the address of the connection. Rate limits and lockouts key
+        /// on it, since the connection address of every proxied request is the proxy.
+        /// </summary>
+        IPAddress ClientAddress => (RemoteEndPoint as IPEndPoint)?.Address;
+
+        /// <summary>
         /// Gets a boolean value that indicates whether the tcp connection used to send the request uses the secure sockets layer (ssl) protocol.
         /// </summary>
         bool IsSecureConnection { get; }
