@@ -22,6 +22,16 @@ namespace WebExpress.WebCore.WebMessage
     public abstract class RequestBase : IRequest
     {
         private readonly ParameterDictionary _param = [];
+
+        /// <summary>
+        /// Gets or sets the most distinct parameters one request may carry.
+        /// </summary>
+        /// <remarks>
+        /// Query, form and text bodies are split into parameters by the client's say; without a
+        /// bound a single body of short pairs grew a dictionary of hundreds of thousands of
+        /// entries. Further keys are dropped; a repeated key still replaces its earlier value.
+        /// </remarks>
+        public static int MaxParameters { get; set; } = 1024;
         private Session _session;
 
         internal Session ExistingSession { get => _session; set => _session = value; }
@@ -147,7 +157,7 @@ namespace WebExpress.WebCore.WebMessage
             RequestTraceIdentifier = requestIdentifierFeature.TraceIdentifier;
             Protocol = requestFeature.Protocol;
 
-            Scheme = requestFeature.Scheme.ToLower() switch
+            Scheme = requestFeature.Scheme.ToLowerInvariant() switch
             {
                 "http" => UriScheme.Http,
                 "https" => UriScheme.Https,
@@ -228,7 +238,7 @@ namespace WebExpress.WebCore.WebMessage
             {
                 foreach (var param in property.Params)
                 {
-                    AddParameter(new Parameter(param.Key?.ToLower(), param.Value.Value, ParameterScope.Session));
+                    AddParameter(new Parameter(param.Key?.ToLowerInvariant(), param.Value.Value, ParameterScope.Session));
                 }
             }
         }
@@ -251,9 +261,14 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="param">The parameter.</param>
         public void AddParameter(Parameter param)
         {
-            var key = param.Key.ToLower();
+            var key = param.Key?.ToLowerInvariant();
 
-            if (!_param.TryAdd(key, param))
+            if (key is null)
+            {
+                return;
+            }
+
+            if (_param.ContainsKey(key) || _param.Count < MaxParameters)
             {
                 _param[key] = param;
             }
@@ -268,7 +283,7 @@ namespace WebExpress.WebCore.WebMessage
         {
             if (!string.IsNullOrWhiteSpace(name) && HasParameter(name))
             {
-                return _param[name.ToLower()];
+                return _param[name.ToLowerInvariant()];
             }
 
             return null;
@@ -286,7 +301,7 @@ namespace WebExpress.WebCore.WebMessage
 
             if (!string.IsNullOrWhiteSpace(key) && HasParameter(key))
             {
-                var p = _param[key.ToLower()];
+                var p = _param[key.ToLowerInvariant()];
 
                 var parameter = new TParameter
                 {
@@ -312,7 +327,7 @@ namespace WebExpress.WebCore.WebMessage
                 return false;
             }
 
-            return _param.ContainsKey(name.ToLower());
+            return _param.ContainsKey(name.ToLowerInvariant());
         }
     }
 }

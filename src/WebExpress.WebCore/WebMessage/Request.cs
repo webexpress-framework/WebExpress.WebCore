@@ -354,6 +354,19 @@ namespace WebExpress.WebCore.WebMessage
 
             Parameter last = null;
 
+            // continuation lines are gathered and written once: appending each one to the value
+            // copied the whole value per line, quadratic in a body of many short lines
+            var continuation = new StringBuilder();
+
+            void Flush()
+            {
+                if (last is not null && continuation.Length > 0)
+                {
+                    last.Value += continuation.ToString();
+                    continuation.Clear();
+                }
+            }
+
             foreach (var line in lines)
             {
                 var trimmed = line.TrimEnd('\r');
@@ -361,15 +374,17 @@ namespace WebExpress.WebCore.WebMessage
                 var match = TextRegex().Match(trimmed);
                 if (match.Success)
                 {
+                    Flush();
                     last = new Parameter(match.Groups[1].Value, match.Groups[2].Value, ParameterScope.Parameter);
                     AddParameter(last);
                 }
-                else
+                else if (last is not null)
                 {
-                    last?.Value += "\r\n" + trimmed;
+                    continuation.Append("\r\n").Append(trimmed);
                 }
             }
 
+            Flush();
             last?.Value = last.Value.TrimEnd();
         }
 
