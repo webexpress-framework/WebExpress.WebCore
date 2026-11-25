@@ -112,7 +112,7 @@ namespace WebExpress.WebCore.Test.Manager
         /// never throws.
         /// </summary>
         [Fact]
-        public void ReadingPagesWhilePluginsChange()
+        public async Task ReadingPagesWhilePluginsChange()
         {
             // arrange
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
@@ -140,7 +140,7 @@ namespace WebExpress.WebCore.Test.Manager
             stop.Cancel();
 
             // validation
-            reader.Wait(TestContext.Current.CancellationToken);
+            await reader.WaitAsync(TestContext.Current.CancellationToken);
             Assert.True(reader.IsCompletedSuccessfully);
         }
     }
