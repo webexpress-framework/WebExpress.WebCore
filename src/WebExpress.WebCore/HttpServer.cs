@@ -275,9 +275,9 @@ namespace WebExpress.WebCore
             (
                 _webHost.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value
             );
-            serverOptions.Value.AllowSynchronousIO = kestrel?.AllowSynchronousIO ?? true;
+            serverOptions.Value.AllowSynchronousIO = kestrel?.AllowSynchronousIO ?? false;
             serverOptions.Value.AllowResponseHeaderCompression = kestrel?.AllowResponseHeaderCompression ?? true;
-            serverOptions.Value.AddServerHeader = kestrel?.AddServerHeader ?? true;
+            serverOptions.Value.AddServerHeader = kestrel?.AddServerHeader ?? false;
 
             var limits = serverOptions.Value.Limits;
 
