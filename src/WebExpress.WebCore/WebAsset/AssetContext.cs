@@ -58,7 +58,13 @@ namespace WebExpress.WebCore.WebAsset
         /// <summary>
         /// Gets the collection of identity policies for the endpoint.
         /// </summary>
-        public IEnumerable<IIdentityPolicy> Policies => [];
+        /// <remarks>
+        /// Assets are the scripts, styles and images of the framework and its plugins, which a
+        /// login page needs before anybody is signed in, so they are public.
+        /// </remarks>
+        public IEnumerable<IIdentityPolicy> Policies => [_public];
+
+        private static readonly IIdentityPolicy _public = new WebPolicies.PublicAccessPolicy();
 
         /// <summary>
         /// Initializes a new instance of the class with the specified endpoint manager, parent type, context path, and path segment.

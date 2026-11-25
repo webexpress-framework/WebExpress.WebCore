@@ -490,9 +490,18 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="identity">The identity to check.</param>
         /// <param name="endpointContext">The endpoint context containing the policies to evaluate.</param>
         /// <returns>True if the identity has the permission, false otherwise.</returns>
+        /// <remarks>
+        /// An endpoint without a policy requires a signed-in caller; a policy that could not be
+        /// created (null) denies access. Access is never granted by the absence of a rule.
+        /// </remarks>
         public bool CheckAccess(IIdentity identity, IEndpointContext endpointContext)
         {
-            var policies = endpointContext.Policies ?? [];
+            var policies = endpointContext?.Policies?.ToList() ?? [];
+
+            if (policies.Count == 0)
+            {
+                return identity is not null;
+            }
 
             return policies.All(x => CheckAccess(identity, x));
         }
@@ -505,6 +514,12 @@ namespace WebExpress.WebCore.WebIdentity
         /// <returns>True if the identity is assigned to a group that contains the policy, false otherwise.</returns>
         public bool CheckAccess(IIdentity identity, IIdentityPolicy policy)
         {
+            // a public endpoint answers everybody, signed in or not
+            if (policy is WebPolicies.PublicAccessPolicy)
+            {
+                return true;
+            }
+
             if (identity is null || policy is null)
             {
                 return false;

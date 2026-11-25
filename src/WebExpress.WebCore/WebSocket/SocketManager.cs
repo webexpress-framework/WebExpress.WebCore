@@ -305,6 +305,12 @@ namespace WebExpress.WebCore.WebSocket
                 var messageType = SocketMessageType.Text;
                 var maxMessageSize = (ulong?)null;
                 var policies = new List<IIdentityPolicy>();
+                // a class that answers callers who are not signed in says so; an endpoint
+                // without a policy requires a signed-in caller
+                if (typeof(WebEndpoint.IPublicEndpoint).IsAssignableFrom(socketType))
+                {
+                    policies.Add(new WebPolicies.PublicAccessPolicy());
+                }
                 var attributes = socketType.CustomAttributes
                     .Where(x => !x.AttributeType.GetInterfaces().Contains(typeof(IEndpointAttribute)));
 

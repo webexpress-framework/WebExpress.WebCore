@@ -16,6 +16,17 @@ To get started with `WebExpress.WebCore`, use the following guides:
 
 We hope you enjoy using `WebExpress.WebCore` and find it valuable for your projects. Happy coding!
 
+## Access to endpoints
+Access is denied unless it is granted. Every request to a page, REST API, resource or socket is checked against the policies of its endpoint:
+
+- An endpoint without a policy requires a signed-in caller. It used to be served to anybody, so an endpoint that forgot its policy was public.
+- `[Policy<PublicAccessPolicy>]` makes an endpoint public, for example a login page or the API it signs in through. A class implementing `IPublicEndpoint` is public as well; the interface is inherited, which a base class such as the login page of an application template needs, since attributes are read from the concrete class only.
+- `[Policy<AuthenticatedAccessPolicy>]` requires a signed-in caller; any other policy requires a caller whose groups grant it.
+- A policy that cannot be created denies access.
+- Assets (scripts, styles, images of the framework and plugins) are public.
+
+`WebExpress:Security:PublicByDefault` set to `true` serves endpoints without a policy to everybody again. It is meant only for migrating an application whose public endpoints are not yet marked.
+
 ## Health checks
 
 The container health endpoint is documented in the [Health model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#health-model) section of the Development Guide. WebCore provides `/health` globally, and applications contribute critical dependency checks as public sealed `IHealth` components in `WebExpress.WebCore.WebHealth`. The `HealthManager` discovers these components through the plugin and application lifecycle. The guide includes the component model, a database example, the HTTP contract, and Docker and Kubernetes probe configuration.

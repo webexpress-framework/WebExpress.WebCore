@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Hosting.Server;
+﻿using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -124,7 +124,7 @@ namespace WebExpress.WebCore.Test.Server
             var previousHub = WebEx.ComponentHub;
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock(externalUri: externalUri))
             {
-                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }] }
+                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }], Security = new SecuritySettings { PublicByDefault = true } }
             };
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock(server.HttpServerContext);
             using var client = new ClientWebSocket();
@@ -223,7 +223,7 @@ namespace WebExpress.WebCore.Test.Server
             var previousHub = WebEx.ComponentHub;
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
             {
-                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }] }
+                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }], Security = new SecuritySettings { PublicByDefault = true } }
             };
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock(server.HttpServerContext);
             using var client = new ClientWebSocket();

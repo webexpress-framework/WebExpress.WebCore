@@ -1481,9 +1481,12 @@ namespace WebExpress.WebCore
                 request.EndpointContext = searchResult.EndpointContext;
             }
 
-            // no policies (null or empty) -> serve without an access check; a websocket upgrade
-            // is checked here too, otherwise an endpoint's policies would only guard plain requests
-            if (searchResult.EndpointContext.Policies?.Any() ?? false)
+            // every endpoint is checked, a websocket upgrade included: an endpoint without a policy
+            // requires a signed-in caller - it was served to anybody before, so an endpoint that
+            // forgot its policy was public - unless the settings still allow that for a migration
+            var publicByDefault = (Settings?.Security?.PublicByDefault ?? false) && !(searchResult.EndpointContext.Policies?.Any() ?? false);
+
+            if (!publicByDefault)
             {
                 var identity = WebEx.ComponentHub.IdentityManager.GetCurrentIdentity(httpContext.Request);
 

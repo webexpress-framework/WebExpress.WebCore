@@ -119,7 +119,11 @@ namespace WebExpress.WebCore.Test.Server
             try
             {
                 UnitTestFixture.BindComponentHub(null);
-                var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
+                var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
+                {
+                    // the endpoint under test carries no policy; the response, not the access, is tested
+                    Settings = new HttpServerSettings { Security = new SecuritySettings { PublicByDefault = true } }
+                };
                 componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
                 componentHub.SitemapManager.Refresh();
                 var context = UnitTestFixture.CreateHttpContextMock($"GET {path} HTTP/1.1\r\nCookie:\r\n\r\n");

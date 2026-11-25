@@ -190,6 +190,12 @@ namespace WebExpress.WebCore.WebResource
                 var conditions = new List<ICondition>();
                 var cache = false;
                 var policies = new List<IIdentityPolicy>();
+                // a class that answers callers who are not signed in says so; an endpoint
+                // without a policy requires a signed-in caller
+                if (typeof(WebEndpoint.IPublicEndpoint).IsAssignableFrom(resourceType))
+                {
+                    policies.Add(new WebPolicies.PublicAccessPolicy());
+                }
                 var attributes = resourceType.CustomAttributes
                     .Where(x => !x.AttributeType.GetInterfaces().Contains(typeof(IEndpointAttribute)) &&
                                 !x.AttributeType.GetInterfaces().Contains(typeof(IPageAttribute)));

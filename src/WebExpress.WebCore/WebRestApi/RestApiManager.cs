@@ -416,6 +416,12 @@ namespace WebExpress.WebCore.WebRestApi
                 var versionSegment = match.Success ? match.Groups[0].Value.Replace(".", "") : "";
                 var version = match.Success && uint.TryParse(match.Groups[1].Value, out var result) ? result : 1u;
                 var policies = new List<IIdentityPolicy>();
+                // a class that answers callers who are not signed in says so; an endpoint
+                // without a policy requires a signed-in caller
+                if (typeof(WebEndpoint.IPublicEndpoint).IsAssignableFrom(restApiType))
+                {
+                    policies.Add(new WebPolicies.PublicAccessPolicy());
+                }
                 var attributes = restApiType.CustomAttributes
                     .Where(x => !x.AttributeType.GetInterfaces().Contains(typeof(IEndpointAttribute)) &&
                                 !x.AttributeType.GetInterfaces().Contains(typeof(IPageAttribute)));
