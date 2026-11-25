@@ -118,7 +118,8 @@ namespace WebExpress.WebCore.Test.Manager
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
             var plugin = componentHub.PluginManager.GetPlugin(typeof(TestPlugin));
             var pageManager = componentHub.PageManager as PageManager;
-            using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            stop.CancelAfter(TimeSpan.FromSeconds(2));
             var register = typeof(PageManager).GetMethod("Register", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, [typeof(WebExpress.WebCore.WebPlugin.IPluginContext)]);
 
             // act
@@ -128,7 +129,7 @@ namespace WebExpress.WebCore.Test.Manager
                 {
                     _ = componentHub.PageManager.Pages.Count();
                 }
-            });
+            }, TestContext.Current.CancellationToken);
 
             for (var i = 0; i < 50; i++)
             {
@@ -139,7 +140,7 @@ namespace WebExpress.WebCore.Test.Manager
             stop.Cancel();
 
             // validation
-            reader.Wait();
+            reader.Wait(TestContext.Current.CancellationToken);
             Assert.True(reader.IsCompletedSuccessfully);
         }
     }
