@@ -276,9 +276,9 @@ namespace WebExpress.WebCore.WebMessage
                     var bytes = new byte[dataLength];
                     Buffer.BlockCopy(Content, dataStart, bytes, 0, dataLength);
 
-                    AddParameter(new ParameterFile(name, filename, ParameterScope.Parameter)
+                    AddParameter(new ParameterFile(name, SafeFileName(filename), ParameterScope.Parameter)
                     {
-                        ContentType = contentType,
+                        ContentType = SafeContentType(contentType),
                         Data = bytes
                     });
                 }
@@ -290,6 +290,57 @@ namespace WebExpress.WebCore.WebMessage
 
                 pos = nextBoundary;
             }
+        }
+
+        /// <summary>
+        /// Reduces the file name a client declared for an upload to a plain name.
+        /// </summary>
+        /// <remarks>
+        /// The name is chosen by the client. An application that stores the file under it would
+        /// write wherever "../" or an absolute path points, so only the last segment is kept -
+        /// after either kind of separator - without control characters, characters a file system
+        /// reserves, and leading dots or spaces, and at most 255 characters long.
+        /// </remarks>
+        /// <param name="filename">The declared file name.</param>
+        /// <returns>The plain name, or "file" when nothing usable remains.</returns>
+        internal static string SafeFileName(string filename)
+        {
+            var name = (filename ?? string.Empty).Replace('\\', '/');
+            name = name[(name.LastIndexOf('/') + 1)..];
+
+            var builder = new StringBuilder(name.Length);
+            foreach (var c in name)
+            {
+                if (!char.IsControl(c) && c is not ('<' or '>' or ':' or '"' or '|' or '?' or '*'))
+                {
+                    builder.Append(c);
+                }
+            }
+
+            name = builder.ToString().TrimStart('.', ' ').TrimEnd('.', ' ');
+
+            if (name.Length > 255)
+            {
+                name = name[..255];
+            }
+
+            return name.Length > 0 ? name : "file";
+        }
+
+        /// <summary>
+        /// Keeps a declared content type only when it has the form type/subtype; anything else is
+        /// read as application/octet-stream, so no header or markup travels in it.
+        /// </summary>
+        /// <param name="contentType">The declared content type.</param>
+        /// <returns>The content type.</returns>
+        internal static string SafeContentType(string contentType)
+        {
+            var value = contentType?.Split(';')[0].Trim();
+
+            return value is not null && value.Length <= 127
+                && System.Text.RegularExpressions.Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$")
+                ? value.ToLowerInvariant()
+                : "application/octet-stream";
         }
 
         /// <summary>
