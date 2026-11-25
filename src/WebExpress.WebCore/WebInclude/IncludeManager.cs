@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -21,6 +22,7 @@ namespace WebExpress.WebCore.WebInclude
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly IncludeDictionary _dictionary = new();
+        private readonly ConcurrentDictionary<IPluginContext, (HashSet<string> Declared, HashSet<string> Referenced)> _dependencies = new();
 
         /// <summary>
         /// An event that fires when an include is added.
@@ -271,6 +273,9 @@ namespace WebExpress.WebCore.WebInclude
                 return;
             }
 
+            // a plugin loaded again may come with other dependencies
+            _dependencies.TryRemove(pluginContext, out _);
+
             // removed first and announced afterwards, outside the registry's lock
             foreach (var includeItem in _dictionary.Remove(pluginContext))
             {
@@ -325,7 +330,7 @@ namespace WebExpress.WebCore.WebInclude
                 return [];
             }
 
-            return [.. _dictionary.GetItems(applicationContext).Select(x => x.IncludeContext)];
+            return [.. OrderByDependency(_dictionary.GetItems(applicationContext)).Select(x => x.IncludeContext)];
         }
 
         /// <summary>
@@ -341,7 +346,93 @@ namespace WebExpress.WebCore.WebInclude
                 return [];
             }
 
-            return [.. _dictionary.GetItems(applicationContext, includeType).Select(x => x.IncludeContext)];
+            return [.. OrderByDependency(_dictionary.GetItems(applicationContext, includeType)).Select(x => x.IncludeContext)];
+        }
+
+        /// <summary>
+        /// Orders include items so that the includes of a plugin follow those of every plugin it
+        /// builds on. A script extends the classes of the scripts before it and a stylesheet
+        /// overrides the rules before it, so the includes of a plugin must never be linked ahead
+        /// of those of its dependencies. The registry cannot provide that order itself: the
+        /// plugins are enumerated in hash order, which changes with every start of the server.
+        /// </summary>
+        /// <remarks>
+        /// A plugin builds on another when it declares it as a dependency or when its assembly
+        /// references the other plugin's assembly - most plugins only do the latter. Plugins
+        /// without such a relation are ordered by their id, and a cycle is broken in the same
+        /// order, so the result is the same on every start. The includes of one plugin keep
+        /// their registration order.
+        /// </remarks>
+        /// <param name="items">The include items to order.</param>
+        /// <returns>The include items in the order they are to be linked.</returns>
+        private IEnumerable<IncludeItem> OrderByDependency(IReadOnlyList<IncludeItem> items)
+        {
+            var byPlugin = items
+                .GroupBy(x => x.PluginContext)
+                .OrderBy(x => x.Key.PluginId?.ToString(), StringComparer.Ordinal)
+                .ToList();
+
+            if (byPlugin.Count < 2)
+            {
+                return items;
+            }
+
+            var assemblyNames = byPlugin.ToDictionary
+            (
+                x => x.Key,
+                x => x.Key.Assembly?.GetName().Name ?? string.Empty
+            );
+
+            var pending = byPlugin;
+            var ordered = new List<IncludeItem>(items.Count);
+
+            while (pending.Count > 0)
+            {
+                // a plugin is due once none of the plugins still pending is one it builds on
+                var next = pending.FirstOrDefault(x => pending
+                    .Where(other => other != x)
+                    .All(other => !DependsOn(x.Key, other.Key, assemblyNames[other.Key])))
+                    ?? pending[0];
+
+                ordered.AddRange(next);
+                pending.Remove(next);
+            }
+
+            return ordered;
+        }
+
+        /// <summary>
+        /// Determines whether a plugin builds on another plugin.
+        /// </summary>
+        /// <param name="pluginContext">The plugin that may depend on the other.</param>
+        /// <param name="other">The plugin that may be a dependency.</param>
+        /// <param name="otherAssemblyName">The name of the other plugin's assembly.</param>
+        /// <returns>True if the plugin declares or references the other plugin.</returns>
+        private bool DependsOn(IPluginContext pluginContext, IPluginContext other, string otherAssemblyName)
+        {
+            var (declared, referenced) = _dependencies.GetOrAdd(pluginContext, ResolveDependencies);
+
+            return declared.Contains(other.PluginId?.ToString() ?? string.Empty)
+                || referenced.Contains(otherAssemblyName);
+        }
+
+        /// <summary>
+        /// Resolves the plugin ids a plugin declares as dependencies and the names of the
+        /// assemblies its assembly references. Both are fixed for a loaded plugin, so they are
+        /// resolved once instead of on every page render.
+        /// </summary>
+        /// <param name="pluginContext">The plugin context.</param>
+        /// <returns>The declared plugin ids and the referenced assembly names.</returns>
+        private (HashSet<string> Declared, HashSet<string> Referenced) ResolveDependencies(IPluginContext pluginContext)
+        {
+            var declared = ((_componentHub?.PluginManager as PluginManager)?.GetDependencies(pluginContext) ?? [])
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var referenced = (pluginContext.Assembly?.GetReferencedAssemblies() ?? [])
+                .Select(x => x.Name)
+                .Where(x => x is not null)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return (declared, referenced);
         }
 
         /// <summary>
