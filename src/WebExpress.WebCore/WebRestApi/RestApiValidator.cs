@@ -191,7 +191,7 @@ namespace WebExpress.WebCore.WebRestApi
             }
 
             var value = _request.GetParameter(parameter)?.Value;
-            if (!string.IsNullOrWhiteSpace(value) && !System.Text.RegularExpressions.Regex.IsMatch(value, pattern))
+            if (!string.IsNullOrWhiteSpace(value) && !MatchesWithin(value, pattern))
             {
                 _result.Add(
                     message ?? I18N.Translate(_request, "webexpress.webcore:validation.regex_mismatch", parameter),
@@ -630,6 +630,26 @@ namespace WebExpress.WebCore.WebRestApi
             }
 
             return this;
+        }
+
+        /// <summary>
+        /// Matches a client value against a pattern, counting a match that runs too long as a
+        /// mismatch: the value is the client's, and a pattern that backtracks badly on it must not
+        /// hold the request thread.
+        /// </summary>
+        /// <param name="value">The value.</param>
+        /// <param name="pattern">The pattern.</param>
+        /// <returns>True when the value matches in time.</returns>
+        private static bool MatchesWithin(string value, string pattern)
+        {
+            try
+            {
+                return System.Text.RegularExpressions.Regex.IsMatch(value, pattern, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(250));
+            }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
+            {
+                return false;
+            }
         }
     }
 }
