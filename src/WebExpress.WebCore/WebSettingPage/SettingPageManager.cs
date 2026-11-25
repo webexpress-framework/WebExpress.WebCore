@@ -266,7 +266,7 @@ namespace WebExpress.WebCore.WebSettingPage
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(ISettingCategory).Name) is not null))
             {
-                var id = settingCategoryType.FullName?.ToLower();
+                var id = settingCategoryType.FullName?.ToLowerInvariant();
                 var icon = default(IIcon);
                 var name = default(string);
                 var description = default(string);
@@ -345,7 +345,7 @@ namespace WebExpress.WebCore.WebSettingPage
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(ISettingGroup).Name) is not null))
             {
-                var id = settingGroupType.FullName?.ToLower();
+                var id = settingGroupType.FullName?.ToLowerInvariant();
                 var icon = default(IIcon);
                 var name = default(string);
                 var description = default(string);
@@ -436,7 +436,7 @@ namespace WebExpress.WebCore.WebSettingPage
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(ISettingPage<>).Name) is not null))
             {
-                var id = settingPageType.FullName?.ToLower();
+                var id = settingPageType.FullName?.ToLowerInvariant();
                 var title = settingPageType.Name;
                 var segment = default(ISegmentAttribute);
                 var conditions = new List<ICondition>();

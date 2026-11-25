@@ -319,7 +319,7 @@ namespace WebExpress.WebCore.WebPage
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IPage<>).Name) is not null))
             {
-                var id = pageType.FullName?.ToLower();
+                var id = pageType.FullName?.ToLowerInvariant();
                 var segment = default(ISegmentAttribute);
                 var icon = default(Type);
                 var title = pageType.Name;

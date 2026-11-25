@@ -15,7 +15,7 @@
         /// <param name="id">The identifier of the component.</param>
         public ComponentId(string id)
         {
-            _id = id?.ToLower();
+            _id = id?.ToLowerInvariant();
         }
 
         /// <summary>

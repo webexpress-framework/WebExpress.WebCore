@@ -41,7 +41,7 @@ namespace WebExpress.WebCore.WebParameter
         /// <param name="scope">The scope of the parameter.</param>
         public Parameter(string key, Guid value, ParameterScope scope)
         {
-            Key = key.ToLower();
+            Key = key.ToLowerInvariant();
             Value = value.ToString();
             Scope = scope;
         }
@@ -60,7 +60,7 @@ namespace WebExpress.WebCore.WebParameter
         /// <param name="scope">The scope of the parameter.</param>
         public Parameter(string key, string value, ParameterScope scope)
         {
-            Key = key.ToLower();
+            Key = key.ToLowerInvariant();
             Value = value;
             Scope = scope;
         }
@@ -73,7 +73,7 @@ namespace WebExpress.WebCore.WebParameter
         /// <param name="scope">The scope of the parameter.</param>
         public Parameter(string key, int value, ParameterScope scope)
         {
-            Key = key.ToLower();
+            Key = key.ToLowerInvariant();
             Value = value.ToString();
             Scope = scope;
         }
@@ -86,7 +86,7 @@ namespace WebExpress.WebCore.WebParameter
         /// <param name="scope">The scope of the parameter.</param>
         public Parameter(string key, char value, ParameterScope scope)
         {
-            Key = key.ToLower();
+            Key = key.ToLowerInvariant();
             Value = value.ToString();
             Scope = scope;
         }

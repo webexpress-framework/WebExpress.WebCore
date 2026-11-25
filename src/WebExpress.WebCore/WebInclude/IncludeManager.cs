@@ -126,7 +126,7 @@ namespace WebExpress.WebCore.WebInclude
                 .Where(x => x.IsClass && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IInclude).Name) is not null))
             {
-                var id = includeType.FullName?.ToLower();
+                var id = includeType.FullName?.ToLowerInvariant();
                 var cache = false;
                 var scopes = new List<Type>();
                 var files = new List<(TypeInclude, string)>();

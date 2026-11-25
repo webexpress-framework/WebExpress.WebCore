@@ -44,7 +44,7 @@ namespace WebExpress.WebCore.WebUri
         /// <summary>
         /// Gets or sets the id.
         /// </summary>
-        public string Id => VariableName?.ToLower();
+        public string Id => VariableName?.ToLowerInvariant();
 
         /// <summary>
         /// Gets or sets the variable name.

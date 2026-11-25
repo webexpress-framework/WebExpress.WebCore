@@ -102,7 +102,7 @@ namespace WebExpress.WebCore.Internationalization
         /// <param name="pluginId">The id of the plugin to which the internationalization data will be assigned.</param>
         public void Register(Assembly assembly, string pluginId)
         {
-            var assemblyName = assembly.GetName().Name.ToLower();
+            var assemblyName = assembly.GetName().Name.ToLowerInvariant();
             var name = assemblyName + ".internationalization.";
             // resource names are identifiers, not text: a culture-aware comparison would be slow
             // over the thousands of names a plugin embeds, and wrong under e.g. a turkish culture
@@ -110,7 +110,7 @@ namespace WebExpress.WebCore.Internationalization
 
             foreach (var languageResource in resources)
             {
-                var language = languageResource.Split('.').LastOrDefault()?.ToLower();
+                var language = languageResource.Split('.').LastOrDefault()?.ToLowerInvariant();
 
                 var dictItem = Dictionary.GetOrAdd(language, _ => new());
 
@@ -122,7 +122,7 @@ namespace WebExpress.WebCore.Internationalization
                     if (!line.StartsWith('#') && !string.IsNullOrWhiteSpace(line))
                     {
                         var split = line.Split('=');
-                        var key = pluginId?.ToLower() + ":" + split[0]?.Trim().ToLower();
+                        var key = pluginId?.ToLowerInvariant() + ":" + split[0]?.Trim().ToLowerInvariant();
 
                         dictItem.TryAdd(key, string.Join("=", split.Skip(1)));
                     }
@@ -233,7 +233,7 @@ namespace WebExpress.WebCore.Internationalization
         public string Translate(CultureInfo culture, string pluginId, string key)
         {
             var language = culture?.TwoLetterISOLanguageName;
-            var k = string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(pluginId) || key.StartsWith($"{pluginId?.ToLower()}:") ? key?.ToLower() : $"{pluginId?.ToLower()}:{key?.ToLower()}";
+            var k = string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(pluginId) || key.StartsWith($"{pluginId?.ToLowerInvariant()}:") ? key?.ToLowerInvariant() : $"{pluginId?.ToLowerInvariant()}:{key?.ToLowerInvariant()}";
 
             if (string.IsNullOrWhiteSpace(key))
             {

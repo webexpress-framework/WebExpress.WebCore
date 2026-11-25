@@ -168,7 +168,7 @@ namespace WebExpress.WebCore.WebMessage
                 _ => UriScheme.Http
 
             };
-            Method = requestFeature.Method.ToUpper() switch
+            Method = requestFeature.Method.ToUpperInvariant() switch
             {
                 "GET" => RequestMethod.GET,
                 "POST" => RequestMethod.POST,

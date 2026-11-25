@@ -405,7 +405,7 @@ namespace WebExpress.WebCore.WebRestApi
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IRestApi).Name) is not null))
             {
-                var id = restApiType.FullName?.ToLower();
+                var id = restApiType.FullName?.ToLowerInvariant();
                 var segment = default(ISegmentAttribute);
                 var title = restApiType.Name;
                 var contextPath = string.Empty;

@@ -207,12 +207,12 @@ namespace WebExpress.WebCore.WebPlugin
                     var dependencies = dependency is not null
                         ? new List<string>([dependency])
                         : [];
-                    var id = new ComponentId(assembly.GetName().Name.ToLower());
+                    var id = new ComponentId(assembly.GetName().Name.ToLowerInvariant());
                     var pluginContext = new PluginContext()
                     {
                         Assembly = assembly,
                         PluginId = id,
-                        PluginName = assembly.GetName().Name.ToLower(),
+                        PluginName = assembly.GetName().Name.ToLowerInvariant(),
                         Manufacturer = assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company,
                         Copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright,
                         Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,

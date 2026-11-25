@@ -69,7 +69,7 @@ namespace WebExpress.WebCore.WebAsset.Model
                 return null;
             }
 
-            var normalized = requestUri.ToLower().Replace("/", ".");
+            var normalized = requestUri.ToLowerInvariant().Replace("/", ".");
 
             return _dictionary.Values
                 .SelectMany(x => x.Values)

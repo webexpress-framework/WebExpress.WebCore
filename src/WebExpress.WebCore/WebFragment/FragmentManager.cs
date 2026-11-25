@@ -109,7 +109,7 @@ namespace WebExpress.WebCore.WebFragment
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IFragment<,>).Name) is not null))
             {
-                var id = fragmentType.FullName?.ToLower();
+                var id = fragmentType.FullName?.ToLowerInvariant();
                 var scopes = new List<Type>();
                 var sections = new List<Type>();
                 var conditions = new List<ICondition>();

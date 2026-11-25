@@ -83,7 +83,7 @@ namespace WebExpress.WebCore.WebIdentity.Model
         /// <returns>The event element in its string representation.</returns>
         public override string ToString()
         {
-            return $"Policy: '{PolicyClass.FullName.ToLower()}'";
+            return $"Policy: '{PolicyClass.FullName.ToLowerInvariant()}'";
         }
     }
 }

@@ -108,7 +108,7 @@ namespace WebExpress.WebCore.WebApplication
                     x.GetInterface(typeof(IApplication).Name) is not null
                 ))
             {
-                var id = type.FullName?.ToLower();
+                var id = type.FullName?.ToLowerInvariant();
                 var name = type.Name;
                 var icon = string.Empty;
                 var description = string.Empty;

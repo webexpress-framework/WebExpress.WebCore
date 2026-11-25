@@ -194,7 +194,7 @@ namespace WebExpress.WebCore.WebEvent
                     )
                 ))
             {
-                var id = eventHandlerType.FullName?.ToLower();
+                var id = eventHandlerType.FullName?.ToLowerInvariant();
                 var eventType = default(Type);
 
                 foreach (var customAttribute in eventHandlerType.CustomAttributes

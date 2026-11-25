@@ -128,7 +128,7 @@ namespace WebExpress.WebCore.WebEvent.Model
         /// <returns>The event element in its string representation.</returns>
         public override string ToString()
         {
-            return $"Event: '{EventClass.FullName.ToLower()}'";
+            return $"Event: '{EventClass.FullName.ToLowerInvariant()}'";
         }
     }
 }

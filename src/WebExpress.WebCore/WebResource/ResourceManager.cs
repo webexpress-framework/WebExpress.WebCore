@@ -183,7 +183,7 @@ namespace WebExpress.WebCore.WebResource
                 .Where(x => x.GetInterface(typeof(IResource).Name) is not null)
                 .Where(x => x.GetInterface(typeof(IStatusPage).Name) is null))
             {
-                var id = resourceType.FullName?.ToLower();
+                var id = resourceType.FullName?.ToLowerInvariant();
                 var segment = default(ISegmentAttribute);
                 var contextPath = string.Empty;
                 var includeSubPaths = false;

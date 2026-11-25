@@ -144,7 +144,7 @@ namespace WebExpress.WebCore.WebJob
                     x.GetInterface(typeof(IJob).Name) is not null
                 ))
             {
-                var id = job.FullName?.ToLower();
+                var id = job.FullName?.ToLowerInvariant();
 
                 var minute = "*";
                 var hour = "*";

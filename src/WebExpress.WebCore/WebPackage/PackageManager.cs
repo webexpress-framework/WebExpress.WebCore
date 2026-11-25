@@ -2148,7 +2148,7 @@ namespace WebExpress.WebCore.WebPackage
                     .Select(x => x as TargetFrameworkAttribute)
                     .SingleOrDefault();
 
-            return targetFrameworkAttribute.FrameworkDisplayName.Replace(" ", "").ToLower().Replace(".net", "net");
+            return targetFrameworkAttribute.FrameworkDisplayName.Replace(" ", "").ToLowerInvariant().Replace(".net", "net");
         }
 
         /// <summary>

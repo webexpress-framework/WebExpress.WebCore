@@ -73,7 +73,7 @@ namespace WebExpress.WebCore.WebJob
         private static IEnumerable<int> Parse(string value, int minValue, int maxValue)
         {
             var items = new List<int>() as IEnumerable<int>;
-            value = value?.ToLower().Trim();
+            value = value?.ToLowerInvariant().Trim();
 
             if (string.IsNullOrEmpty(value) || value.Equals("*"))
             {

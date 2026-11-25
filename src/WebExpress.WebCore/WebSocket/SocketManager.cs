@@ -297,7 +297,7 @@ namespace WebExpress.WebCore.WebSocket
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterfaces().Where(i => i == typeof(ISocket)).Any()))
             {
-                var id = socketType.FullName?.ToLower();
+                var id = socketType.FullName?.ToLowerInvariant();
                 var includeSubPaths = false;
                 var conditions = new List<ICondition>();
                 var cache = false;
