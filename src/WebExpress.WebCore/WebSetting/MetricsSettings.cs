@@ -17,7 +17,9 @@ namespace WebExpress.WebCore.WebSetting
         /// <summary>
         /// A secret the scraper must send as <c>Authorization: Bearer &lt;token&gt;</c>. The series name
         /// no user, but they do reveal load, login failures and the framework version, so an endpoint
-        /// reachable from outside the cluster should set one. Left unset, an enabled endpoint is open.
+        /// reachable from outside the cluster should set one. Left unset, an enabled endpoint answers
+        /// only scrapers on the same host - a direct loopback request without a forwarding header -
+        /// and refuses every other caller.
         /// </summary>
         public string BearerToken { get; set; }
 

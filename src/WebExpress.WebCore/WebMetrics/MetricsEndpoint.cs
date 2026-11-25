@@ -95,13 +95,17 @@ namespace WebExpress.WebCore.WebMetrics
         /// anyone who can reach the server.
         /// </summary>
         /// <param name="request">The scrape request.</param>
-        /// <param name="token">The configured token, or null when the endpoint is open.</param>
-        /// <returns>True when no token is configured or the request presents it.</returns>
+        /// <param name="token">The configured token, or null.</param>
+        /// <returns>True when the request presents the token, or - without a token - comes directly from this host.</returns>
         private static bool IsAuthorized(IRequest request, string token)
         {
             if (string.IsNullOrEmpty(token))
             {
-                return true;
+                // without a secret only a scraper on this host is answered; a request a proxy
+                // forwarded arrives from the loopback address too, but names its real origin
+                return request.RemoteEndPoint is System.Net.IPEndPoint endPoint
+                    && System.Net.IPAddress.IsLoopback(endPoint.Address)
+                    && string.IsNullOrEmpty(request.Header?.XForwardedFor);
             }
 
             var authorization = request.Header.Authorization;

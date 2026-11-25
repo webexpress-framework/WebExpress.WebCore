@@ -243,5 +243,23 @@ namespace WebExpress.WebCore.Test.Server
                 server.Stop();
             }
         }
+
+        /// <summary>
+        /// Verifies that an endpoint without a token answers only a scraper on this host: a
+        /// request a proxy forwarded names its real origin and is refused.
+        /// </summary>
+        [Fact]
+        public async Task HandleAsync_WithoutToken_AnswersLocalScrapersOnly()
+        {
+            // arrange
+            var hub = UnitTestFixture.CreateComponentHubMock();
+            var forwarded = UnitTestFixture.CreateRequestMock("GET /metrics HTTP/1.1\r\nX-Forwarded-For: 203.0.113.7\r\n\r\n");
+
+            // act
+            var response = await MetricsEndpoint.HandleAsync(forwarded, hub.MetricsManager, null, null, TestContext.Current.CancellationToken);
+
+            // validation
+            Assert.Equal(401, response.Status);
+        }
     }
 }
