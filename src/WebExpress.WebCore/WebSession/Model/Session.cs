@@ -70,8 +70,8 @@ namespace WebExpress.WebCore.WebSession.Model
         public Session(Guid id)
         {
             Id = id;
-            Created = DateTime.Now;
-            Updated = DateTime.Now;
+            Created = DateTime.UtcNow;
+            Updated = DateTime.UtcNow;
 
             Properties = [];
         }

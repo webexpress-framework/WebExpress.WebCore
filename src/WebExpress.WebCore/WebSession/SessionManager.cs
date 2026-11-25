@@ -135,7 +135,7 @@ namespace WebExpress.WebCore.WebSession
                 .Cookies?.FirstOrDefault(x => x.Name.Equals("session", StringComparison.OrdinalIgnoreCase));
 
             var hasId = Guid.TryParse(sessionCookie?.Value, out var id);
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
 
             if (SharedStore is { } store)
             {
@@ -188,12 +188,12 @@ namespace WebExpress.WebCore.WebSession
             if (SharedStore is { } store)
             {
                 var session = Load(store, id);
-                return session is not null && !IsExpired(session, DateTime.Now) ? session : null;
+                return session is not null && !IsExpired(session, DateTime.UtcNow) ? session : null;
             }
 
             lock (_sync)
             {
-                return _dictionary.TryGetValue(id, out var session) && !IsExpired(session, DateTime.Now)
+                return _dictionary.TryGetValue(id, out var session) && !IsExpired(session, DateTime.UtcNow)
                     ? session
                     : null;
             }
@@ -231,7 +231,7 @@ namespace WebExpress.WebCore.WebSession
             {
                 store.Remove(StoreScope, session.Id.ToString());
                 session.Id = id;
-                session.Updated = DateTime.Now;
+                session.Updated = DateTime.UtcNow;
 
                 // written right away: the old id is gone, and a parallel request carrying the new
                 // cookie must find the session before this request has finished
@@ -246,7 +246,7 @@ namespace WebExpress.WebCore.WebSession
                 _dictionary.Remove(session.Id);
                 session.Id = id;
                 _dictionary[id] = session;
-                session.Updated = DateTime.Now;
+                session.Updated = DateTime.UtcNow;
             }
 
             return id;
@@ -289,7 +289,7 @@ namespace WebExpress.WebCore.WebSession
                 return this;
             }
 
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
 
             // collect expired ids under lock to avoid concurrent modifications during enumeration.
             // the query must be materialized (ToList) before removing - otherwise the deferred
@@ -335,7 +335,7 @@ namespace WebExpress.WebCore.WebSession
             }
 
             var ours = SessionSerializer.Serialize(session, ReportUnserializable);
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
 
             if (session.PersistedFingerprint is { } persisted
                 && persisted.AsSpan().SequenceEqual(ours.Fingerprint)
