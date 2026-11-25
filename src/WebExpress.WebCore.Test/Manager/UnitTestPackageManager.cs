@@ -459,6 +459,83 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that the scan holds a file placed in the package directory to the checks of an
+        /// upload: a spec whose plugin path leaves the package was taken in without any check.
+        /// </summary>
+        [Fact]
+        public void ScanRefusesAnInvalidPackage()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                CreatePackageArchive(Path.Combine(packagePath, "escape.wxp"), "escape", "1.0.0", plugins: ["../../evil.dll"]);
+
+                // act
+                packageManager.Scan();
+
+                // validation
+                Assert.DoesNotContain(packageManager.Catalog.Packages, x => x?.File == "escape.wxp");
+            }
+            finally
+            {
+                if (Directory.Exists(packagePath))
+                {
+                    Directory.Delete(packagePath, true);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tests that an archive with more entries than allowed, or declaring more bytes than may
+        /// be unpacked, is refused before anything of it is extracted.
+        /// </summary>
+        [Fact]
+        public void ValidatePackageRefusesOversizedArchives()
+        {
+            // arrange
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var componentHub = UnitTestFixture.CreateComponentHubMock(httpServerContext);
+            var packageManager = componentHub.PackageManager as PackageManager;
+            var packagePath = httpServerContext.PackagePath;
+            var packageFile = Path.Combine(packagePath, "bomb.1.0.0.wxp");
+            var payload = Path.Combine(packagePath, "payload.bin");
+
+            try
+            {
+                Directory.CreateDirectory(packagePath);
+                File.WriteAllBytes(payload, new byte[64 * 1024]);
+                CreatePackageArchive(packageFile, "bomb", "1.0.0", files: new Dictionary<string, string> { ["lib/payload.bin"] = payload });
+
+                // act
+                packageManager.MaxPackageEntries = 2;
+                var tooMany = packageManager.ValidatePackage(packageFile);
+                packageManager.MaxPackageEntries = 10_000;
+                packageManager.MaxExtractedBytes = 1024;
+                var tooLarge = packageManager.ValidatePackage(packageFile);
+                packageManager.MaxExtractedBytes = 1024L * 1024 * 1024;
+                var fine = packageManager.ValidatePackage(packageFile);
+
+                // validation
+                Assert.False(tooMany.IsValid);
+                Assert.False(tooLarge.IsValid);
+                Assert.True(fine.IsValid);
+            }
+            finally
+            {
+                if (Directory.Exists(packagePath))
+                {
+                    Directory.Delete(packagePath, true);
+                }
+            }
+        }
+
+        /// <summary>
         /// Tests package SHA-256 verification support.
         /// </summary>
         [Fact]
