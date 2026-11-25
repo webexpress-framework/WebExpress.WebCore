@@ -14,10 +14,18 @@ namespace WebExpress.WebCore.WebAsset
     /// </summary>
     public class Asset : IAsset
     {
-        // the address of an asset carries no version, so a copy reused without asking would keep
+        // the address of a plain asset carries no version, so a copy reused without asking would keep
         // an outdated script after every deployment; the entity tag makes revalidation a cheap 304
-        private const string CacheControl = "no-cache";
+        private const string CacheControlRevalidate = "no-cache";
 
+        // the address of a versioned asset carries a hash of its content, so a changed file is a new
+        // address and a copy of the old one never goes stale
+        private const string CacheControlImmutable = "public, max-age=31536000, immutable";
+
+        // the number of hex digits of the content hash that make up the version in an address
+        private const int VersionLength = 12;
+
+        private readonly string _cacheControl;
         private readonly IComponentHub _componentHub;
         private readonly IAssetContext _assetContext;
         private readonly IHttpServerContext _httpServerContext;
@@ -55,12 +63,16 @@ namespace WebExpress.WebCore.WebAsset
 
             var assembly = _assetContext.PluginContext.Assembly;
 
+            _cacheControl = _assetContext is AssetContext { Version: not null }
+                ? CacheControlImmutable
+                : CacheControlRevalidate;
+
             // an asset is immutable embedded content, so its content type and entity tag are
             // resolved once instead of on every request.
             _contentType = ContentTypeExtensions.ToContentType(Path.GetExtension(_assetContext.EndpointId?.ToString()));
             _payload = new(() =>
             {
-                var data = GetData(assembly);
+                var data = ReadResource(assembly, _embeddedResource);
 
                 return (data, ComputeETag(data));
             });
@@ -85,7 +97,7 @@ namespace WebExpress.WebCore.WebAsset
             if (!string.IsNullOrEmpty(eTag) && string.Equals(request?.Header?.IfNoneMatch, eTag, StringComparison.Ordinal))
             {
                 var notModified = new ResponseNotModified();
-                notModified.Header.CacheControl = CacheControl;
+                notModified.Header.CacheControl = _cacheControl;
                 notModified.Header.AddCustomHeader("ETag", eTag);
 
                 return notModified;
@@ -112,7 +124,7 @@ namespace WebExpress.WebCore.WebAsset
                 if (range is (var start, var end))
                 {
                     var partial = new ResponsePartialContent();
-                    partial.Header.CacheControl = CacheControl;
+                    partial.Header.CacheControl = _cacheControl;
                     partial.Header.ContentLength = (int)(end - start + 1);
                     partial.Header.ContentType = _contentType.GetMimeType();
                     partial.Header.AddCustomHeader("Accept-Ranges", "bytes");
@@ -129,7 +141,7 @@ namespace WebExpress.WebCore.WebAsset
             }
 
             var response = new ResponseOK();
-            response.Header.CacheControl = CacheControl;
+            response.Header.CacheControl = _cacheControl;
             response.Header.ContentLength = data.Length;
             response.Header.ContentType = _contentType.GetMimeType();
             response.Content = data;
@@ -158,18 +170,19 @@ namespace WebExpress.WebCore.WebAsset
         }
 
         /// <summary>
-        /// Reads the data of a specified resource.
+        /// Reads the data of an embedded resource.
         /// </summary>
         /// <param name="assembly">The assembly.</param>
+        /// <param name="embeddedResource">The embedded resource name.</param>
         /// <returns>The data.</returns>
-        private byte[] GetData(Assembly assembly)
+        internal static byte[] ReadResource(Assembly assembly, string embeddedResource)
         {
-            if (assembly is null || _embeddedResource is null)
+            if (assembly is null || embeddedResource is null)
             {
                 return [];
             }
 
-            using var stream = assembly.GetManifestResourceStream(_embeddedResource);
+            using var stream = assembly.GetManifestResourceStream(embeddedResource);
 
             if (stream is null)
             {
@@ -260,14 +273,37 @@ namespace WebExpress.WebCore.WebAsset
         /// <returns>A quoted ETag value, or null when there is no payload.</returns>
         private static string ComputeETag(byte[] data)
         {
+            var hash = ComputeHash(data);
+
+            return hash is null ? null : "\"" + hash + "\"";
+        }
+
+        /// <summary>
+        /// Computes the content hash of an asset.
+        /// </summary>
+        /// <param name="data">The asset payload.</param>
+        /// <returns>The hash as lower case hex digits, or null when there is no payload.</returns>
+        private static string ComputeHash(byte[] data)
+        {
             if (data is null || data.Length == 0)
             {
                 return null;
             }
 
-            // a content hash is used so the tag changes if and only if the payload changes; SHA-1 is
+            // a content hash is used so the value changes if and only if the payload changes; SHA-1 is
             // chosen for speed because the value is a cache validator, not a security token.
-            return "\"" + Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant() + "\"";
+            return Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Computes the version an address of the asset carries, so that a changed file is
+        /// served from a new address.
+        /// </summary>
+        /// <param name="data">The asset payload.</param>
+        /// <returns>The version, or null when there is no payload.</returns>
+        internal static string ComputeVersion(byte[] data)
+        {
+            return ComputeHash(data)?[..VersionLength];
         }
 
         /// <summary>

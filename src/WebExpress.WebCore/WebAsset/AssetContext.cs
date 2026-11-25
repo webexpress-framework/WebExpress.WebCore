@@ -51,6 +51,13 @@ namespace WebExpress.WebCore.WebAsset
         public IRoute Route { get; internal set; }
 
         /// <summary>
+        /// Gets the hash of the content the address of this asset carries, or null for an asset
+        /// whose address has no version. A versioned address never serves another content, so
+        /// the asset is delivered with a cache lifetime of a year.
+        /// </summary>
+        public string Version { get; internal set; }
+
+        /// <summary>
         /// Gets the attributes associated with the page.
         /// </summary>
         public IEnumerable<Attribute> Attributes => [];

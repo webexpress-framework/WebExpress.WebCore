@@ -1,4 +1,5 @@
 ﻿using System;
+using WebExpress.WebCore.WebEndpoint;
 
 namespace WebExpress.WebCore.WebAsset.Model
 {
@@ -23,6 +24,12 @@ namespace WebExpress.WebCore.WebAsset.Model
         /// Gets the asset context.
         /// </summary>
         public IAssetContext AssetContext { get; internal set; }
+
+        /// <summary>
+        /// Gets the route of the same file with the hash of its content in the name, or null
+        /// when the file has no versioned address.
+        /// </summary>
+        public IRoute VersionedRoute { get; internal set; }
 
         /// <summary>
         /// Initializes a new instance of the class.

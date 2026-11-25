@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
@@ -27,6 +30,11 @@ namespace WebExpress.WebCore.WebAsset
         private readonly IComponentHub _componentHub;
         private readonly IHttpServerContext _httpServerContext;
         private readonly AssetItemDictionary _itemDictionary = new();
+
+        // the files addressed by the hash of their content: the ones a page links
+        private static readonly HashSet<string> VersionedExtensions = new(StringComparer.OrdinalIgnoreCase) { ".js", ".css" };
+
+        private readonly ConcurrentDictionary<(Assembly, string), string> _versions = new();
 
         /// <summary>
         /// An event that fires when an asset is added.
@@ -176,53 +184,146 @@ namespace WebExpress.WebCore.WebAsset
                 if (resource.StartsWith(assemblName + ".Assets.", StringComparison.OrdinalIgnoreCase))
                 {
                     var id = resource[(assemblName.Length + 8)..]?.Replace('\\', '/');
+                    var version = GetVersion(assembly, resource);
+                    var versionedId = version is null ? null : InsertVersion(id, version);
 
                     // assign the asset to existing applications
                     foreach (var (applicationContext, prefix) in prefixes)
                     {
-                        var assetContext = new AssetContext()
-                        {
-                            EndpointId = new ComponentId($"{pluginContext.PluginId}.{id.Replace('/', '.')}"),
-                            PluginContext = pluginContext,
-                            ApplicationContext = applicationContext,
-                            Route = prefix.Concat(id),
-                            IncludeSubPaths = false
-                        };
+                        var versionedRoute = versionedId is null ? null : prefix.Concat(versionedId);
 
-                        var assetItem = new AssetItem(_componentHub?.AssetManager)
+                        if (versionedId is not null)
                         {
-                            AssetClass = typeof(Asset),
-                            AssetContext = assetContext,
-                            Instance = ComponentActivator.CreateInstance<IAsset, IAssetContext>
-                            (
-                                typeof(Asset),
-                                assetContext,
-                                _httpServerContext,
-                                _componentHub,
-                                resource
-                            )
-                        };
-
-                        bool added;
-
-                        lock (_guard)
-                        {
-                            added = _itemDictionary.AddAssetItem(pluginContext, applicationContext, assetItem);
+                            MountAsset(pluginContext, applicationContext, versionedRoute, versionedId, resource, version, null);
                         }
 
-                        if (added)
-                        {
-                            OnAddAsset(assetContext);
-                            _httpServerContext?.Log?.Debug(
-                                I18N.Translate(
-                                    "webexpress.webcore:assetmanager.addresource",
-                                    id,
-                                    applicationContext.ApplicationId
-                                )
-                            );
-                        }
+                        MountAsset(pluginContext, applicationContext, prefix.Concat(id), id, resource, null, versionedRoute);
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Mounts one embedded file of a plugin in an application.
+        /// </summary>
+        /// <param name="pluginContext">The plugin context.</param>
+        /// <param name="applicationContext">The application context.</param>
+        /// <param name="route">The route the file is mounted on.</param>
+        /// <param name="id">The path of the file below the asset directory.</param>
+        /// <param name="resource">The embedded resource name.</param>
+        /// <param name="version">The hash of the content the route carries, or null for a route without one.</param>
+        /// <param name="versionedRoute">The route of the same file that carries the hash, if any.</param>
+        private void MountAsset
+        (
+            IPluginContext pluginContext,
+            IApplicationContext applicationContext,
+            IRoute route,
+            string id,
+            string resource,
+            string version,
+            IRoute versionedRoute
+        )
+        {
+            var assetContext = new AssetContext()
+            {
+                EndpointId = new ComponentId($"{pluginContext.PluginId}.{id.Replace('/', '.')}"),
+                PluginContext = pluginContext,
+                ApplicationContext = applicationContext,
+                Route = route,
+                IncludeSubPaths = false,
+                Version = version
+            };
+
+            var assetItem = new AssetItem(_componentHub?.AssetManager)
+            {
+                AssetClass = typeof(Asset),
+                AssetContext = assetContext,
+                VersionedRoute = versionedRoute,
+                Instance = ComponentActivator.CreateInstance<IAsset, IAssetContext>
+                (
+                    typeof(Asset),
+                    assetContext,
+                    _httpServerContext,
+                    _componentHub,
+                    resource
+                )
+            };
+
+            bool added;
+
+            lock (_guard)
+            {
+                added = _itemDictionary.AddAssetItem(pluginContext, applicationContext, assetItem);
+            }
+
+            if (added)
+            {
+                OnAddAsset(assetContext);
+                _httpServerContext?.Log?.Debug(
+                    I18N.Translate(
+                        "webexpress.webcore:assetmanager.addresource",
+                        id,
+                        applicationContext.ApplicationId
+                    )
+                );
+            }
+        }
+
+        /// <summary>
+        /// Returns the version of an embedded file when scripts and stylesheets are addressed by it.
+        /// Other files are referenced by their plain address, from a stylesheet or by a user, and
+        /// keep it.
+        /// </summary>
+        /// <param name="assembly">The assembly the resource is embedded in.</param>
+        /// <param name="resource">The embedded resource name.</param>
+        /// <returns>The hash of the content, or null when the file has no versioned address.</returns>
+        private string GetVersion(Assembly assembly, string resource)
+        {
+            if (!VersionedExtensions.Contains(Path.GetExtension(resource)))
+            {
+                return null;
+            }
+
+            // a plugin is registered once per application, but its content does not change meanwhile
+            return _versions.GetOrAdd((assembly, resource), key => Asset.ComputeVersion(Asset.ReadResource(key.Item1, key.Item2)));
+        }
+
+        /// <summary>
+        /// Inserts the version before the extension of a file path.
+        /// </summary>
+        /// <param name="id">The path of the file.</param>
+        /// <param name="version">The version.</param>
+        /// <returns>The path with the version in the file name.</returns>
+        private static string InsertVersion(string id, string version)
+        {
+            var extension = Path.GetExtension(id);
+
+            return $"{id[..^extension.Length]}.{version}{extension}";
+        }
+
+        /// <summary>
+        /// Returns the route to link a script or stylesheet of a plugin from. It carries a hash
+        /// of the content in the file name, so the file is served with an immutable cache policy.
+        /// </summary>
+        /// <param name="applicationContext">The context of the application the file is addressed in.</param>
+        /// <param name="pluginContext">The context of the plugin the file belongs to.</param>
+        /// <param name="file">The file path relative to the plugin's mount, as declared on the asset attribute.</param>
+        /// <returns>
+        /// The versioned route of the file; the route of <see cref="GetAssetRoute"/> when the file
+        /// has no versioned address; or null when the arguments do not describe a file.
+        /// </returns>
+        public IRoute GetVersionedAssetRoute(IApplicationContext applicationContext, IPluginContext pluginContext, string file)
+        {
+            var route = GetAssetRoute(applicationContext, pluginContext, file);
+
+            if (route is null)
+            {
+                return null;
+            }
+
+            lock (_guard)
+            {
+                return _itemDictionary.GetByRoute(route.ToString())?.VersionedRoute ?? route;
             }
         }
 

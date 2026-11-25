@@ -18,7 +18,8 @@ namespace WebExpress.WebCore.Test.Manager
         /// Test the refresh function of the sitemap manager.
         /// </summary>
         [Theory]
-        [InlineData(106)]
+        // the 12 scripts and stylesheets are mounted a second time on their versioned address
+        [InlineData(118)]
         public void Refresh(int expected)
         {
             // arrange

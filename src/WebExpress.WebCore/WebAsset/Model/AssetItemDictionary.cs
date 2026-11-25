@@ -20,6 +20,10 @@ namespace WebExpress.WebCore.WebAsset.Model
         // index answers in constant time where a scan over all items dominated the request cpu
         private readonly Dictionary<IAssetContext, AssetItem> _byContext = new(ReferenceEqualityComparer.Instance);
 
+        // a page links every include of its application, so resolving the versioned address of a
+        // file by route must not scan the items either
+        private readonly Dictionary<string, AssetItem> _byRoute = new(System.StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
         /// Gets all asset items.
         /// </summary>
@@ -53,6 +57,17 @@ namespace WebExpress.WebCore.WebAsset.Model
                 .SelectMany(x => x.Values)
                 .FirstOrDefault(x => (x.AssetContext?.EndpointId?.Equals(assetContext.EndpointId) ?? false)
                     && Equals(x.AssetContext.ApplicationContext, assetContext.ApplicationContext));
+        }
+
+        /// <summary>
+        /// Returns the asset item mounted on exactly the given route.
+        /// Callers must synchronize access to this collection.
+        /// </summary>
+        /// <param name="route">The route of the asset.</param>
+        /// <returns>The matching asset item, or null when none is mounted on the route.</returns>
+        public AssetItem GetByRoute(string route)
+        {
+            return route is not null && _byRoute.TryGetValue(route, out var item) ? item : null;
         }
 
         /// <summary>
@@ -111,14 +126,31 @@ namespace WebExpress.WebCore.WebAsset.Model
             // a later asset of the same endpoint replaces the earlier one and is listed last
             if (assetList.Remove(assetItem.AssetContext.EndpointId, out var replaced))
             {
-                _byContext.Remove(replaced.AssetContext);
+                Unindex(replaced);
                 replaced.Dispose();
             }
 
             assetList.Add(assetItem.AssetContext.EndpointId, assetItem);
             _byContext[assetItem.AssetContext] = assetItem;
+            _byRoute[assetItem.AssetContext.Route?.ToString() ?? string.Empty] = assetItem;
 
             return true;
+        }
+
+        /// <summary>
+        /// Removes an asset item from the indexes.
+        /// </summary>
+        /// <param name="assetItem">The asset item.</param>
+        private void Unindex(AssetItem assetItem)
+        {
+            _byContext.Remove(assetItem.AssetContext);
+
+            var route = assetItem.AssetContext.Route?.ToString() ?? string.Empty;
+
+            if (_byRoute.TryGetValue(route, out var indexed) && ReferenceEquals(indexed, assetItem))
+            {
+                _byRoute.Remove(route);
+            }
         }
 
         /// <summary>
@@ -142,7 +174,7 @@ namespace WebExpress.WebCore.WebAsset.Model
 
                 foreach (var assetItem in items)
                 {
-                    _byContext.Remove(assetItem.AssetContext);
+                    Unindex(assetItem);
                     assetItem.Dispose();
                 }
 
@@ -175,7 +207,7 @@ namespace WebExpress.WebCore.WebAsset.Model
                     foreach (var assetItem in assetList.Values)
                     {
                         removedAssets.Add(assetItem.AssetContext);
-                        _byContext.Remove(assetItem.AssetContext);
+                        Unindex(assetItem);
                         assetItem.Dispose();
                     }
                 }
