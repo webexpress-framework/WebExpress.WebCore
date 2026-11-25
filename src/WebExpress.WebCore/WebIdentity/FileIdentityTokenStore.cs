@@ -38,7 +38,7 @@ namespace WebExpress.WebCore.WebIdentity
             // the first sweep waits an interval too: leftovers do no harm until then, and a store that
             // is created and dropped again - a reload, a test - never races a sweep over its directory
             _nextSweepTicks = (_clock.GetUtcNow() + SweepInterval).UtcTicks;
-            Directory.CreateDirectory(_directory);
+            PrivateStorage.CreateDirectory(_directory);
         }
 
         /// <summary>
@@ -52,7 +52,7 @@ namespace WebExpress.WebCore.WebIdentity
             var path = MarkerPath(tokenId);
             try
             {
-                using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+                using (var stream = PrivateStorage.Create(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
                 using (var writer = new StreamWriter(stream))
                 {
                     writer.Write(expiresAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));

@@ -61,17 +61,6 @@
 		</None>
 	</ItemGroup>
 
-	<ItemGroup>
-		<None Update="ufo.ico">
-			<Pack>True</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="WebPermissions\" />
-	</ItemGroup>
-
 	<Target Name="GenerateSbomWithDotnet" AfterTargets="Pack" Condition="'$(MSBuildRuntimeType)' != 'Core' AND '$(IsPackable)' == 'true' AND '$(Configuration)' == 'Release'">
 		<Exec Command="dotnet msbuild &quot;$(MSBuildProjectFullPath)&quot; -nologo -v:m -t:GenerateSbomTarget -p:Configuration=$(Configuration)" />
 	</Target>

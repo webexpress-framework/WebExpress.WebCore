@@ -1545,7 +1545,7 @@ namespace WebExpress.WebCore.WebPackage
             Catalog.DisabledPlugins.Clear();
             Catalog.DisabledPlugins.AddRange(disabled);
 
-            using (var fs = new FileStream(temporary, FileMode.CreateNew))
+            using (var fs = PrivateStorage.Create(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read))
             using (var writer = new XmlTextWriter(fs, Encoding.Unicode))
             {
                 var serializer = new XmlSerializer(typeof(PackageCatalog));
@@ -1991,7 +1991,8 @@ namespace WebExpress.WebCore.WebPackage
                 Directory.CreateDirectory(settingsPath);
 
                 // create-new, so of several instances deploying the same package only one writes
-                using var target = new FileStream(targetFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                // settings deployed from a package often carry credentials
+                using var target = PrivateStorage.Create(targetFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                 target.Write(content);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

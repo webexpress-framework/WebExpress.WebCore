@@ -62,7 +62,7 @@ namespace WebExpress.WebCore.WebCluster
             _clock = timeProvider ?? TimeProvider.System;
             _nextSweepTicks = (_clock.GetUtcNow() + SweepInterval).UtcTicks;
 
-            Directory.CreateDirectory(_directory);
+            PrivateStorage.CreateDirectory(_directory);
         }
 
         /// <summary>
@@ -439,9 +439,9 @@ namespace WebExpress.WebCore.WebCluster
             var expires = (_clock.GetUtcNow() + lifetime).ToUnixTimeMilliseconds();
             var keyBytes = Encoding.UTF8.GetBytes(key);
 
-            Directory.CreateDirectory(directory);
+            PrivateStorage.CreateDirectory(directory);
 
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var stream = PrivateStorage.Create(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             using (var writer = new BinaryWriter(stream))
             {
                 writer.Write(Magic);
