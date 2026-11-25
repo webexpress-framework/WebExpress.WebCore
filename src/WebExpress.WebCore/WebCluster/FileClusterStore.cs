@@ -181,11 +181,6 @@ namespace WebExpress.WebCore.WebCluster
         }
 
         /// <summary>
-        /// Returns every live entry of a scope.
-        /// </summary>
-        /// <param name="scope">The group to list.</param>
-        /// <returns>The keys and values of the live entries.</returns>
-        /// <summary>
         /// Removes an entry only while it still holds the given value: the entry is first moved
         /// aside, so no other instance can replace it while it is compared, and handed back when
         /// it turns out to be another's.
@@ -234,6 +229,11 @@ namespace WebExpress.WebCore.WebCluster
             return false;
         }
 
+        /// <summary>
+        /// Returns every live entry of a scope.
+        /// </summary>
+        /// <param name="scope">The group to list.</param>
+        /// <returns>The keys and values of the live entries.</returns>
         public IEnumerable<KeyValuePair<string, byte[]>> List(string scope)
         {
             var result = new List<KeyValuePair<string, byte[]>>();

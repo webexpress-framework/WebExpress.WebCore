@@ -513,7 +513,7 @@ namespace WebExpress.WebCore.WebHtml.Parser
         /// Tells whether a character is whitespace in the sense of the HTML tokenizer.
         /// </summary>
         /// <remarks>
-        /// Only these five characters separate a tag name and attributes. <see cref="char.IsWhiteSpace"/>
+        /// Only these five characters separate a tag name and attributes. <see cref="char.IsWhiteSpace(char)"/>
         /// also accepts Unicode spaces such as U+00A0, which a browser reads as part of a name:
         /// <c>&lt;img&#xA0;src=x&#xA0;onerror=...&gt;</c> is one inert element to the browser but
         /// was split into an image with an event handler here, and written out as one.
