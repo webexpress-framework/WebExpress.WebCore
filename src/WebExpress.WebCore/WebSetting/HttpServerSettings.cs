@@ -159,6 +159,12 @@ namespace WebExpress.WebCore.WebSetting
         public MetricsSettings Metrics { get; set; }
 
         /// <summary>
+        /// Optional settings of the delivery of scripts and stylesheets. When the block is omitted
+        /// the files of an include are bundled.
+        /// </summary>
+        public AssetSettings Assets { get; set; }
+
+        /// <summary>
         /// The log settings. A missing block keeps logging switched off.
         /// </summary>
         public LogSettings Log { get; set; } = new();

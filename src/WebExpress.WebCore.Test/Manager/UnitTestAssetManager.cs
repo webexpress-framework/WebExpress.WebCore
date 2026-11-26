@@ -22,8 +22,9 @@ namespace WebExpress.WebCore.Test.Manager
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
 
             // act
-            // every script and stylesheet is mounted twice: on its plain and on its versioned address
-            Assert.Equal(24, componentHub.AssetManager.Assets.Count());
+            // every script, stylesheet and image is mounted twice: on its plain and on its versioned
+            // address, and so are the two bundles of the bundled include in each of the three applications
+            Assert.Equal(48, componentHub.AssetManager.Assets.Count());
         }
 
         /// <summary>

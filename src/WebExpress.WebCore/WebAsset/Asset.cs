@@ -40,7 +40,7 @@ namespace WebExpress.WebCore.WebAsset
         /// client asks for few; reading and hashing each one up front made the registration the
         /// bulk of a hub's start. Null once the asset is disposed.
         /// </remarks>
-        private Lazy<(byte[] Data, string ETag)> _payload;
+        private Lazy<AssetPayload> _payload;
 
         /// <summary>
         /// Gets the root directory.
@@ -63,19 +63,14 @@ namespace WebExpress.WebCore.WebAsset
 
             var assembly = _assetContext.PluginContext.Assembly;
 
-            _cacheControl = _assetContext is AssetContext { Version: not null }
-                ? CacheControlImmutable
-                : CacheControlRevalidate;
+            _cacheControl = ResolveCacheControl(_assetContext);
 
             // an asset is immutable embedded content, so its content type and entity tag are
             // resolved once instead of on every request.
-            _contentType = ContentTypeExtensions.ToContentType(Path.GetExtension(_assetContext.EndpointId?.ToString()));
-            _payload = new(() =>
-            {
-                var data = ReadResource(assembly, _embeddedResource);
-
-                return (data, ComputeETag(data));
-            });
+            _contentType = ResolveContentType(_assetContext);
+            // a stylesheet is delivered with the files it addresses rewritten to their
+            // fingerprinted names, the content its own fingerprint is taken from
+            _payload = new(() => new AssetPayload(AssetFingerprint.ReadContent(assembly, _embeddedResource), _contentType));
         }
 
         /// <summary>
@@ -90,83 +85,58 @@ namespace WebExpress.WebCore.WebAsset
                 return new ResponseNotFound();
             }
 
-            var (data, eTag) = payload.Value;
+            var response = payload.Value.Respond(request, _contentType, _cacheControl, _assetContext.EndpointId?.ToString());
 
-            // conditional request: when the client already holds the current version, skip the body
-            // and answer with 304 Not Modified so the cached copy is reused.
-            if (!string.IsNullOrEmpty(eTag) && string.Equals(request?.Header?.IfNoneMatch, eTag, StringComparison.Ordinal))
+            if (response is ResponseOK)
             {
-                var notModified = new ResponseNotModified();
-                notModified.Header.CacheControl = _cacheControl;
-                notModified.Header.AddCustomHeader("ETag", eTag);
-
-                return notModified;
+                _httpServerContext?.Log?.Debug(I18N.Translate
+                (
+                    "webexpress.webcore:asset.file",
+                    request.RemoteEndPoint, request.Uri
+                ));
             }
-
-            // a range of an outdated version would be joined to parts of the current one, so a
-            // mismatching If-Range is answered with the whole file
-            var rangeHeader = request?.Header?.Range;
-            var ifRange = request?.Header?.IfRange;
-
-            if (request?.Method == RequestMethod.GET && !string.IsNullOrWhiteSpace(rangeHeader) &&
-                (string.IsNullOrWhiteSpace(ifRange) || string.Equals(ifRange, eTag, StringComparison.Ordinal)))
-            {
-                var range = ParseRange(rangeHeader, data.LongLength);
-
-                if (range == (-1, -1))
-                {
-                    var notSatisfiable = new ResponseRangeNotSatisfiable();
-                    notSatisfiable.Header.AddCustomHeader("Content-Range", $"bytes */{data.LongLength}");
-
-                    return notSatisfiable;
-                }
-
-                if (range is (var start, var end))
-                {
-                    var partial = new ResponsePartialContent();
-                    partial.Header.CacheControl = _cacheControl;
-                    partial.Header.ContentLength = (int)(end - start + 1);
-                    partial.Header.ContentType = _contentType.GetMimeType();
-                    partial.Header.AddCustomHeader("Accept-Ranges", "bytes");
-                    partial.Header.AddCustomHeader("Content-Range", $"bytes {start}-{end}/{data.LongLength}");
-                    partial.Content = data[(int)start..(int)(end + 1)];
-
-                    if (!string.IsNullOrEmpty(eTag))
-                    {
-                        partial.Header.AddCustomHeader("ETag", eTag);
-                    }
-
-                    return partial;
-                }
-            }
-
-            var response = new ResponseOK();
-            response.Header.CacheControl = _cacheControl;
-            response.Header.ContentLength = data.Length;
-            response.Header.ContentType = _contentType.GetMimeType();
-            response.Content = data;
-
-            // tells media players they may seek by asking for parts; safari plays no video without it
-            response.Header.AddCustomHeader("Accept-Ranges", "bytes");
-
-            if (!string.IsNullOrEmpty(eTag))
-            {
-                response.Header.AddCustomHeader("ETag", eTag);
-            }
-
-            // archives are offered as a download rather than rendered inline
-            if (_contentType == ContentType.Zip)
-            {
-                response.Header.ContentDisposition = $"attachment; filename={_assetContext.EndpointId}; size={data.LongLength}";
-            }
-
-            _httpServerContext?.Log?.Debug(I18N.Translate
-            (
-                "webexpress.webcore:asset.file",
-                request.RemoteEndPoint, request.Uri
-            ));
 
             return response;
+        }
+
+        /// <summary>
+        /// Returns the content of the asset for a bundle. The payload is not created for it: in a
+        /// bundled application the file itself is rarely asked for, and keeping it next to the
+        /// bundle would hold every script twice.
+        /// </summary>
+        /// <returns>The content, empty once the asset is disposed.</returns>
+        internal byte[] ReadContent()
+        {
+            if (_payload is not { } payload)
+            {
+                return [];
+            }
+
+            return payload.IsValueCreated
+                ? payload.Value.Data
+                : AssetFingerprint.ReadContent(_assetContext.PluginContext.Assembly, _embeddedResource);
+        }
+
+        /// <summary>
+        /// Returns the cache policy of the address an asset is served from.
+        /// </summary>
+        /// <param name="assetContext">The asset context.</param>
+        /// <returns>The value of the Cache-Control header.</returns>
+        internal static string ResolveCacheControl(IAssetContext assetContext)
+        {
+            return assetContext is AssetContext { Version: not null }
+                ? CacheControlImmutable
+                : CacheControlRevalidate;
+        }
+
+        /// <summary>
+        /// Returns the content type of an asset, which follows from the extension of its address.
+        /// </summary>
+        /// <param name="assetContext">The asset context.</param>
+        /// <returns>The content type.</returns>
+        internal static ContentType ResolveContentType(IAssetContext assetContext)
+        {
+            return ContentTypeExtensions.ToContentType(Path.GetExtension(assetContext?.EndpointId?.ToString()));
         }
 
         /// <summary>
@@ -271,7 +241,7 @@ namespace WebExpress.WebCore.WebAsset
         /// </summary>
         /// <param name="data">The asset payload.</param>
         /// <returns>A quoted ETag value, or null when there is no payload.</returns>
-        private static string ComputeETag(byte[] data)
+        internal static string ComputeETag(byte[] data)
         {
             var hash = ComputeHash(data);
 

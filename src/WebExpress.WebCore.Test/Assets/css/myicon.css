@@ -1,0 +1,9 @@
+/* This CSS file addresses an image the way the icon set does, for the fingerprint tests. */
+.quoted { mask: url("../img/myicon.svg") no-repeat; }
+.unquoted { background: url( ../img/myicon.svg?v=1#part ); }
+.single { background: url('./../img/myicon.svg'); }
+.data { background: url('data:image/svg+xml;utf8,<svg xmlns="x"/>'); }
+.absolute { background: url(/img/myicon.svg); }
+.external { background: url(https://example.com/img/myicon.svg); }
+.missing { background: url("missing.svg"); }
+.outside { background: url("../../img/myicon.svg"); }

@@ -19,7 +19,7 @@ namespace WebExpress.WebCore.Test.Manager
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
 
             // act
-            Assert.Equal(12, componentHub.IncludeManager.Includes.Count());
+            Assert.Equal(15, componentHub.IncludeManager.Includes.Count());
         }
 
         /// <summary>

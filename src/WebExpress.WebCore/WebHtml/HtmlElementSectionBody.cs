@@ -15,12 +15,15 @@ namespace WebExpress.WebCore.WebHtml
         public new IEnumerable<IHtmlNode> Elements => base.Elements;
 
         /// <summary>
-        /// Gets or sets the script elements.
+        /// Gets or sets the code of scripts that are not files of their own. Like the
+        /// <see cref="ScriptLinks"/> they are deferred, so they run after the deferred files of
+        /// the head they build on.
         /// </summary>
         public List<string> Scripts { get; set; } = [];
 
         /// <summary>
-        /// Gets or sets the text/javascript.
+        /// Gets or sets the links to script files. They are deferred like the ones of the head:
+        /// loaded synchronously at the end of the body, they would run before those.
         /// </summary>
         public List<string> ScriptLinks
         {
@@ -32,7 +35,8 @@ namespace WebExpress.WebCore.WebHtml
                 {
                     Language = "javascript",
                     Src = x,
-                    Type = "text/javascript"
+                    Type = "text/javascript",
+                    Defer = true
                 }));
             }
         }
@@ -82,7 +86,7 @@ namespace WebExpress.WebCore.WebHtml
 
             foreach (var script in Scripts)
             {
-                new HtmlElementScriptingScript(script).ToString(builder, deep + 1);
+                HtmlElementScriptingScript.CreateDeferred(script).ToString(builder, deep + 1);
             }
 
             ToPostString(builder, deep, true);

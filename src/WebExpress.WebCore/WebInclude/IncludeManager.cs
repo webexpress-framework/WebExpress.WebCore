@@ -4,12 +4,16 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using Microsoft.Extensions.Configuration;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
+using WebExpress.WebCore.WebAsset;
 using WebExpress.WebCore.WebAttribute;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebInclude.Model;
+using WebExpress.WebCore.WebMessage;
 using WebExpress.WebCore.WebPlugin;
+using WebExpress.WebCore.WebSetting;
 
 namespace WebExpress.WebCore.WebInclude
 {
@@ -23,6 +27,7 @@ namespace WebExpress.WebCore.WebInclude
         private readonly IHttpServerContext _httpServerContext;
         private readonly IncludeDictionary _dictionary = new();
         private readonly ConcurrentDictionary<IPluginContext, (HashSet<string> Declared, HashSet<string> Referenced)> _dependencies = new();
+        private readonly bool _bundle;
 
         /// <summary>
         /// An event that fires when an include is added.
@@ -49,6 +54,9 @@ namespace WebExpress.WebCore.WebInclude
         {
             _componentHub = componentHub;
             _httpServerContext = httpServerContext;
+            _bundle = httpServerContext?.Configuration?
+                .GetSection(ConfigurationPath.Combine(HttpServerSettings.Section, nameof(HttpServerSettings.Assets)))
+                .Get<AssetSettings>()?.Bundle ?? true;
 
             _componentHub?.PluginManager?.AddPlugin += OnAddPlugin;
             _componentHub?.PluginManager?.RemovePlugin += OnRemovePlugin;
@@ -124,6 +132,10 @@ namespace WebExpress.WebCore.WebInclude
             // registration is the only moment the dead file can still be named.
             var mountedRoutes = new Dictionary<IApplicationContext, HashSet<string>>();
 
+            // every application bound to the plugin mounts the same files, so a bundle is joined
+            // once per registration and mounted in each of them
+            var bundleContents = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var includeType in assembly.GetTypes()
                 .Where(x => x.IsClass && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IInclude).Name) is not null))
@@ -176,7 +188,10 @@ namespace WebExpress.WebCore.WebInclude
                         ApplicationContext = applicationContext,
                         Cache = cache,
                         Scopes = scopes,
-                        Files = includeFiles
+                        Files = includeFiles,
+                        LinkedFiles = _bundle
+                            ? BundleFiles(applicationContext, pluginContext, id, includeFiles, bundleContents)
+                            : includeFiles
                     };
 
                     var includeItem = new IncludeItem(_componentHub)
@@ -268,6 +283,165 @@ namespace WebExpress.WebCore.WebInclude
             }
 
             return mounted;
+        }
+
+        /// <summary>
+        /// Joins the files of an include into bundles and returns what a page links instead of
+        /// the single files.
+        /// </summary>
+        /// <remarks>
+        /// The files of one type are bundled in their declared order: a script builds on the ones
+        /// before it and a stylesheet overrides the rules before it. Scripts and stylesheets are
+        /// loaded independently of one another, so each type forms bundles of its own. A file that
+        /// is not mounted ends a bundle and keeps its place, so it is still resolved when the page
+        /// renders. The order between the includes of different plugins is not affected: it is
+        /// established when the includes are read.
+        /// A stylesheet addresses its images relative to its own address, so stylesheets from
+        /// different directories are not joined - the bundle is mounted in the directory of its
+        /// files and such an address keeps pointing at the same file.
+        /// </remarks>
+        /// <param name="applicationContext">The application the files are linked in.</param>
+        /// <param name="pluginContext">The plugin the files belong to.</param>
+        /// <param name="includeId">The id of the include, which names its bundles.</param>
+        /// <param name="files">The files of the include, in declared order.</param>
+        /// <param name="bundleContents">The contents joined during this registration, by bundle.</param>
+        /// <returns>The bundles and the files that stay single, in the order they are linked.</returns>
+        private IReadOnlyList<IncludeFile> BundleFiles
+        (
+            IApplicationContext applicationContext,
+            IPluginContext pluginContext,
+            string includeId,
+            IReadOnlyList<IncludeFile> files,
+            Dictionary<string, byte[]> bundleContents
+        )
+        {
+            if (_componentHub?.AssetManager is not AssetManager assetManager)
+            {
+                return files;
+            }
+
+            var linked = new List<(int Position, IncludeFile File)>();
+
+            foreach (var type in files.Select(x => x.Type).Distinct())
+            {
+                var run = new List<(int Position, IncludeFile File)>();
+                var bundleCount = 0;
+
+                void Close()
+                {
+                    if (run.Count == 1)
+                    {
+                        linked.Add(run[0]);
+                    }
+                    else if (run.Count > 1)
+                    {
+                        var bundle = MountBundle(assetManager, applicationContext, pluginContext, includeId, type, bundleCount, [.. run.Select(x => x.File)], bundleContents);
+
+                        if (bundle is null)
+                        {
+                            linked.AddRange(run);
+                        }
+                        else
+                        {
+                            linked.Add((run[0].Position, bundle));
+                            bundleCount++;
+                        }
+                    }
+
+                    run.Clear();
+                }
+
+                for (var position = 0; position < files.Count; position++)
+                {
+                    var file = files[position];
+
+                    if (file.Type != type)
+                    {
+                        continue;
+                    }
+
+                    if (file.Route is null)
+                    {
+                        Close();
+                        linked.Add((position, file));
+
+                        continue;
+                    }
+
+                    if (run.Count > 0 && type == TypeInclude.StyleSheet &&
+                        !string.Equals(GetDirectory(run[0].File.FileName), GetDirectory(file.FileName), StringComparison.OrdinalIgnoreCase))
+                    {
+                        Close();
+                    }
+
+                    run.Add((position, file));
+                }
+
+                Close();
+            }
+
+            return [.. linked.OrderBy(x => x.Position).Select(x => x.File)];
+        }
+
+        /// <summary>
+        /// Mounts the joined content of a run of files as a bundle of the plugin.
+        /// </summary>
+        /// <param name="assetManager">The asset manager.</param>
+        /// <param name="applicationContext">The application the bundle is mounted in.</param>
+        /// <param name="pluginContext">The plugin the files belong to.</param>
+        /// <param name="includeId">The id of the include, which names its bundles.</param>
+        /// <param name="type">The type of the files.</param>
+        /// <param name="bundleIndex">The number of bundles of this type the include has so far.</param>
+        /// <param name="files">The files to join, in the order they are linked in.</param>
+        /// <param name="bundleContents">The contents joined during this registration, by bundle.</param>
+        /// <returns>The bundle, or null when it could not be mounted.</returns>
+        private static IncludeFile MountBundle
+        (
+            AssetManager assetManager,
+            IApplicationContext applicationContext,
+            IPluginContext pluginContext,
+            string includeId,
+            TypeInclude type,
+            int bundleIndex,
+            IReadOnlyList<IncludeFile> files,
+            Dictionary<string, byte[]> bundleContents
+        )
+        {
+            var (contentType, extension) = type == TypeInclude.JavaScript
+                ? (ContentType.Js, ".js")
+                : (ContentType.Css, ".css");
+            var suffix = bundleIndex == 0 ? string.Empty : (bundleIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var fileName = $"{GetDirectory(files[0].FileName)}{includeId}.bundle{suffix}{extension}";
+            var key = fileName + "|" + string.Join("|", files.Select(x => x.FileName));
+
+            if (!bundleContents.TryGetValue(key, out var content))
+            {
+                content = AssetBundle.Join(contentType, files.Select(x => assetManager.ReadAssetContent(applicationContext, pluginContext, x.FileName)));
+                bundleContents[key] = content;
+            }
+
+            var route = assetManager.MountBundle(applicationContext, pluginContext, fileName, content);
+
+            return route is null
+                ? null
+                : new IncludeFile()
+                {
+                    Type = type,
+                    FileName = fileName,
+                    Route = route.ToString()
+                };
+        }
+
+        /// <summary>
+        /// Returns the directory part of a file path, including the trailing separator.
+        /// </summary>
+        /// <param name="fileName">The file path as declared on the asset attribute.</param>
+        /// <returns>The directory, empty for a file without one.</returns>
+        private static string GetDirectory(string fileName)
+        {
+            var separator = fileName?.LastIndexOf('/') ?? -1;
+
+            return separator < 0 ? string.Empty : fileName[..(separator + 1)];
         }
 
         /// <summary>

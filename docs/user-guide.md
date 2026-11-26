@@ -54,6 +54,28 @@ The endpoint is switched off by default, because the metrics reveal load and log
 
 The equivalent environment variables are `WEBEXPRESS_WebExpress__Metrics__Enabled` and `WEBEXPRESS_WebExpress__Metrics__BearerToken`. While the endpoint is off, `/metrics` is left to application routing. `Metrics:ActiveUserWindowMinutes` sets how recently a user must have sent an authenticated request to count as active (default `5`).
 
+## Scripts and stylesheets
+
+A page links the files of every include of its application. By default the files of an include are joined into one bundle per type, so a page loads them with a few requests instead of several hundred. A bundle keeps the declared order of its files, sits in the directory of its files (stylesheets from different directories are not joined, so their relative `url()` addresses stay valid) and, like every script and stylesheet, is addressed by the hash of its content and cached for a year. Script files are linked with `defer`: they load while the page is parsed and run in their order before `DOMContentLoaded`. The code a page adds as a script of its own (`AddHeaderScript`, `AddScript`) is deferred as well - it is emitted as a `data:` script carrying the nonce of the response - so it runs after the files it builds on, as it did while they were loaded synchronously.
+
+The images and fonts a stylesheet addresses - the icon set, flags, backgrounds - are cached for a year as well. Every embedded `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, `.ico`, `.bmp`, `.woff`, `.woff2`, `.ttf`, `.otf` and `.eot` file is mounted on its plain address and on one that carries the hash of its content, and a stylesheet is delivered with each relative `url()` of such a file rewritten to the hashed name (`url("../icons/bold.svg")` becomes `url("../icons/bold.<hash>.svg")`). The hash of a stylesheet is taken from that rewritten content, so changing a drawing gives the stylesheet - and the bundle it is part of - a new address on the next start; nothing is edited by hand. Absolute, external and `data:` urls are left as written, and the plain address of every file keeps working for links from elsewhere.
+
+While developing, switch bundling off to link every file on its own, which keeps the file and line of a script error readable:
+
+```json
+{
+  "WebExpress": {
+    "Assets": {
+      "Bundle": false
+    }
+  }
+}
+```
+
+The equivalent environment variable is `WEBEXPRESS_WebExpress__Assets__Bundle`. A file of an include that is not mounted is logged as a warning in both modes.
+
+Scripts, stylesheets and other text assets are answered compressed with brotli or gzip, whichever the client accepts and prefers (`Accept-Encoding`). Each representation is compressed once, on the first request that accepts it, and carries an entity tag of its own; responses name `Vary: Accept-Encoding`. Large content such as a bundle is compressed with brotli in the background, and clients receive gzip until it is done. A range request is always answered from the uncompressed file.
+
 ## Graceful shutdown
 
 The container lifecycle is described in the [Graceful shutdown guide](graceful-shutdown.md). It covers `Shutdown: "graceful"`, the shared drain budget, background synchronization, resource ownership, and Docker and Kubernetes termination settings.

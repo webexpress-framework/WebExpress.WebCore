@@ -18,5 +18,23 @@ namespace WebExpress.WebCore.Test.Html
 
             Assert.Equal(@"<script type=""text/javascript""></script>", html.Trim());
         }
+
+        /// <summary>
+        /// Tests that a deferred script carries the attribute without a value, and loses it again.
+        /// </summary>
+        [Fact]
+        public void Defer()
+        {
+            // arrange
+            var html = new HtmlElementScriptingScript() { Src = "/a.js", Defer = true };
+
+            // act
+            var deferred = html.Trim();
+            html.Defer = false;
+
+            // validation
+            Assert.Equal(@"<script type=""text/javascript"" src=""/a.js"" defer></script>", deferred);
+            Assert.Equal(@"<script type=""text/javascript"" src=""/a.js""></script>", html.Trim());
+        }
     }
 }

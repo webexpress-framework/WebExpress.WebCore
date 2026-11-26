@@ -37,6 +37,11 @@ namespace WebExpress.WebCore.WebInclude
         public IEnumerable<IncludeFile> Files { get; set; } = [];
 
         /// <summary>
+        /// Gets the files a page links for the include, in the order they are to be linked.
+        /// </summary>
+        public IEnumerable<IncludeFile> LinkedFiles { get; set; } = [];
+
+        /// <summary>
         /// Gets or sets the collection of scopes associated with the current context.
         /// </summary>
         /// <remarks>
