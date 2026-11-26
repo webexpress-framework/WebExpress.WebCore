@@ -165,7 +165,8 @@ namespace WebExpress.WebCore.WebApplication
                     DataPath = Path.Combine(_httpServerContext?.DataPath, dataPath),
                     Icon = RouteEndpoint.Combine(_httpServerContext?.Route, contextPath, icon),
                     Route = RouteEndpoint.Combine(_httpServerContext?.Route, contextPath),
-                    DefaultThemeType = defaultThemeType
+                    DefaultThemeType = defaultThemeType,
+                    ResolveAsset = route => _componentHub?.AssetManager?.GetVersionedAssetRoute(route)
                 };
 
                 IApplication applicationInstance;
@@ -418,7 +419,7 @@ namespace WebExpress.WebCore.WebApplication
             // the [Icon] attribute would have carried and never has to assemble a route
             var route = RouteEndpoint.Combine(_httpServerContext?.Route, context.ContextPath, path);
 
-            if (context.Icon?.ToString() == route?.ToString())
+            if (context.DeclaredIconRoute?.ToString() == route?.ToString())
             {
                 return;
             }

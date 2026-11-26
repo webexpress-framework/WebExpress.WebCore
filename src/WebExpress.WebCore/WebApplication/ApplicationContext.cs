@@ -53,10 +53,33 @@ namespace WebExpress.WebCore.WebApplication
         /// </summary>
         public IRoute Route { get; internal set; }
 
+        private IRoute _icon;
+
         /// <summary>
         /// Gets the icon uri.
         /// </summary>
-        public IRoute Icon { get; internal set; }
+        /// <remarks>
+        /// The icon is declared by its plain path, but every page shows it, so while it is a file
+        /// of a plugin this is the address that carries the hash of its content, which the browser
+        /// keeps for good. It is resolved on every read: the file is mounted only after the
+        /// application is registered, and a plugin loaded again brings a new hash.
+        /// </remarks>
+        public IRoute Icon
+        {
+            get => (_icon is not null ? ResolveAsset?.Invoke(_icon.ToString()) : null) ?? _icon;
+            internal set => _icon = value;
+        }
+
+        /// <summary>
+        /// Gets the route of the icon as it is declared, before it is resolved to a versioned file.
+        /// </summary>
+        internal IRoute DeclaredIconRoute => _icon;
+
+        /// <summary>
+        /// Gets or sets the lookup of the versioned route of a file mounted on a plain route,
+        /// supplied by the application manager of the hub the application belongs to.
+        /// </summary>
+        internal Func<string, IRoute> ResolveAsset { get; set; }
 
         /// <summary>
         /// Gets or sets the type of the theme declared via

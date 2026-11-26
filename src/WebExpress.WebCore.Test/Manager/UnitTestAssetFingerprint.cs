@@ -147,6 +147,55 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that a link composed from the plain route of a file - a theme stylesheet, an
+        /// application icon - is resolved to the route carrying its fingerprint, and that a route
+        /// naming no such file is not.
+        /// </summary>
+        [Fact]
+        public void PlainRouteResolvesToTheVersionedOne()
+        {
+            // arrange
+            var componentHub = CreateComponentHub();
+            var (application, plugin) = Resolve(componentHub);
+            var versioned = componentHub.AssetManager.GetVersionedAssetRoute(application, plugin, "/assets/css/myicon.css").ToString();
+
+            // act
+            var resolved = componentHub.AssetManager.GetVersionedAssetRoute("/server/appa/assets/css/myicon.css");
+
+            // validation
+            Assert.Equal(versioned, resolved?.ToString());
+            Assert.Null(componentHub.AssetManager.GetVersionedAssetRoute(versioned));
+            Assert.Null(componentHub.AssetManager.GetVersionedAssetRoute("/server/appa/api/style.css"));
+            Assert.Null(componentHub.AssetManager.GetVersionedAssetRoute(null));
+        }
+
+        /// <summary>
+        /// Tests that the icon of an application, shown on every page, is addressed by its
+        /// fingerprint while it is an embedded file, and by its plain route otherwise.
+        /// </summary>
+        [Fact]
+        public void ApplicationIconIsAddressedByItsFingerprint()
+        {
+            // arrange
+            var componentHub = CreateComponentHub();
+            var (application, _) = Resolve(componentHub);
+            var updates = 0;
+            componentHub.ApplicationManager.UpdateApplication += (_, _) => updates++;
+
+            // act
+            componentHub.ApplicationManager.SetApplicationIcon(application, "/assets/img/myicon.svg");
+            var embedded = application.Icon.ToString();
+            componentHub.ApplicationManager.SetApplicationIcon(application, "/assets/img/myicon.svg");
+            componentHub.ApplicationManager.SetApplicationIcon(application, null);
+            var declared = application.Icon.ToString();
+
+            // validation
+            Assert.Matches(@"^/server/appa/assets/img/myicon\.[0-9a-f]{12}\.svg$", embedded);
+            Assert.Equal("/server/appa/assets/img/Logo.png", declared);
+            Assert.Equal(2, updates);
+        }
+
+        /// <summary>
         /// Tests the resolution of a relative path against the directory of the stylesheet.
         /// </summary>
         [Theory]

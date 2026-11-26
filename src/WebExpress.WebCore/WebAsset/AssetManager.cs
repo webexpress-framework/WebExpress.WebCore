@@ -323,6 +323,25 @@ namespace WebExpress.WebCore.WebAsset
         }
 
         /// <summary>
+        /// Returns the route that carries the hash of the content of the file mounted on a plain
+        /// route.
+        /// </summary>
+        /// <param name="route">The route a file is linked by.</param>
+        /// <returns>The versioned route, or null when no file with a versioned route is mounted on the route.</returns>
+        public IRoute GetVersionedAssetRoute(string route)
+        {
+            if (string.IsNullOrEmpty(route))
+            {
+                return null;
+            }
+
+            lock (_guard)
+            {
+                return _itemDictionary.GetByRoute(route)?.VersionedRoute;
+            }
+        }
+
+        /// <summary>
         /// Returns the content of a file of a plugin as it is mounted in an application, to join it
         /// into a bundle.
         /// </summary>

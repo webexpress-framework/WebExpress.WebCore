@@ -69,5 +69,17 @@ namespace WebExpress.WebCore.WebAsset
         /// has no versioned address; or null when the arguments do not describe a file.
         /// </returns>
         IRoute GetVersionedAssetRoute(IApplicationContext applicationContext, IPluginContext pluginContext, string file);
+
+        /// <summary>
+        /// Returns the route that carries the hash of the content of the file mounted on a plain
+        /// route. A link composed from a plain route - a theme stylesheet, an application icon -
+        /// is turned into one the browser may keep for good.
+        /// </summary>
+        /// <param name="route">The route a file is linked by.</param>
+        /// <returns>
+        /// The versioned route, or null when no file with a versioned route is mounted on the route
+        /// - it addresses something else, such as an endpoint that generates its content.
+        /// </returns>
+        IRoute GetVersionedAssetRoute(string route);
     }
 }
