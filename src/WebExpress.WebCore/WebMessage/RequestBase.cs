@@ -117,24 +117,15 @@ namespace WebExpress.WebCore.WebMessage
         /// <summary>
         /// Gets the culture.
         /// </summary>
-        public CultureInfo Culture
-        {
-            get
-            {
-                try
-                {
-                    // see RFC 5646 
-                    var languages = Header?.AcceptLanguage.FirstOrDefault();
-                    var language = languages?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        /// <remarks>
+        /// Every translation and every date or number format of a render reads it, hundreds of
+        /// times per page, so it is resolved once per request. The instance is the shared,
+        /// read-only one of <see cref="CultureInfo.GetCultureInfo(string)"/>, since it is handed
+        /// to code the request does not control.
+        /// </remarks>
+        public CultureInfo Culture => _culture ??= ResolveCulture();
 
-                    return new CultureInfo(language);
-                }
-                catch
-                {
-                    return HttpServerContext.Culture ?? CultureInfo.CurrentCulture;
-                }
-            }
-        }
+        private CultureInfo _culture;
 
         /// <summary>
         /// Gets the collection of parameters associated with the request.
@@ -226,6 +217,38 @@ namespace WebExpress.WebCore.WebMessage
                     AddParameter(new Parameter(key, value, ParameterScope.Parameter));
                 }
             }
+        }
+
+        /// <summary>
+        /// Determines the culture from the first language the client accepts (see RFC 5646),
+        /// falling back to the culture of the server.
+        /// </summary>
+        /// <remarks>
+        /// curl, health checks and many XHR calls send no Accept-Language; such a request is
+        /// answered from the fallback without an exception, which was thrown and swallowed on
+        /// every read before.
+        /// </remarks>
+        /// <returns>The culture of the request.</returns>
+        private CultureInfo ResolveCulture()
+        {
+            var language = Header?.AcceptLanguage?.FirstOrDefault()?
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+
+            // "*" is the wildcard of the header, not a language
+            if (!string.IsNullOrWhiteSpace(language) && language != "*")
+            {
+                try
+                {
+                    return CultureInfo.GetCultureInfo(language);
+                }
+                catch (CultureNotFoundException)
+                {
+                    // a tag the client may send but the runtime does not know
+                }
+            }
+
+            return HttpServerContext?.Culture ?? CultureInfo.CurrentCulture;
         }
 
         /// <summary>

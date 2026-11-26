@@ -161,7 +161,8 @@ namespace WebExpress.WebCore.WebMessage
             ContentEncoding = requestFeature.Headers.ContentEncoding.Count != 0 ? requestFeature.Headers.ContentEncoding.ToString() : null;
             Accept = requestFeature.Headers.Accept;
             AcceptEncoding = requestFeature.Headers.AcceptEncoding;
-            AcceptLanguage = requestFeature.Headers.AcceptLanguage.SelectMany(x => x.Split(';', StringSplitOptions.RemoveEmptyEntries));
+            // materialized, as a lazy query would split the header again on every read
+            AcceptLanguage = [.. requestFeature.Headers.AcceptLanguage.SelectMany(x => x.Split(';', StringSplitOptions.RemoveEmptyEntries))];
             UserAgent = requestFeature.Headers.UserAgent;
             Referer = requestFeature.Headers.Referer;
             Origin = requestFeature.Headers.Origin;

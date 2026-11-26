@@ -44,6 +44,73 @@ namespace WebExpress.WebCore.Test.Message
         }
 
         /// <summary>
+        /// The culture follows the first language the client accepts; a request without a usable
+        /// language - curl, health checks, a wildcard or an unknown tag - gets the server culture.
+        /// </summary>
+        /// <param name="acceptLanguage">The Accept-Language header, or null when it is absent.</param>
+        /// <param name="expected">The name of the expected culture.</param>
+        [Theory]
+        [InlineData("de,en;q=0.9,en-GB;q=0.8", "de")]
+        [InlineData("en-GB, de;q=0.5", "en-GB")]
+        [InlineData(null, "en")]
+        [InlineData("", "en")]
+        [InlineData("*", "en")]
+        [InlineData("not a culture!", "en")]
+        public void CultureFollowsAcceptLanguage(string acceptLanguage, string expected)
+        {
+            // arrange
+            var features = PrepareGet();
+            var headers = features.Get<IHttpRequestFeature>().Headers;
+            headers.Remove("Accept-Language");
+            if (acceptLanguage is not null)
+            {
+                headers.AcceptLanguage = acceptLanguage;
+            }
+            var context = Fixture.UnitTestFixture.CreateHttpServerContextMock();
+
+            // act
+            var request = new WebMessage.HttpContext(features, context).Request;
+
+            // validation
+            Assert.Equal(expected, request.Culture.Name);
+        }
+
+        /// <summary>
+        /// The culture is resolved once per request and handed out read-only, so a caller
+        /// cannot change it for the rest of the render.
+        /// </summary>
+        [Fact]
+        public void CultureIsResolvedOncePerRequest()
+        {
+            // arrange
+            var features = PrepareGet();
+            var context = Fixture.UnitTestFixture.CreateHttpServerContextMock();
+            var request = new WebMessage.HttpContext(features, context).Request;
+
+            // act
+            var first = request.Culture;
+            var second = request.Culture;
+
+            // validation
+            Assert.Same(first, second);
+            Assert.True(first.IsReadOnly);
+        }
+
+        /// <summary>
+        /// Creates the feature collection of a plain get request to the root.
+        /// </summary>
+        /// <returns>The feature collection.</returns>
+        private static IFeatureCollection PrepareGet()
+        {
+            var features = Prepare(null, RequestMethod.GET, "");
+            var requestFeature = features.Get<IHttpRequestFeature>();
+            requestFeature.Scheme = "http";
+            requestFeature.RawTarget = "/";
+
+            return features;
+        }
+
+        /// <summary>
         /// Creates the feature collection.
         /// </summary>
         /// <param name="reader">The reader.</param>
