@@ -167,6 +167,8 @@ namespace WebExpress.WebCore.WebInclude
                 // assign the resource to existing applications
                 foreach (var applicationContext in applicationContexts)
                 {
+                    var includeFiles = ResolveFiles(applicationContext, pluginContext, files, mountedRoutes);
+
                     var includeContext = new IncludeContext()
                     {
                         IncludeId = new ComponentId(id),
@@ -174,7 +176,7 @@ namespace WebExpress.WebCore.WebInclude
                         ApplicationContext = applicationContext,
                         Cache = cache,
                         Scopes = scopes,
-                        Files = files.Select(x => new IncludeFile() { Type = x.Item1, FileName = x.Item2 })
+                        Files = includeFiles
                     };
 
                     var includeItem = new IncludeItem(_componentHub)
@@ -186,7 +188,7 @@ namespace WebExpress.WebCore.WebInclude
                         IncludeClass = includeType,
                         Cache = cache,
                         Scopes = scopes,
-                        Files = files.Select(x => new IncludeFile() { Type = x.Item1, FileName = x.Item2 })
+                        Files = includeFiles
                     };
 
                     WarnAboutUnresolvedFiles(includeContext, mountedRoutes);
@@ -209,6 +211,66 @@ namespace WebExpress.WebCore.WebInclude
         }
 
         /// <summary>
+        /// Creates the files of an include for one application, each with the route it is
+        /// linked from.
+        /// </summary>
+        /// <remarks>
+        /// Every page links every file of every include - several hundred - and composing and
+        /// versioning each route on every render allocated over a thousand objects per page for
+        /// a result that cannot change: the files of an include belong to its own plugin, whose
+        /// assets are mounted before its includes are registered and leave together with them.
+        /// A file whose asset is not mounted yet keeps no route, so the page resolves it at
+        /// render time instead of linking an unversioned route for good.
+        /// </remarks>
+        /// <param name="applicationContext">The application the files are linked in.</param>
+        /// <param name="pluginContext">The plugin the files belong to.</param>
+        /// <param name="files">The type and name of each file, in declared order.</param>
+        /// <param name="mountedRoutes">The per-application index of mounted asset routes, filled on demand.</param>
+        /// <returns>The include files, in declared order.</returns>
+        private IReadOnlyList<IncludeFile> ResolveFiles(IApplicationContext applicationContext, IPluginContext pluginContext, IEnumerable<(TypeInclude Type, string FileName)> files, Dictionary<IApplicationContext, HashSet<string>> mountedRoutes)
+        {
+            var assetManager = _componentHub?.AssetManager;
+            var mounted = GetMountedRoutes(applicationContext, mountedRoutes);
+
+            return [.. files.Select(x => new IncludeFile()
+            {
+                Type = x.Type,
+                FileName = x.FileName,
+                Route = mounted is not null && mounted.Contains(assetManager.GetAssetRoute(applicationContext, pluginContext, x.FileName)?.ToString() ?? string.Empty)
+                    ? assetManager.GetVersionedAssetRoute(applicationContext, pluginContext, x.FileName)?.ToString()
+                    : null
+            })];
+        }
+
+        /// <summary>
+        /// Returns the routes of the assets the asset manager has mounted for an application.
+        /// </summary>
+        /// <param name="applicationContext">The application context.</param>
+        /// <param name="mountedRoutes">The per-application index of mounted asset routes, filled on demand.</param>
+        /// <returns>The mounted routes, or null without an asset manager.</returns>
+        private HashSet<string> GetMountedRoutes(IApplicationContext applicationContext, Dictionary<IApplicationContext, HashSet<string>> mountedRoutes)
+        {
+            var assetManager = _componentHub?.AssetManager;
+
+            if (assetManager is null)
+            {
+                return null;
+            }
+
+            if (!mountedRoutes.TryGetValue(applicationContext, out var mounted))
+            {
+                mounted = assetManager.GetAssets(applicationContext)
+                    .Select(x => x.Route?.ToString())
+                    .Where(x => x is not null)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                mountedRoutes[applicationContext] = mounted;
+            }
+
+            return mounted;
+        }
+
+        /// <summary>
         /// Logs every file of an include that does not resolve to an asset the asset manager
         /// has mounted. The include is kept rather than refused, because the two managers are
         /// wired to the same events and a hard refusal would turn any future change of that
@@ -220,20 +282,11 @@ namespace WebExpress.WebCore.WebInclude
         {
             var applicationContext = includeContext.ApplicationContext;
             var assetManager = _componentHub?.AssetManager;
+            var mounted = GetMountedRoutes(applicationContext, mountedRoutes);
 
-            if (assetManager is null)
+            if (mounted is null)
             {
                 return;
-            }
-
-            if (!mountedRoutes.TryGetValue(applicationContext, out var mounted))
-            {
-                mounted = assetManager.GetAssets(applicationContext)
-                    .Select(x => x.Route?.ToString())
-                    .Where(x => x is not null)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                mountedRoutes[applicationContext] = mounted;
             }
 
             foreach (var file in includeContext.Files)

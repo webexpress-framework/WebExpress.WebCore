@@ -131,6 +131,27 @@ namespace WebExpress.WebCore.Test.Manager
         }
 
         /// <summary>
+        /// Tests that a file whose asset is not mounted keeps no route, so a page resolves it
+        /// when it renders instead of linking an unversioned route for good, and that the files
+        /// are created once rather than on every read.
+        /// </summary>
+        [Fact]
+        public void UnmountedFileKeepsNoRoute()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA))?.FirstOrDefault();
+            var include = componentHub.IncludeManager.GetIncludes(application, typeof(TestIncludeJavaScriptA))?.FirstOrDefault();
+
+            // act
+            var files = include.Files.ToList();
+
+            // validation
+            Assert.All(files, x => Assert.Null(x.Route));
+            Assert.Equal(files, include.Files);
+        }
+
+        /// <summary>
         /// Tests whether the include manager implements interface IComponentManager.
         /// </summary>
         [Fact]
