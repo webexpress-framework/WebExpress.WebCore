@@ -17,6 +17,7 @@ namespace WebExpress.WebCore.WebSocket
         private readonly CancellationTokenSource _cts = new();
         private readonly SemaphoreSlim _sendLock = new(1, 1);
         private readonly int _bufferSize;
+        private readonly ulong? _maxMessageSize;
         private bool _disconnectRaised;
         private static readonly TimeSpan _shutdownCloseTimeout = TimeSpan.FromSeconds(1);
 
@@ -63,6 +64,7 @@ namespace WebExpress.WebCore.WebSocket
                 ?? throw new ArgumentNullException(nameof(networkStream));
 
             _bufferSize = bufferSize;
+            _maxMessageSize = socketContext.MaxMessageSize;
         }
 
         /// <summary>
@@ -170,6 +172,16 @@ namespace WebExpress.WebCore.WebSocket
                 // accumulate fragments
                 builder.Write(buffer, 0, result.Count);
 
+                // checked per fragment, so a message announced as endless cannot grow the
+                // buffer past the limit before it ends; the http exchange is over by now, so
+                // the refusal is the close code of RFC 6455 and not a status
+                if (_maxMessageSize is ulong maxMessageSize && (ulong)builder.Length > maxMessageSize)
+                {
+                    using var deadline = new CancellationTokenSource(_shutdownCloseTimeout);
+                    await CloseAsync(WebSocketCloseStatus.MessageTooBig, $"message exceeds {maxMessageSize} bytes", deadline.Token);
+                    break;
+                }
+
                 if (result.EndOfMessage)
                 {
                     if (result.MessageType == WebSocketMessageType.Text)
@@ -199,7 +211,19 @@ namespace WebExpress.WebCore.WebSocket
         /// <returns>
         /// A task that represents the asynchronous close operation.
         /// </returns>
-        public async Task CloseAsync(string reason = "closed", CancellationToken cancellation = default)
+        public Task CloseAsync(string reason = "closed", CancellationToken cancellation = default)
+        {
+            return CloseAsync(WebSocketCloseStatus.NormalClosure, reason, cancellation);
+        }
+
+        /// <summary>
+        /// Closes the connection with the given close code.
+        /// </summary>
+        /// <param name="status">The close code sent to the client.</param>
+        /// <param name="reason">A textual description sent to the client as part of the close frame.</param>
+        /// <param name="cancellation">A token used to cancel the close operation.</param>
+        /// <returns>A task that represents the asynchronous close operation.</returns>
+        private async Task CloseAsync(WebSocketCloseStatus status, string reason, CancellationToken cancellation)
         {
             if (_socket.State == WebSocketState.Open || _socket.State == WebSocketState.CloseReceived)
             {
@@ -210,7 +234,7 @@ namespace WebExpress.WebCore.WebSocket
 
                     try
                     {
-                        await _socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, reason, cancellation);
+                        await _socket.CloseOutputAsync(status, reason, cancellation);
                     }
                     finally
                     {
@@ -224,7 +248,7 @@ namespace WebExpress.WebCore.WebSocket
             }
 
             _cts.Cancel();
-            RaiseDisconnected(WebSocketCloseStatus.NormalClosure, reason);
+            RaiseDisconnected(status, reason);
         }
 
         /// <summary>

@@ -109,7 +109,7 @@ namespace WebExpress.WebCore.WebFragment
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IFragment<,>).Name) is not null))
             {
-                var id = fragmentType.FullName?.ToLower();
+                var id = fragmentType.FullName?.ToLowerInvariant();
                 var scopes = new List<Type>();
                 var sections = new List<Type>();
                 var conditions = new List<ICondition>();
@@ -250,11 +250,10 @@ namespace WebExpress.WebCore.WebFragment
                 return;
             }
 
-            var fragments = _dictionary.RemoveFragments(pluginContext);
-
-            foreach (var fragment in fragments)
+            foreach (var fragment in _dictionary.RemoveFragments(pluginContext))
             {
-                OnRemoveFragment(fragment);
+                fragment.Dispose();
+                OnRemoveFragment(fragment.FragmentContext);
             }
         }
 
@@ -269,11 +268,10 @@ namespace WebExpress.WebCore.WebFragment
                 return;
             }
 
-            var fragments = _dictionary.RemoveFragments(applicationContext);
-
-            foreach (var fragment in fragments)
+            foreach (var fragment in _dictionary.RemoveFragments(applicationContext))
             {
-                OnRemoveFragment(fragment);
+                fragment.Dispose();
+                OnRemoveFragment(fragment.FragmentContext);
             }
         }
 
@@ -486,13 +484,12 @@ namespace WebExpress.WebCore.WebFragment
         {
             var effectiveScopes = (scopes?.Any() == true) ? scopes : [typeof(IScope)];
 
-            foreach (var scope in effectiveScopes)
-            {
-                foreach (var item in GetFragments(applicationContext, section, effectiveScopes))
-                {
-                    yield return item;
-                }
-            }
+            // each scope is asked through the single-scope overload; the call passed the whole
+            // list again and recursed into this method until the stack overflowed
+            return effectiveScopes
+                .SelectMany(scope => GetFragments(applicationContext, section, scope))
+                .Distinct()
+                .ToList();
         }
 
         /// <summary>

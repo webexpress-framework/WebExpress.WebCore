@@ -57,5 +57,50 @@ namespace WebExpress.WebCore.Test.Message
             // validation
             Assert.Equal(expected, uri.ToString());
         }
+
+        /// <summary>
+        /// Tests that the request target never replaces the authority of the request: a target
+        /// starting with "//" is a path, not a network-path reference, so the routing cannot be
+        /// steered to "/admin" while a proxy in front saw "//evil.com/admin".
+        /// </summary>
+        /// <param name="target">The request target as the client sent it.</param>
+        /// <param name="expected">The expected uri.</param>
+        [Theory]
+        [InlineData("/a/b?c=1", "http://localhost:8080/a/b?c=1")]
+        [InlineData("//evil.com/admin", "http://localhost:8080//evil.com/admin")]
+        [InlineData("http://other.org/x?y=2", "http://localhost:8080/x?y=2")]
+        [InlineData("*", "http://localhost:8080/")]
+        [InlineData("", "http://localhost:8080/")]
+        [InlineData(null, "http://localhost:8080/")]
+        public void ResolveTargetKeepsTheAuthority(string target, string expected)
+        {
+            // act
+            var uri = HttpContext.ResolveTarget(new Uri("http://localhost:8080/"), target);
+
+            // validation
+            Assert.Equal("localhost", uri.Host);
+            Assert.Equal(8080, uri.Port);
+            Assert.Equal(expected, uri.ToString());
+        }
+
+        /// <summary>
+        /// Tests that a compressed body does not fail the context: Content-Encoding names a
+        /// compression such as gzip, not a character set, and reading it as one threw before the
+        /// request existed, so every compressed post was answered with a 500.
+        /// </summary>
+        /// <param name="contentEncoding">The value of the Content-Encoding header.</param>
+        [Theory]
+        [InlineData("gzip")]
+        [InlineData("br")]
+        [InlineData("deflate, gzip")]
+        public void ContentEncodingIsNoCharset(string contentEncoding)
+        {
+            // act
+            var context = Fixture.UnitTestFixture.CreateHttpContextMock($"POST /a HTTP/1.1\r\nContent-Encoding: {contentEncoding}\r\n\r\n");
+
+            // validation
+            Assert.Equal(contentEncoding, context.Request.Header.ContentEncoding);
+            Assert.Equal("utf-8", context.Encoding.WebName);
+        }
     }
 }

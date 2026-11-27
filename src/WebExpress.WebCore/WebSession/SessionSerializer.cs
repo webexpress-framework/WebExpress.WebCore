@@ -152,9 +152,9 @@ namespace WebExpress.WebCore.WebSession
 
             var session = new Session(id)
             {
-                Updated = root["updated"]?.GetValue<DateTime>() ?? DateTime.Now
+                Updated = root["updated"]?.GetValue<DateTime>().ToUniversalTime() ?? DateTime.UtcNow
             };
-            session.Created = root["created"]?.GetValue<DateTime>() ?? session.Updated;
+            session.Created = root["created"]?.GetValue<DateTime>().ToUniversalTime() ?? session.Updated;
 
             var properties = root["properties"] as JsonObject ?? [];
 

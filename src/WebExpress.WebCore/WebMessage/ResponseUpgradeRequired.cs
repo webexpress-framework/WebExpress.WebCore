@@ -26,7 +26,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseUpgradeRequired(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>426</title></head><body>426 - Upgrade Required</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>426</title></head><body>426 - Upgrade Required</body></html>");
 
             // reason phrase for 426 (Upgrade Required)
             Reason = "Upgrade Required";

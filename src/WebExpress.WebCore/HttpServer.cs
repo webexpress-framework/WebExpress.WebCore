@@ -133,10 +133,13 @@ namespace WebExpress.WebCore
         /// </summary>
         public static DateTime ExecutionTime { get; } = DateTime.Now;
 
+        private long _requestNumber;
+
         /// <summary>
-        /// Gets the request number;
+        /// Gets the number of the request answered last; each request takes the next one, also
+        /// while several are answered at once.
         /// </summary>
-        public long RequestNumber { get; private set; }
+        public long RequestNumber => Interlocked.Read(ref _requestNumber);
 
         /// <summary>
         /// Gets the statistics history.
@@ -272,9 +275,9 @@ namespace WebExpress.WebCore
             (
                 _webHost.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value
             );
-            serverOptions.Value.AllowSynchronousIO = kestrel?.AllowSynchronousIO ?? true;
+            serverOptions.Value.AllowSynchronousIO = kestrel?.AllowSynchronousIO ?? false;
             serverOptions.Value.AllowResponseHeaderCompression = kestrel?.AllowResponseHeaderCompression ?? true;
-            serverOptions.Value.AddServerHeader = kestrel?.AddServerHeader ?? true;
+            serverOptions.Value.AddServerHeader = kestrel?.AddServerHeader ?? false;
 
             var limits = serverOptions.Value.Limits;
 
@@ -594,12 +597,15 @@ namespace WebExpress.WebCore
             var request = context.Request;
             var response = default(IResponse);
 
+            // taken once, so the done line names this request and not whichever started last
+            var requestNumber = Interlocked.Increment(ref _requestNumber);
+
             HttpServerContext.Log?.Debug(message: I18N.Translate("webexpress.webcore:httpserver.connected"), args: context.RemoteEndPoint);
             HttpServerContext.Log?.Info(I18N.Translate
             (
                 "webexpress.webcore:httpserver.request",
                 context.RemoteEndPoint,
-                ++RequestNumber,
+                requestNumber,
                 $"{request?.Method} {request?.Uri} {request?.Protocol}"
             ));
 
@@ -704,7 +710,7 @@ namespace WebExpress.WebCore
             (
                 "webexpress.webcore:httpserver.request.done",
                 context?.RemoteEndPoint,
-                RequestNumber,
+                requestNumber,
                 stopwatch.ElapsedMilliseconds,
                 response.Status
             ));
@@ -1044,7 +1050,8 @@ namespace WebExpress.WebCore
             var applicationContext = string.IsNullOrEmpty(route)
                 ? null
                 : applicationManager?.Applications
-                    .FirstOrDefault(x => route.StartsWith(x.Route.ToString()));
+                    .Where(x => IsRouteBelow(route, x.Route.ToString()))
+                    .MaxBy(x => x.Route.ToString().TrimEnd('/').Length);
 
             if (statusPageManager is not null && searchResult is not null)
             {
@@ -1068,15 +1075,36 @@ namespace WebExpress.WebCore
                 );
             }
 
-            message = $"<html><head><title>{response.Status}</title></head><body>" +
-                      $"<p>{message}<br/><p>" +
-                      $"</body></html>";
+            // the message is text and is encoded with its line breaks kept
+            message = StatusMessage.ToHtml(new StatusMessage(message ?? string.Empty), null)
+                .Replace("<html><body>", $"<html><head><title>{response.Status}</title></head><body>");
 
             response.Content = message;
             response.Header.ContentLength = message.Length;
             response.Header.ContentType = "text/html; charset=utf-8";
 
             return response;
+        }
+
+        /// <summary>
+        /// Determines whether a route lies at or below the route of an application. The routes
+        /// are compared by whole segments: a plain prefix test takes "/application/x" for a
+        /// route of the application at "/app".
+        /// </summary>
+        /// <param name="route">The route of the request.</param>
+        /// <param name="applicationRoute">The route of the application.</param>
+        /// <returns>True when the route belongs to the application.</returns>
+        internal static bool IsRouteBelow(string route, string applicationRoute)
+        {
+            var root = applicationRoute?.TrimEnd('/') ?? string.Empty;
+
+            if (root.Length == 0)
+            {
+                return true;
+            }
+
+            return route.StartsWith(root, StringComparison.Ordinal)
+                && (route.Length == root.Length || route[root.Length] == '/');
         }
 
         /// <summary>
@@ -1126,17 +1154,13 @@ namespace WebExpress.WebCore
         {
             try
             {
-                var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
-
-                // check if schema or upgrade header indicates websocket
-                if (IsWebSocketRequest(requestFeature))
+                if (IsWebSocketRequest(contextFeatures))
                 {
-                    // use WebSocketContext for websocket connections
                     return new HttpWebSocketContext(contextFeatures, HttpServerContext);
                 }
 
-                // use regular HttpContext for normal HTTP requests
-                return new HttpContext(contextFeatures, HttpServerContext);
+                // the body is read once the request is processed, asynchronously
+                return new HttpContext(contextFeatures, HttpServerContext, readContent: false);
             }
             catch (Exception ex)
             {
@@ -1163,6 +1187,12 @@ namespace WebExpress.WebCore
             // shared with the pipeline, which stops it once it has recorded its response; a
             // failure while that response is being sent must not be counted a second time
             var stopwatch = Stopwatch.StartNew();
+
+            // resolved once through the trusted proxies, so every limit downstream keys on the client
+            if (httpContext?.Request is RequestBase resolved)
+            {
+                resolved.ClientAddress = ClientResolver.Resolve(resolved);
+            }
 
             try
             {
@@ -1286,7 +1316,7 @@ namespace WebExpress.WebCore
         }
 
         /// <summary>
-        /// Renders an exception as the html fragment a status page shows.
+        /// Describes an exception as the text a status page shows; the page encodes it.
         /// </summary>
         /// <remarks>
         /// The details are shown only when <see cref="SecuritySettings.DetailedErrors"/> asks for
@@ -1298,7 +1328,7 @@ namespace WebExpress.WebCore
         /// exists to report the first failure.
         /// </remarks>
         /// <param name="ex">The exception to describe.</param>
-        /// <returns>The html fragment.</returns>
+        /// <returns>The text.</returns>
         private string Describe(Exception ex)
         {
             if (!(Settings?.Security?.DetailedErrors ?? false))
@@ -1306,10 +1336,11 @@ namespace WebExpress.WebCore
                 return "The server could not complete the request. The cause has been logged.";
             }
 
-            return $"<h4>Message</h4>{EncodeHtml(ex.Message)}<br/><br/>" +
-                $"<h5>Source</h5>{EncodeHtml(ex.Source)}<br/><br/>" +
-                $"<h5>StackTrace</h5>{EncodeHtml(ex.StackTrace)}<br/><br/>" +
-                $"<h5>InnerException</h5>{EncodeHtml(ex.InnerException?.ToString())}";
+            return string.Join("\n",
+                "Message", ex.Message, "",
+                "Source", ex.Source, "",
+                "StackTrace", ex.StackTrace, "",
+                "InnerException", ex.InnerException?.ToString());
         }
 
         /// <summary>
@@ -1325,20 +1356,9 @@ namespace WebExpress.WebCore
         {
             var message = Settings?.Security?.DetailedErrors ?? false
                 ? Describe(ex)
-                : EncodeHtml(ex.Message);
+                : ex.Message;
 
             return CreateStatusPage<ResponseBadRequest>(message, request, searchResult);
-        }
-
-        /// <summary>
-        /// Encodes text for an error page. Exception messages routinely quote request data such as
-        /// the path or a parameter, which must not become markup.
-        /// </summary>
-        /// <param name="text">The text to encode, possibly null.</param>
-        /// <returns>The encoded text with line breaks kept, or null.</returns>
-        private static string EncodeHtml(string text)
-        {
-            return WebUtility.HtmlEncode(text)?.Replace("\n", "<br/>\n");
         }
 
         /// <summary>
@@ -1356,13 +1376,9 @@ namespace WebExpress.WebCore
         {
             var sender = new ResponseSender(SecurityHeaders);
 
-            /*
-             * Applies pending authentication and optional session cookies even when routing bypasses a handler.
-             * Records statistics before transmission so client latency does not inflate server processing time.
-             * The context parameter identifies the HTTP exchange and its pending credential changes.
-             * The response parameter carries the result of routing, authentication, or an application handler.
-             * Returns a task that completes after the response has been sent.
-             */
+            // cookies are applied here so they reach the client even when routing bypasses a
+            // handler; statistics are recorded before sending, so client latency does not
+            // count as server processing time
             async Task SendAsync(IHttpContext context, IResponse response)
             {
                 IssueSessionCookie(context?.Request, response);
@@ -1379,13 +1395,21 @@ namespace WebExpress.WebCore
             {
                 HttpServerContext.Log?.Exception(exceptionContext.Exception);
 
-                var message = "<html><head><title>404</title></head><body>" +
-                    Describe(exceptionContext.Exception) +
-                    "</body></html>";
-
-                var response500 = CreateStatusPage<ResponseInternalServerError>(message, httpContext?.Request);
+                // only the fragment: the status page supplies the document around it
+                var response500 = CreateStatusPage<ResponseInternalServerError>(Describe(exceptionContext.Exception), httpContext?.Request);
 
                 await SendAsync(exceptionContext, response500);
+
+                return;
+            }
+
+            if (httpContext is not HttpWebSocketContext && httpContext.Request.Method == RequestMethod.NONE)
+            {
+                await SendAsync(httpContext, CreateStatusPage<ResponseNotImplemented>
+                (
+                    "The request method is not supported.",
+                    httpContext.Request
+                ));
 
                 return;
             }
@@ -1396,6 +1420,27 @@ namespace WebExpress.WebCore
                 await SendAsync(httpContext, new ResponseForbidden(new StatusMessage("Cross-site request rejected.")));
 
                 return;
+            }
+
+            if (httpContext.Request is Request bodyRequest)
+            {
+                try
+                {
+                    await bodyRequest.ReadContentAsync(httpContext.Features.Get<IHttpRequestLifetimeFeature>()?.RequestAborted
+                        ?? CancellationToken.None);
+                }
+                catch (Microsoft.AspNetCore.Http.BadHttpRequestException ex)
+                {
+                    // kestrel rejects a body over MaxRequestBodySize or a malformed chunked one;
+                    // the client is told why instead of seeing an internal error
+                    var rejected = ex.StatusCode == Microsoft.AspNetCore.Http.StatusCodes.Status413PayloadTooLarge
+                        ? CreateStatusPage<ResponsePayloadTooLarge>(ex.Message, httpContext.Request)
+                        : CreateStatusPage<ResponseBadRequest>(ex.Message, httpContext.Request);
+
+                    await SendAsync(httpContext, rejected);
+
+                    return;
+                }
             }
 
             var authenticationResponse = await _authenticationEndpoint.Value.HandleAsync(httpContext.Request);
@@ -1442,9 +1487,12 @@ namespace WebExpress.WebCore
                 request.EndpointContext = searchResult.EndpointContext;
             }
 
-            // no policies (null or empty) -> serve without an access check; a websocket upgrade
-            // is checked here too, otherwise an endpoint's policies would only guard plain requests
-            if (searchResult.EndpointContext.Policies?.Any() ?? false)
+            // every endpoint is checked, a websocket upgrade included: an endpoint without a policy
+            // requires a signed-in caller - it was served to anybody before, so an endpoint that
+            // forgot its policy was public - unless the settings still allow that for a migration
+            var publicByDefault = (Settings?.Security?.PublicByDefault ?? false) && !(searchResult.EndpointContext.Policies?.Any() ?? false);
+
+            if (!publicByDefault)
             {
                 var identity = WebEx.ComponentHub.IdentityManager.GetCurrentIdentity(httpContext.Request);
 
@@ -1458,8 +1506,12 @@ namespace WebExpress.WebCore
 
             if (httpContext is HttpWebSocketContext)
             {
-                // try to obtain websocket context and optional handler
-                var socketContext = searchResult.EndpointContext as ISocketContext;
+                if (searchResult.EndpointContext is not ISocketContext socketContext)
+                {
+                    await SendAsync(httpContext, new ResponseBadRequest(new StatusMessage("The resource does not accept websocket connections.")));
+
+                    return;
+                }
 
                 await HandleWebSocketAsync(httpContext, socketContext);
 
@@ -1495,6 +1547,18 @@ namespace WebExpress.WebCore
                 return;
             }
 
+            // once the connection is switched it no longer speaks http: a status written then
+            // only fails, so a failure ends the request and with it the upgraded connection
+            async Task FailAsync(IResponse response)
+            {
+                if (httpContext.Features.Get<IHttpResponseFeature>()?.HasStarted ?? false)
+                {
+                    return;
+                }
+
+                await responseSender.SendAsync(httpContext, response);
+            }
+
             try
             {
                 BindSocketSession(httpContext);
@@ -1506,30 +1570,19 @@ namespace WebExpress.WebCore
                 var response = new ResponseUpgradeRequired(new StatusMessage("Invalid WebSocket handshake headers"));
                 response.Header.Upgrade = "websocket";
 
-                await responseSender.SendAsync(httpContext, response);
-            }
-            catch (SocketMessageTooLargeException ex)
-            {
-                // the client sent a WebSocket message exceeding the configured maximum size -> respond with 413 
-                var response = new ResponsePayloadTooLarge(new StatusMessage($"WebSocket message exceeds the maximum allowed size of {ex.MaxSize} bytes."));
-                await responseSender.SendAsync(httpContext, response);
+                await FailAsync(response);
             }
             catch (SocketException ex)
             {
                 HttpServerContext.Log?.Exception(ex);
 
-                // return 500 when socket error 
-                var response = new ResponseInternalServerError(new StatusMessage("A transport-level socket error occurred during WebSocket communication."));
-                await responseSender.SendAsync(httpContext, response);
+                await FailAsync(new ResponseInternalServerError(new StatusMessage("A transport-level socket error occurred during WebSocket communication.")));
             }
             catch (Exception ex)
             {
-                // log unhandled exceptions during websocket processing
                 HttpServerContext.Log?.Exception(ex);
 
-                // return 500 when handshake did not succeed and no websocket established
-                var response = new ResponseInternalServerError(new StatusMessage("An unexpected server error occurred during WebSocket processing."));
-                await responseSender.SendAsync(httpContext, response);
+                await FailAsync(new ResponseInternalServerError(new StatusMessage("An unexpected server error occurred during WebSocket processing.")));
             }
         }
 
@@ -1545,14 +1598,25 @@ namespace WebExpress.WebCore
         /// <summary>
         /// Checks whether the current request is a WebSocket connection.
         /// </summary>
-        /// <param name="requestFeature">The HTTP request feature instance.</param>
+        /// <remarks>
+        /// Over HTTP/2 and HTTP/3 a browser opens a websocket with an extended CONNECT
+        /// (RFC 8441, RFC 9220), which carries the protocol in a pseudo-header and no Upgrade
+        /// header at all.
+        /// </remarks>
+        /// <param name="contextFeatures">The feature collection of the request.</param>
         /// <returns>True if it is a WebSocket connection; otherwise, false.</returns>
-        private static bool IsWebSocketRequest(IHttpRequestFeature requestFeature)
+        private static bool IsWebSocketRequest(IFeatureCollection contextFeatures)
         {
-            // check scheme and "Upgrade" header for websocket protocol
+            var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
             if (requestFeature == null)
             {
                 return false;
+            }
+
+            var extendedConnect = contextFeatures.Get<IHttpExtendedConnectFeature>();
+            if (extendedConnect?.IsExtendedConnect == true)
+            {
+                return string.Equals(extendedConnect.Protocol, "websocket", StringComparison.OrdinalIgnoreCase);
             }
 
             var upgradeHeader = requestFeature.Headers.Upgrade;

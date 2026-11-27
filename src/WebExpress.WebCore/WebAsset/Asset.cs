@@ -14,10 +14,18 @@ namespace WebExpress.WebCore.WebAsset
     /// </summary>
     public class Asset : IAsset
     {
-        // the address of an asset carries no version, so a copy reused without asking would keep
+        // the address of a plain asset carries no version, so a copy reused without asking would keep
         // an outdated script after every deployment; the entity tag makes revalidation a cheap 304
-        private const string CacheControl = "no-cache";
+        private const string CacheControlRevalidate = "no-cache";
 
+        // the address of a versioned asset carries a hash of its content, so a changed file is a new
+        // address and a copy of the old one never goes stale
+        private const string CacheControlImmutable = "public, max-age=31536000, immutable";
+
+        // the number of hex digits of the content hash that make up the version in an address
+        private const int VersionLength = 12;
+
+        private readonly string _cacheControl;
         private readonly IComponentHub _componentHub;
         private readonly IAssetContext _assetContext;
         private readonly IHttpServerContext _httpServerContext;
@@ -32,7 +40,7 @@ namespace WebExpress.WebCore.WebAsset
         /// client asks for few; reading and hashing each one up front made the registration the
         /// bulk of a hub's start. Null once the asset is disposed.
         /// </remarks>
-        private Lazy<(byte[] Data, string ETag)> _payload;
+        private Lazy<AssetPayload> _payload;
 
         /// <summary>
         /// Gets the root directory.
@@ -55,15 +63,14 @@ namespace WebExpress.WebCore.WebAsset
 
             var assembly = _assetContext.PluginContext.Assembly;
 
+            _cacheControl = ResolveCacheControl(_assetContext);
+
             // an asset is immutable embedded content, so its content type and entity tag are
             // resolved once instead of on every request.
-            _contentType = ContentTypeExtensions.ToContentType(Path.GetExtension(_assetContext.EndpointId?.ToString()));
-            _payload = new(() =>
-            {
-                var data = GetData(assembly);
-
-                return (data, ComputeETag(data));
-            });
+            _contentType = ResolveContentType(_assetContext);
+            // a stylesheet is delivered with the files it addresses rewritten to their
+            // fingerprinted names, the content its own fingerprint is taken from
+            _payload = new(() => new AssetPayload(AssetFingerprint.ReadContent(assembly, _embeddedResource), _contentType));
         }
 
         /// <summary>
@@ -78,98 +85,74 @@ namespace WebExpress.WebCore.WebAsset
                 return new ResponseNotFound();
             }
 
-            var (data, eTag) = payload.Value;
+            var response = payload.Value.Respond(request, _contentType, _cacheControl, _assetContext.EndpointId?.ToString());
 
-            // conditional request: when the client already holds the current version, skip the body
-            // and answer with 304 Not Modified so the cached copy is reused.
-            if (!string.IsNullOrEmpty(eTag) && string.Equals(request?.Header?.IfNoneMatch, eTag, StringComparison.Ordinal))
+            if (response is ResponseOK)
             {
-                var notModified = new ResponseNotModified();
-                notModified.Header.CacheControl = CacheControl;
-                notModified.Header.AddCustomHeader("ETag", eTag);
-
-                return notModified;
+                _httpServerContext?.Log?.Debug(I18N.Translate
+                (
+                    "webexpress.webcore:asset.file",
+                    request.RemoteEndPoint, request.Uri
+                ));
             }
-
-            // a range of an outdated version would be joined to parts of the current one, so a
-            // mismatching If-Range is answered with the whole file
-            var rangeHeader = request?.Header?.Range;
-            var ifRange = request?.Header?.IfRange;
-
-            if (request?.Method == RequestMethod.GET && !string.IsNullOrWhiteSpace(rangeHeader) &&
-                (string.IsNullOrWhiteSpace(ifRange) || string.Equals(ifRange, eTag, StringComparison.Ordinal)))
-            {
-                var range = ParseRange(rangeHeader, data.LongLength);
-
-                if (range == (-1, -1))
-                {
-                    var notSatisfiable = new ResponseRangeNotSatisfiable();
-                    notSatisfiable.Header.AddCustomHeader("Content-Range", $"bytes */{data.LongLength}");
-
-                    return notSatisfiable;
-                }
-
-                if (range is (var start, var end))
-                {
-                    var partial = new ResponsePartialContent();
-                    partial.Header.CacheControl = CacheControl;
-                    partial.Header.ContentLength = (int)(end - start + 1);
-                    partial.Header.ContentType = _contentType.GetMimeType();
-                    partial.Header.AddCustomHeader("Accept-Ranges", "bytes");
-                    partial.Header.AddCustomHeader("Content-Range", $"bytes {start}-{end}/{data.LongLength}");
-                    partial.Content = data[(int)start..(int)(end + 1)];
-
-                    if (!string.IsNullOrEmpty(eTag))
-                    {
-                        partial.Header.AddCustomHeader("ETag", eTag);
-                    }
-
-                    return partial;
-                }
-            }
-
-            var response = new ResponseOK();
-            response.Header.CacheControl = CacheControl;
-            response.Header.ContentLength = data.Length;
-            response.Header.ContentType = _contentType.GetMimeType();
-            response.Content = data;
-
-            // tells media players they may seek by asking for parts; safari plays no video without it
-            response.Header.AddCustomHeader("Accept-Ranges", "bytes");
-
-            if (!string.IsNullOrEmpty(eTag))
-            {
-                response.Header.AddCustomHeader("ETag", eTag);
-            }
-
-            // archives are offered as a download rather than rendered inline
-            if (_contentType == ContentType.Zip)
-            {
-                response.Header.ContentDisposition = $"attachment; filename={_assetContext.EndpointId}; size={data.LongLength}";
-            }
-
-            _httpServerContext?.Log?.Debug(I18N.Translate
-            (
-                "webexpress.webcore:asset.file",
-                request.RemoteEndPoint, request.Uri
-            ));
 
             return response;
         }
 
         /// <summary>
-        /// Reads the data of a specified resource.
+        /// Returns the content of the asset for a bundle. The payload is not created for it: in a
+        /// bundled application the file itself is rarely asked for, and keeping it next to the
+        /// bundle would hold every script twice.
         /// </summary>
-        /// <param name="assembly">The assembly.</param>
-        /// <returns>The data.</returns>
-        private byte[] GetData(Assembly assembly)
+        /// <returns>The content, empty once the asset is disposed.</returns>
+        internal byte[] ReadContent()
         {
-            if (assembly is null || _embeddedResource is null)
+            if (_payload is not { } payload)
             {
                 return [];
             }
 
-            using var stream = assembly.GetManifestResourceStream(_embeddedResource);
+            return payload.IsValueCreated
+                ? payload.Value.Data
+                : AssetFingerprint.ReadContent(_assetContext.PluginContext.Assembly, _embeddedResource);
+        }
+
+        /// <summary>
+        /// Returns the cache policy of the address an asset is served from.
+        /// </summary>
+        /// <param name="assetContext">The asset context.</param>
+        /// <returns>The value of the Cache-Control header.</returns>
+        internal static string ResolveCacheControl(IAssetContext assetContext)
+        {
+            return assetContext is AssetContext { Version: not null }
+                ? CacheControlImmutable
+                : CacheControlRevalidate;
+        }
+
+        /// <summary>
+        /// Returns the content type of an asset, which follows from the extension of its address.
+        /// </summary>
+        /// <param name="assetContext">The asset context.</param>
+        /// <returns>The content type.</returns>
+        internal static ContentType ResolveContentType(IAssetContext assetContext)
+        {
+            return ContentTypeExtensions.ToContentType(Path.GetExtension(assetContext?.EndpointId?.ToString()));
+        }
+
+        /// <summary>
+        /// Reads the data of an embedded resource.
+        /// </summary>
+        /// <param name="assembly">The assembly.</param>
+        /// <param name="embeddedResource">The embedded resource name.</param>
+        /// <returns>The data.</returns>
+        internal static byte[] ReadResource(Assembly assembly, string embeddedResource)
+        {
+            if (assembly is null || embeddedResource is null)
+            {
+                return [];
+            }
+
+            using var stream = assembly.GetManifestResourceStream(embeddedResource);
 
             if (stream is null)
             {
@@ -258,16 +241,39 @@ namespace WebExpress.WebCore.WebAsset
         /// </summary>
         /// <param name="data">The asset payload.</param>
         /// <returns>A quoted ETag value, or null when there is no payload.</returns>
-        private static string ComputeETag(byte[] data)
+        internal static string ComputeETag(byte[] data)
+        {
+            var hash = ComputeHash(data);
+
+            return hash is null ? null : "\"" + hash + "\"";
+        }
+
+        /// <summary>
+        /// Computes the content hash of an asset.
+        /// </summary>
+        /// <param name="data">The asset payload.</param>
+        /// <returns>The hash as lower case hex digits, or null when there is no payload.</returns>
+        private static string ComputeHash(byte[] data)
         {
             if (data is null || data.Length == 0)
             {
                 return null;
             }
 
-            // a content hash is used so the tag changes if and only if the payload changes; SHA-1 is
+            // a content hash is used so the value changes if and only if the payload changes; SHA-1 is
             // chosen for speed because the value is a cache validator, not a security token.
-            return "\"" + Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant() + "\"";
+            return Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Computes the version an address of the asset carries, so that a changed file is
+        /// served from a new address.
+        /// </summary>
+        /// <param name="data">The asset payload.</param>
+        /// <returns>The version, or null when there is no payload.</returns>
+        internal static string ComputeVersion(byte[] data)
+        {
+            return ComputeHash(data)?[..VersionLength];
         }
 
         /// <summary>

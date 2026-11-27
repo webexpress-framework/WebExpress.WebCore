@@ -495,7 +495,9 @@ namespace WebExpress.WebCore.Test.Server
                 {
                     Endpoints = [new EndpointSettings { Uri = "http://127.0.0.1:0/" }],
                     Shutdown = mode,
-                    ShutdownTimeoutSeconds = 10
+                    ShutdownTimeoutSeconds = 10,
+                    // the endpoints under test carry no policy; the shutdown, not the access, is tested
+                    Security = new SecuritySettings { PublicByDefault = true }
                 }
             };
         }

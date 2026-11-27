@@ -119,7 +119,11 @@ namespace WebExpress.WebCore.Test.Server
             try
             {
                 UnitTestFixture.BindComponentHub(null);
-                var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock());
+                var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
+                {
+                    // the endpoint under test carries no policy; the response, not the access, is tested
+                    Settings = new HttpServerSettings { Security = new SecuritySettings { PublicByDefault = true } }
+                };
                 componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
                 componentHub.SitemapManager.Refresh();
                 var context = UnitTestFixture.CreateHttpContextMock($"GET {path} HTTP/1.1\r\nCookie:\r\n\r\n");
@@ -504,6 +508,25 @@ namespace WebExpress.WebCore.Test.Server
 
             // validation
             Assert.Equal(status, response.StatusCode);
+        }
+
+        /// <summary>
+        /// Tests that a route belongs to an application only by whole segments, so the status
+        /// page of "/app" is never chosen for "/application/x".
+        /// </summary>
+        /// <param name="route">The route of the request.</param>
+        /// <param name="applicationRoute">The route of the application.</param>
+        /// <param name="expected">Whether the route belongs to the application.</param>
+        [Theory]
+        [InlineData("/app", "/app", true)]
+        [InlineData("/app/x", "/app", true)]
+        [InlineData("/app/x", "/app/", true)]
+        [InlineData("/application/x", "/app", false)]
+        [InlineData("/x", "/", true)]
+        [InlineData("/x", "", true)]
+        public void RouteBelongsToApplicationBySegments(string route, string applicationRoute, bool expected)
+        {
+            Assert.Equal(expected, HttpServer.IsRouteBelow(route, applicationRoute));
         }
     }
 }

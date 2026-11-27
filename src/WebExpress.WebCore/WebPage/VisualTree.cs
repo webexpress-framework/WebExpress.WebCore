@@ -77,7 +77,7 @@ namespace WebExpress.WebCore.WebPage
         {
             if (key is null) return;
 
-            var k = key.ToLower();
+            var k = key.ToLowerInvariant();
             var dict = Scripts;
 
             if (dict.ContainsKey(k))

@@ -351,7 +351,7 @@ namespace WebExpress.WebCore.WebComponent
             _metricsManager = CreateInstance(typeof(MetricsManager)) as MetricsManager
                 ?? throw new InvalidOperationException("Failed to create MetricsManager.");
 
-            _internationalizationManager.Register(typeof(HttpServer).Assembly, typeof(HttpServer).Assembly.GetName().Name?.ToLower());
+            _internationalizationManager.Register(typeof(HttpServer).Assembly, typeof(HttpServer).Assembly.GetName().Name?.ToLowerInvariant());
 
             _httpServerContext?.Log?.Debug
             (
@@ -453,13 +453,13 @@ namespace WebExpress.WebCore.WebComponent
 
             // initialize the component entry as an empty list for easier manipulation
             var componentList = new List<ComponentItem>();
-            _dictionary.Add(pluginContext, componentList);
+            _dictionary.TryAdd(pluginContext, []);
 
             foreach (var type in assembly
                 .GetExportedTypes()
                 .Where(x => x.IsClass && x.IsSealed && x.GetInterface(typeof(IComponentManager).Name) is not null))
             {
-                var id = type.FullName?.ToLower();
+                var id = type.FullName?.ToLowerInvariant();
 
                 // determining attributes
                 var componentInstance = CreateInstance(type);
@@ -473,6 +473,10 @@ namespace WebExpress.WebCore.WebComponent
                         ComponentId = id,
                         ComponentInstance = componentInstance
                     });
+
+                    // a request may be reading the stored list right now, so the grown list is
+                    // stored as a new copy instead of being changed in place
+                    _dictionary[pluginContext] = [.. componentList];
 
                     _httpServerContext?.Log?.Debug
                     (
@@ -491,8 +495,7 @@ namespace WebExpress.WebCore.WebComponent
                 }
             }
 
-            // make sure the dictionary uses IEnumerable as value type, if the dictionary requires it
-            _dictionary[pluginContext] = componentList;
+            _dictionary[pluginContext] = [.. componentList];
 
             Log();
         }
@@ -606,7 +609,7 @@ namespace WebExpress.WebCore.WebComponent
                 }
             }
 
-            _dictionary.Remove(pluginContext);
+            _dictionary.TryRemove(pluginContext, out _);
         }
 
         /// <summary>
@@ -651,7 +654,7 @@ namespace WebExpress.WebCore.WebComponent
                 output.Add
                 (
                    string.Empty.PadRight(2) +
-                   _internationalizationManager.Translate("webexpress.webcore:componentmanager.name", manager?.GetType()?.Name.ToLower())
+                   _internationalizationManager.Translate("webexpress.webcore:componentmanager.name", manager?.GetType()?.Name.ToLowerInvariant())
                 );
             }
 

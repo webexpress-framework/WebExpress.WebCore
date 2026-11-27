@@ -25,7 +25,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseNotFound(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>404</title></head><body>404 - Not Found</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>404</title></head><body>404 - Not Found</body></html>");
             Reason = "Not Found";
 
             Header.ContentType = "text/html";

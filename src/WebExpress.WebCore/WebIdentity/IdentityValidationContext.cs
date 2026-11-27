@@ -38,8 +38,29 @@ namespace WebExpress.WebCore.WebIdentity
         public string TokenUse { get; init; }
 
         /// <summary>
+        /// Gets the id (<c>jti</c>) of the token, which a validator matches a personal access
+        /// token by; null when the token carries none.
+        /// </summary>
+        public string TokenId { get; init; }
+
+        /// <summary>
         /// Gets the time the token was issued.
         /// </summary>
         public DateTimeOffset IssuedAt { get; init; }
+
+        /// <summary>
+        /// Gets the time the token itself stops being accepted.
+        /// </summary>
+        public DateTimeOffset ExpiresAt { get; init; }
+
+        /// <summary>
+        /// Gets the time the login grant ends however often it is renewed, which is how long a
+        /// revocation of the grant must last; null for a token without a grant.
+        /// </summary>
+        /// <remarks>
+        /// A validator takes the token's claims from here and never from the request: on a
+        /// renewal the request still carries the previous access cookie, which nobody verified.
+        /// </remarks>
+        public DateTimeOffset? GrantExpiresAt { get; init; }
     }
 }

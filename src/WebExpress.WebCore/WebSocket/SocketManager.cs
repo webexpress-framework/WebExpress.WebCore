@@ -111,32 +111,13 @@ namespace WebExpress.WebCore.WebSocket
         /// </returns>
         public async Task HandleConnectionAsync(IHttpContext httpContext, ISocketContext socketContext)
         {
-            // WebSocket handshake
+            ArgumentNullException.ThrowIfNull(socketContext);
+
             var connectionId = Guid.NewGuid();
-            var secWebSocketKey = httpContext.Request.Header.SecWebSocketKey;
-            var secWebSocketAccept = ComputeWebSocketAcceptKey(secWebSocketKey);
-
-            var headerFeatures = httpContext.Features.Get<IHttpResponseFeature>();
-            headerFeatures.Headers.Append("Upgrade", "websocket");
-            headerFeatures.Headers.Append("Connection", "Upgrade");
-            headerFeatures.Headers.Append("Sec-WebSocket-Accept", secWebSocketAccept);
-            if (!string.IsNullOrWhiteSpace(socketContext.SupportedSubProtocol))
-            {
-                headerFeatures.Headers.Append("Sec-WebSocket-Protocol", socketContext.SupportedSubProtocol);
-            }
-
-            var upgradeFeature = httpContext.Features.Get<IHttpUpgradeFeature>()
-                ?? throw new SocketHandshakeException("Upgrade feature not supported. WebSocket handshake aborted.");
-
-            Stream networkStream;
-            try
-            {
-                networkStream = await upgradeFeature.UpgradeAsync();
-            }
-            catch (Exception ex)
-            {
-                throw new SocketHandshakeException("WebSocket upgrade failed.", ex);
-            }
+            var extendedConnect = httpContext.Features.Get<IHttpExtendedConnectFeature>();
+            var networkStream = extendedConnect?.IsExtendedConnect == true
+                ? await AcceptExtendedConnectAsync(httpContext, socketContext, extendedConnect)
+                : await UpgradeAsync(httpContext, socketContext);
 
             // create application socket instance
             var instance = CreateSocketInstance(connectionId, socketContext, httpContext.Request);
@@ -316,7 +297,7 @@ namespace WebExpress.WebCore.WebSocket
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterfaces().Where(i => i == typeof(ISocket)).Any()))
             {
-                var id = socketType.FullName?.ToLower();
+                var id = socketType.FullName?.ToLowerInvariant();
                 var includeSubPaths = false;
                 var conditions = new List<ICondition>();
                 var cache = false;
@@ -324,6 +305,12 @@ namespace WebExpress.WebCore.WebSocket
                 var messageType = SocketMessageType.Text;
                 var maxMessageSize = (ulong?)null;
                 var policies = new List<IIdentityPolicy>();
+                // a class that answers callers who are not signed in says so; an endpoint
+                // without a policy requires a signed-in caller
+                if (typeof(WebEndpoint.IPublicEndpoint).IsAssignableFrom(socketType))
+                {
+                    policies.Add(new WebPolicies.PublicAccessPolicy());
+                }
                 var attributes = socketType.CustomAttributes
                     .Where(x => !x.AttributeType.GetInterfaces().Contains(typeof(IEndpointAttribute)));
 
@@ -590,6 +577,93 @@ namespace WebExpress.WebCore.WebSocket
             var hash = SHA1.HashData(Encoding.UTF8.GetBytes(combined));
 
             return Convert.ToBase64String(hash);
+        }
+
+        /// <summary>
+        /// Completes the HTTP/1.1 handshake (RFC 6455) and takes over the connection.
+        /// </summary>
+        /// <remarks>
+        /// The handshake headers are only written once the request is known to be upgradable,
+        /// and taken back when the upgrade fails: the error response sent instead must not
+        /// carry an accept key for a connection that was never switched.
+        /// </remarks>
+        /// <param name="httpContext">The context of the upgrade request.</param>
+        /// <param name="socketContext">The endpoint the socket connects to.</param>
+        /// <returns>The stream of the upgraded connection.</returns>
+        private static async Task<Stream> UpgradeAsync(IHttpContext httpContext, ISocketContext socketContext)
+        {
+            var upgradeFeature = httpContext.Features.Get<IHttpUpgradeFeature>();
+            if (upgradeFeature is null || !upgradeFeature.IsUpgradableRequest)
+            {
+                throw new SocketHandshakeException("The request cannot be upgraded. WebSocket handshake aborted.");
+            }
+
+            var secWebSocketKey = httpContext.Request.Header.SecWebSocketKey;
+            if (string.IsNullOrWhiteSpace(secWebSocketKey))
+            {
+                throw new SocketHandshakeException("The Sec-WebSocket-Key header is missing. WebSocket handshake aborted.");
+            }
+
+            var headers = httpContext.Features.Get<IHttpResponseFeature>().Headers;
+            headers.Append("Upgrade", "websocket");
+            headers.Append("Connection", "Upgrade");
+            headers.Append("Sec-WebSocket-Accept", ComputeWebSocketAcceptKey(secWebSocketKey));
+            if (!string.IsNullOrWhiteSpace(socketContext.SupportedSubProtocol))
+            {
+                headers.Append("Sec-WebSocket-Protocol", socketContext.SupportedSubProtocol);
+            }
+
+            try
+            {
+                return await upgradeFeature.UpgradeAsync();
+            }
+            catch (Exception ex)
+            {
+                headers.Remove("Upgrade");
+                headers.Remove("Connection");
+                headers.Remove("Sec-WebSocket-Accept");
+                headers.Remove("Sec-WebSocket-Protocol");
+
+                throw new SocketHandshakeException("WebSocket upgrade failed.", ex);
+            }
+        }
+
+        /// <summary>
+        /// Accepts a websocket that a client opens with an HTTP/2 or HTTP/3 extended CONNECT
+        /// (RFC 8441, RFC 9220).
+        /// </summary>
+        /// <remarks>
+        /// Such a request carries neither an Upgrade header nor a key: the stream of the request
+        /// itself becomes the socket once a 2xx is sent, and the Upgrade, Connection and accept
+        /// headers of HTTP/1.1 are forbidden on it.
+        /// </remarks>
+        /// <param name="httpContext">The context of the connect request.</param>
+        /// <param name="socketContext">The endpoint the socket connects to.</param>
+        /// <param name="extendedConnect">The extended connect feature of the request.</param>
+        /// <returns>The stream of the accepted socket.</returns>
+        private static async Task<Stream> AcceptExtendedConnectAsync(IHttpContext httpContext, ISocketContext socketContext, IHttpExtendedConnectFeature extendedConnect)
+        {
+            if (!string.Equals(extendedConnect.Protocol, "websocket", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SocketHandshakeException("The extended CONNECT does not ask for a websocket. WebSocket handshake aborted.");
+            }
+
+            var headers = httpContext.Features.Get<IHttpResponseFeature>().Headers;
+            if (!string.IsNullOrWhiteSpace(socketContext.SupportedSubProtocol))
+            {
+                headers.Append("Sec-WebSocket-Protocol", socketContext.SupportedSubProtocol);
+            }
+
+            try
+            {
+                return await extendedConnect.AcceptAsync();
+            }
+            catch (Exception ex)
+            {
+                headers.Remove("Sec-WebSocket-Protocol");
+
+                throw new SocketHandshakeException("WebSocket connect failed.", ex);
+            }
         }
 
         /// <summary>

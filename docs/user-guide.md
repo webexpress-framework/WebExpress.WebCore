@@ -16,6 +16,17 @@ To get started with `WebExpress.WebCore`, use the following guides:
 
 We hope you enjoy using `WebExpress.WebCore` and find it valuable for your projects. Happy coding!
 
+## Access to endpoints
+Access is denied unless it is granted. Every request to a page, REST API, resource or socket is checked against the policies of its endpoint:
+
+- An endpoint without a policy requires a signed-in caller. It used to be served to anybody, so an endpoint that forgot its policy was public.
+- `[Policy<PublicAccessPolicy>]` makes an endpoint public, for example a login page or the API it signs in through. A class implementing `IPublicEndpoint` is public as well; the interface is inherited, which a base class such as the login page of an application template needs, since attributes are read from the concrete class only.
+- `[Policy<AuthenticatedAccessPolicy>]` requires a signed-in caller; any other policy requires a caller whose groups grant it.
+- A policy that cannot be created denies access.
+- Assets (scripts, styles, images of the framework and plugins) are public.
+
+`WebExpress:Security:PublicByDefault` set to `true` serves endpoints without a policy to everybody again. It is meant only for migrating an application whose public endpoints are not yet marked.
+
 ## Health checks
 
 The container health endpoint is documented in the [Health model](https://github.com/webexpress-framework/WebExpress/blob/main/docs/development_guide.md#health-model) section of the Development Guide. WebCore provides `/health` globally, and applications contribute critical dependency checks as public sealed `IHealth` components in `WebExpress.WebCore.WebHealth`. The `HealthManager` discovers these components through the plugin and application lifecycle. The guide includes the component model, a database example, the HTTP contract, and Docker and Kubernetes probe configuration.
@@ -42,6 +53,28 @@ The endpoint is switched off by default, because the metrics reveal load and log
 ```
 
 The equivalent environment variables are `WEBEXPRESS_WebExpress__Metrics__Enabled` and `WEBEXPRESS_WebExpress__Metrics__BearerToken`. While the endpoint is off, `/metrics` is left to application routing. `Metrics:ActiveUserWindowMinutes` sets how recently a user must have sent an authenticated request to count as active (default `5`).
+
+## Scripts and stylesheets
+
+A page links the files of every include of its application. By default the files of an include are joined into one bundle per type, so a page loads them with a few requests instead of several hundred. A bundle keeps the declared order of its files, sits in the directory of its files (stylesheets from different directories are not joined, so their relative `url()` addresses stay valid) and, like every script and stylesheet, is addressed by the hash of its content and cached for a year. Script files are linked with `defer`: they load while the page is parsed and run in their order before `DOMContentLoaded`. The code a page adds as a script of its own (`AddHeaderScript`, `AddScript`) is deferred as well - it is emitted as a `data:` script carrying the nonce of the response - so it runs after the files it builds on, as it did while they were loaded synchronously.
+
+The images and fonts a stylesheet addresses - the icon set, flags, backgrounds - are cached for a year as well. Every embedded `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, `.ico`, `.bmp`, `.woff`, `.woff2`, `.ttf`, `.otf` and `.eot` file is mounted on its plain address and on one that carries the hash of its content, and a stylesheet is delivered with each relative `url()` of such a file rewritten to the hashed name (`url("../icons/bold.svg")` becomes `url("../icons/bold.<hash>.svg")`). The hash of a stylesheet is taken from that rewritten content, so changing a drawing gives the stylesheet - and the bundle it is part of - a new address on the next start; nothing is edited by hand. Absolute, external and `data:` urls are left as written, and the plain address of every file keeps working for links from elsewhere.
+
+While developing, switch bundling off to link every file on its own, which keeps the file and line of a script error readable:
+
+```json
+{
+  "WebExpress": {
+    "Assets": {
+      "Bundle": false
+    }
+  }
+}
+```
+
+The equivalent environment variable is `WEBEXPRESS_WebExpress__Assets__Bundle`. A file of an include that is not mounted is logged as a warning in both modes.
+
+Scripts, stylesheets and other text assets are answered compressed with brotli or gzip, whichever the client accepts and prefers (`Accept-Encoding`). Each representation is compressed once, on the first request that accepts it, and carries an entity tag of its own; responses name `Vary: Accept-Encoding`. Large content such as a bundle is compressed with brotli in the background, and clients receive gzip until it is done. A range request is always answered from the uncompressed file.
 
 ## Graceful shutdown
 
@@ -178,4 +211,4 @@ For cluster deployments, configure a shared `Cluster:StatePath` or install a sha
 
 For duplicate protection, claims remain for `DeduplicationHours`, including failed, cancelled and interrupted attempts. The default is 168 hours and the supported range is 1 through 8760 hours. A crash after claiming but before submission can therefore suppress an unsent message. After expiry the same identifier can be sent again. This policy prevents repeated attempts during the retention window but does not promise exactly-once delivery. Applications requiring durable recovery should retain an outbox in their primary database and reconcile uncertain outcomes with the provider before creating a new delivery identifier.
 
-For graceful shutdown, admitted sends participate in `ServerLifetime` draining, and new sends are rejected when draining starts. The per-profile delivery deadline defaults to 60 seconds and accepts values from 1 through 300 seconds. Select `Shutdown: "graceful"` and a sufficient shutdown budget when accepted messages should finish before shared resources are released. Immediate termination or an exhausted shutdown budget can leave the delivery outcome unknown.
+For graceful shutdown, admitted sends participate in `ServerLifetime` draining, and new sends are rejected when draining starts. The per-profile delivery deadline defaults to 60 seconds and accepts values from 1 through 300 seconds. Keep the default `Shutdown: "graceful"` with a sufficient shutdown budget when accepted messages should finish before shared resources are released. Immediate termination or an exhausted shutdown budget can leave the delivery outcome unknown.

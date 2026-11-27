@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseBadGateway(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>502</title></head><body>502 - Bad Gateway</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>502</title></head><body>502 - Bad Gateway</body></html>");
             Reason = "Bad Gateway";
 
             Header.ContentType = "text/html";

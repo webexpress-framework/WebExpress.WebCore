@@ -39,9 +39,9 @@ namespace WebExpress.WebCore.WebPlugin
         public event EventHandler<IPluginContext> RemovePlugin;
 
         /// <summary>
-        /// Gets all plugins.
+        /// Gets all plugins, each after the plugins it depends on.
         /// </summary>
-        public IEnumerable<IPluginContext> Plugins => _dictionary.Values.Select(x => x.PluginContext).ToList();
+        public IEnumerable<IPluginContext> Plugins => [.. InDependencyOrder(_dictionary.Values).Select(x => x.PluginContext)];
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -207,12 +207,12 @@ namespace WebExpress.WebCore.WebPlugin
                     var dependencies = dependency is not null
                         ? new List<string>([dependency])
                         : [];
-                    var id = new ComponentId(assembly.GetName().Name.ToLower());
+                    var id = new ComponentId(assembly.GetName().Name.ToLowerInvariant());
                     var pluginContext = new PluginContext()
                     {
                         Assembly = assembly,
                         PluginId = id,
-                        PluginName = assembly.GetName().Name.ToLower(),
+                        PluginName = assembly.GetName().Name.ToLowerInvariant(),
                         Manufacturer = assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company,
                         Copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright,
                         Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
@@ -232,7 +232,7 @@ namespace WebExpress.WebCore.WebPlugin
 
                         if (hasUnfulfilledDependencies)
                         {
-                            _unfulfilledDependencies.Add(id, new PluginItem()
+                            _unfulfilledDependencies.TryAdd(id, new PluginItem()
                             {
                                 PluginLoadContext = loadContext,
                                 PluginClass = assembly.ExportedTypes.FirstOrDefault() ?? typeof(IPlugin),
@@ -244,7 +244,7 @@ namespace WebExpress.WebCore.WebPlugin
                         }
                         else
                         {
-                            _dictionary.Add(id, new PluginItem()
+                            _dictionary.TryAdd(id, new PluginItem()
                             {
                                 PluginLoadContext = loadContext,
                                 PluginClass = assembly.ExportedTypes.FirstOrDefault() ?? typeof(IPlugin),
@@ -363,7 +363,7 @@ namespace WebExpress.WebCore.WebPlugin
 
                     if (hasUnfulfilledDependencies)
                     {
-                        _unfulfilledDependencies.Add(id, new PluginItem()
+                        _unfulfilledDependencies.TryAdd(id, new PluginItem()
                         {
                             PluginLoadContext = loadContext,
                             PluginClass = type,
@@ -375,7 +375,7 @@ namespace WebExpress.WebCore.WebPlugin
                     }
                     else
                     {
-                        _dictionary.Add(id, new PluginItem()
+                        _dictionary.TryAdd(id, new PluginItem()
                         {
                             PluginLoadContext = loadContext,
                             PluginClass = type,
@@ -442,8 +442,8 @@ namespace WebExpress.WebCore.WebPlugin
 
             OnRemovePlugin(pluginContext);
 
-            _dictionary.Remove(pluginContext.PluginId);
-            _unfulfilledDependencies.Remove(pluginContext.PluginId);
+            _dictionary.TryRemove(pluginContext.PluginId, out _);
+            _unfulfilledDependencies.TryRemove(pluginContext.PluginId, out _);
 
             Release(pluginItem);
 
@@ -521,8 +521,8 @@ namespace WebExpress.WebCore.WebPlugin
                     if (!hasUnfulfilledDependencies)
                     {
                         fulfilledDependencies = true;
-                        _unfulfilledDependencies.Remove(unfulfilledDependencies.Key);
-                        _dictionary.Add(unfulfilledDependencies.Key, unfulfilledDependencies.Value);
+                        _unfulfilledDependencies.TryRemove(unfulfilledDependencies.Key, out _);
+                        _dictionary.TryAdd(unfulfilledDependencies.Key, unfulfilledDependencies.Value);
 
                         OnAddPlugin(unfulfilledDependencies.Value.PluginContext);
 
@@ -658,19 +658,63 @@ namespace WebExpress.WebCore.WebPlugin
         }
 
         /// <summary>
-        /// Returns all plugins that have associated applications.
+        /// Returns all plugins that have associated applications, each after the plugins it
+        /// depends on.
         /// </summary>
         /// <param name="applicationContext">The application context to filter plugins.</param>
         /// <returns>An enumerable collection of plugin contexts with applications.</returns>
         public IEnumerable<IPluginContext> GetPlugins(IApplicationContext applicationContext)
         {
-            return _dictionary.Values
+            return [.. InDependencyOrder(_dictionary.Values
                 .Where(x => x.ApplicationTypes is not null)
                 .Where(x => x.ApplicationTypes.Select(x => _componentHub?.ApplicationManager.GetApplications(x))
                 .SelectMany(x => x)
                 .Where(x => x.ApplicationId == applicationContext.ApplicationId)
-                .Any())
-                .Select(x => x.PluginContext);
+                .Any()))
+                .Select(x => x.PluginContext)];
+        }
+
+        /// <summary>
+        /// Orders plugins so that each one follows the plugins it depends on.
+        /// </summary>
+        /// <remarks>
+        /// The managers register the components of an application plugin by plugin in this
+        /// order, and a plugin builds on what its dependencies provide - a setting page on a
+        /// group of the framework, for instance. The dictionary alone yields the order of a hash
+        /// of the plugin ids, which .NET seeds anew on every start. Plugins that do not depend on
+        /// each other come system plugins first, then by id, so the order is the same on every
+        /// start; a dependency outside the given plugins is ignored, and a cycle, which the
+        /// dependency check does not let through, would keep that order for the plugins in it.
+        /// </remarks>
+        /// <param name="items">The plugins.</param>
+        /// <returns>The plugins in dependency order.</returns>
+        internal static List<PluginItem> InDependencyOrder(IEnumerable<PluginItem> items)
+        {
+            var pending = items
+                .Where(x => x.PluginContext?.PluginId is not null)
+                .OrderBy(x => x.PluginContext.Assembly?.GetCustomAttribute<SystemPluginAttribute>() is not null ? 0 : 1)
+                .ThenBy(x => x.PluginContext.PluginId.ToString(), StringComparer.Ordinal)
+                .ToList();
+            var ids = pending
+                .Select(x => x.PluginContext.PluginId.ToString())
+                .ToHashSet();
+            var placed = new HashSet<string>();
+            var ordered = new List<PluginItem>(pending.Count);
+
+            while (pending.Count > 0)
+            {
+                var next = pending.FirstOrDefault(x => (x.Dependencies ?? [])
+                    .Where(d => !string.IsNullOrWhiteSpace(d))
+                    .Select(d => new ComponentId(d).ToString())
+                    .All(d => !ids.Contains(d) || placed.Contains(d)))
+                    ?? pending[0];
+
+                pending.Remove(next);
+                ordered.Add(next);
+                placed.Add(next.PluginContext.PluginId.ToString());
+            }
+
+            return ordered;
         }
 
         /// <summary>

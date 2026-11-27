@@ -257,7 +257,7 @@ namespace WebExpress.WebCore.Test.Manager
             var staleId = seeded.Id;
 
             // push the last-access point beyond the timeout
-            seeded.Updated = DateTime.Now.AddHours(-1);
+            seeded.Updated = DateTime.UtcNow.AddHours(-1);
 
             // act
             var request = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={staleId}\n\n");
@@ -282,7 +282,7 @@ namespace WebExpress.WebCore.Test.Manager
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
             componentHub.SessionManager.Timeout = TimeSpan.FromMinutes(30);
             var seeded = componentHub.SessionManager.GetSession(UnitTestFixture.CreateRequestMock());
-            seeded.Updated = DateTime.Now.AddMinutes(-10);
+            seeded.Updated = DateTime.UtcNow.AddMinutes(-10);
 
             // act
             var request = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={seeded.Id}\n\n");
@@ -290,7 +290,7 @@ namespace WebExpress.WebCore.Test.Manager
 
             // validation
             Assert.Same(seeded, session);
-            Assert.True((DateTime.Now - session.Updated).TotalMinutes < 1, "the access renewed the idle deadline");
+            Assert.True((DateTime.UtcNow - session.Updated).TotalMinutes < 1, "the access renewed the idle deadline");
         }
 
         /// <summary>
@@ -304,7 +304,7 @@ namespace WebExpress.WebCore.Test.Manager
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
             componentHub.SessionManager.Timeout = TimeSpan.Zero;
             var seeded = componentHub.SessionManager.GetSession(UnitTestFixture.CreateRequestMock());
-            seeded.Updated = DateTime.Now.AddDays(-3650);
+            seeded.Updated = DateTime.UtcNow.AddDays(-3650);
 
             // act
             var request = UnitTestFixture.CreateRequestMock($"GET / HTTP/1.1\nCookie: session={seeded.Id}\n\n");
@@ -346,7 +346,7 @@ namespace WebExpress.WebCore.Test.Manager
             sessionManager.Timeout = TimeSpan.FromMinutes(30);
             var seeded = sessionManager.GetSession(UnitTestFixture.CreateRequestMock());
             var staleId = seeded.Id;
-            seeded.Updated = DateTime.Now.AddHours(-1);
+            seeded.Updated = DateTime.UtcNow.AddHours(-1);
             var applicationContext = new WebExpress.WebCore.WebApplication.ApplicationContext();
 
             // act

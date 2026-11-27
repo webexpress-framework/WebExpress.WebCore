@@ -62,7 +62,7 @@ namespace WebExpress.WebCore.WebCluster
             _clock = timeProvider ?? TimeProvider.System;
             _nextSweepTicks = (_clock.GetUtcNow() + SweepInterval).UtcTicks;
 
-            Directory.CreateDirectory(_directory);
+            PrivateStorage.CreateDirectory(_directory);
         }
 
         /// <summary>
@@ -178,6 +178,55 @@ namespace WebExpress.WebCore.WebCluster
             TryDelete(path);
 
             return IsLive(entry.Value.Expires);
+        }
+
+        /// <summary>
+        /// Removes an entry only while it still holds the given value: the entry is first moved
+        /// aside, so no other instance can replace it while it is compared, and handed back when
+        /// it turns out to be another's.
+        /// </summary>
+        /// <param name="scope">The group the entry belongs to.</param>
+        /// <param name="key">The key of the entry within its scope.</param>
+        /// <param name="expected">The value the entry must hold.</param>
+        /// <returns>True when the entry held the value and was removed.</returns>
+        public bool RemoveIf(string scope, string key, byte[] expected)
+        {
+            var path = EntryPath(scope, key);
+            var taken = path + "." + Guid.NewGuid().ToString("N") + ".stale";
+
+            try
+            {
+                File.Move(path, taken, false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // nothing there, or another instance moved it first
+                return false;
+            }
+
+            var entry = Read(taken);
+
+            if (entry is not null && IsLive(entry.Value.Expires) && entry.Value.Value.AsSpan().SequenceEqual(expected))
+            {
+                TryDelete(taken);
+
+                return true;
+            }
+
+            // not ours: handed back unless a newer entry took the place meanwhile
+            try
+            {
+                if (!TryPublish(taken, path))
+                {
+                    TryDelete(taken);
+                }
+            }
+            catch (IOException)
+            {
+                TryDelete(taken);
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -390,9 +439,9 @@ namespace WebExpress.WebCore.WebCluster
             var expires = (_clock.GetUtcNow() + lifetime).ToUnixTimeMilliseconds();
             var keyBytes = Encoding.UTF8.GetBytes(key);
 
-            Directory.CreateDirectory(directory);
+            PrivateStorage.CreateDirectory(directory);
 
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var stream = PrivateStorage.Create(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             using (var writer = new BinaryWriter(stream))
             {
                 writer.Write(Magic);

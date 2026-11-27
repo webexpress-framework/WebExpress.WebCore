@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponsePreconditionRequired(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>428</title></head><body>428 - Precondition Required</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>428</title></head><body>428 - Precondition Required</body></html>");
             Reason = "Precondition Required";
 
             Header.ContentType = "text/html";

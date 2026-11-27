@@ -183,13 +183,19 @@ namespace WebExpress.WebCore.WebResource
                 .Where(x => x.GetInterface(typeof(IResource).Name) is not null)
                 .Where(x => x.GetInterface(typeof(IStatusPage).Name) is null))
             {
-                var id = resourceType.FullName?.ToLower();
+                var id = resourceType.FullName?.ToLowerInvariant();
                 var segment = default(ISegmentAttribute);
                 var contextPath = string.Empty;
                 var includeSubPaths = false;
                 var conditions = new List<ICondition>();
                 var cache = false;
                 var policies = new List<IIdentityPolicy>();
+                // a class that answers callers who are not signed in says so; an endpoint
+                // without a policy requires a signed-in caller
+                if (typeof(WebEndpoint.IPublicEndpoint).IsAssignableFrom(resourceType))
+                {
+                    policies.Add(new WebPolicies.PublicAccessPolicy());
+                }
                 var attributes = resourceType.CustomAttributes
                     .Where(x => !x.AttributeType.GetInterfaces().Contains(typeof(IEndpointAttribute)) &&
                                 !x.AttributeType.GetInterfaces().Contains(typeof(IPageAttribute)));

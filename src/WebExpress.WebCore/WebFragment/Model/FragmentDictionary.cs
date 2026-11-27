@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebPlugin;
 using WebExpress.WebCore.WebScope;
@@ -12,19 +13,35 @@ namespace WebExpress.WebCore.WebFragment.Model
     /// which in turn maps to a dictionary of section types and inner maps of scope types and lists of FragmentItem objects.
     /// Plugin -> Application -> Section -> Scope -> FragmentItem
     /// </summary>
+    /// <remarks>
+    /// The package scan adds and removes fragments on its own thread while requests render them,
+    /// and a dictionary written during a read can throw or loop forever. Every member therefore
+    /// runs under one lock and returns a list taken under it, never a query that would read the
+    /// dictionary later, outside the lock.
+    /// </remarks>
     internal class FragmentDictionary
     {
         private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, Dictionary<Type, Dictionary<Type, List<FragmentItem>>>>> _dict = [];
+        private readonly Lock _lock = new();
 
         /// <summary>
         /// Gets all fragment contexts from the dictionary.
         /// </summary>
-        public IEnumerable<IFragmentContext> All => _dict.Values
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x)
-            .Select(x => x.FragmentContext);
+        public IEnumerable<IFragmentContext> All
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return [.. _dict.Values
+                        .SelectMany(x => x.Values)
+                        .SelectMany(x => x.Values)
+                        .SelectMany(x => x.Values)
+                        .SelectMany(x => x)
+                        .Select(x => x.FragmentContext)];
+                }
+            }
+        }
 
         /// <summary>
         /// Adds a fragment item to the dictionary.
@@ -42,81 +59,102 @@ namespace WebExpress.WebCore.WebFragment.Model
                 return false;
             }
 
-            if (!_dict.TryGetValue(pluginContext, out var applicationDict))
+            lock (_lock)
             {
-                applicationDict = [];
-                _dict[pluginContext] = applicationDict;
-            }
-
-            if (!applicationDict.TryGetValue(applicationContext, out var sectionDict))
-            {
-                sectionDict = [];
-                applicationDict[applicationContext] = sectionDict;
-            }
-
-            if (!sectionDict.TryGetValue(fragmentItem.Section, out var scopeDict))
-            {
-                scopeDict = [];
-                sectionDict[fragmentItem.Section] = scopeDict;
-            }
-
-            if (!scopeDict.TryGetValue(fragmentItem.Scope, out var itemList))
-            {
-                itemList = [];
-                scopeDict[fragmentItem.Scope] = itemList;
-            }
-
-            if (!itemList.Any(x => x.FragmentClass == fragmentItem.FragmentClass))
-            {
-                itemList.Add(fragmentItem);
-
-                return true;
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Removes fragments from the dictionary.
-        /// </summary>
-        /// <param name="pluginContext">The plugin context.</param>
-        /// <returns>An IEnumerable of fragment contexts that were removed.</returns>
-        public IEnumerable<IFragmentContext> RemoveFragments(IPluginContext pluginContext)
-        {
-            var fragments = GetFragments(pluginContext);
-
-            _dict.Remove(pluginContext);
-
-            return fragments;
-        }
-
-        /// <summary>
-        /// Removes fragments from the dictionary.
-        /// </summary>
-        /// <param name="applicationContext">The application context.</param>
-        /// <returns>An IEnumerable of fragment contexts that were removed.</returns>
-        public IEnumerable<IFragmentContext> RemoveFragments(IApplicationContext applicationContext)
-        {
-            foreach (var pluginKeyValue in _dict)
-            {
-                if (pluginKeyValue.Value.TryGetValue(applicationContext, out var sectionDict))
+                if (!_dict.TryGetValue(pluginContext, out var applicationDict))
                 {
-                    pluginKeyValue.Value.Remove(applicationContext);
+                    applicationDict = [];
+                    _dict[pluginContext] = applicationDict;
+                }
 
-                    if (pluginKeyValue.Value.Count == 0)
+                if (!applicationDict.TryGetValue(applicationContext, out var sectionDict))
+                {
+                    sectionDict = [];
+                    applicationDict[applicationContext] = sectionDict;
+                }
+
+                if (!sectionDict.TryGetValue(fragmentItem.Section, out var scopeDict))
+                {
+                    scopeDict = [];
+                    sectionDict[fragmentItem.Section] = scopeDict;
+                }
+
+                if (!scopeDict.TryGetValue(fragmentItem.Scope, out var itemList))
+                {
+                    itemList = [];
+                    scopeDict[fragmentItem.Scope] = itemList;
+                }
+
+                if (!itemList.Any(x => x.FragmentClass == fragmentItem.FragmentClass))
+                {
+                    itemList.Add(fragmentItem);
+
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Removes the fragments of a plugin.
+        /// </summary>
+        /// <remarks>
+        /// The removed items are collected before they leave the dictionary; a query read after
+        /// the removal found nothing, so the remove events never fired.
+        /// </remarks>
+        /// <param name="pluginContext">The plugin context.</param>
+        /// <returns>The fragment items that were removed.</returns>
+        public IReadOnlyList<FragmentItem> RemoveFragments(IPluginContext pluginContext)
+        {
+            lock (_lock)
+            {
+                if (pluginContext is null || !_dict.Remove(pluginContext, out var applicationDict))
+                {
+                    return [];
+                }
+
+                return [.. applicationDict.Values
+                    .SelectMany(x => x.Values)
+                    .SelectMany(x => x.Values)
+                    .SelectMany(x => x)];
+            }
+        }
+
+        /// <summary>
+        /// Removes the fragments of an application.
+        /// </summary>
+        /// <remarks>
+        /// The plugins are listed before any of them is removed; removing an entry while the
+        /// dictionary was enumerated threw on every removal of an application.
+        /// </remarks>
+        /// <param name="applicationContext">The application context.</param>
+        /// <returns>The fragment items that were removed.</returns>
+        public IReadOnlyList<FragmentItem> RemoveFragments(IApplicationContext applicationContext)
+        {
+            var removed = new List<FragmentItem>();
+
+            lock (_lock)
+            {
+                foreach (var (pluginContext, applicationDict) in _dict.ToList())
+                {
+                    if (!applicationDict.Remove(applicationContext, out var sectionDict))
                     {
-                        _dict.Remove(pluginKeyValue.Key);
+                        continue;
                     }
 
-                    foreach (var item in sectionDict.Values
+                    if (applicationDict.Count == 0)
+                    {
+                        _dict.Remove(pluginContext);
+                    }
+
+                    removed.AddRange(sectionDict.Values
                         .SelectMany(x => x.Values)
-                        .SelectMany(x => x)
-                        .Select(x => x.FragmentContext))
-                    {
-                        yield return item;
-                    }
+                        .SelectMany(x => x));
                 }
             }
+
+            return removed;
         }
 
         /// <summary>
@@ -128,15 +166,21 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <returns>An enumeration of the filtered fragment contexts.</returns>
         public IEnumerable<FragmentItem> GetFragmentItems(IApplicationContext applicationContext, Type section, IEnumerable<Type> scopes)
         {
-            return _dict.Values
-                .SelectMany(x => x)
-                .Where(x => x.Key == applicationContext)
-                .SelectMany(x => x.Value)
-                .Where(x => x.Key == section || section.IsAssignableFrom(x.Key))
-                .SelectMany(x => x.Value)
-                .Where(x => scopes.Any(y => x.Key == y))
-                .SelectMany(x => x.Value)
-                .OrderBy(x => x.Order);
+            // the caller's sequence is read before the lock is taken, so no foreign code runs under it
+            var scopeSet = (scopes ?? []).ToHashSet();
+
+            lock (_lock)
+            {
+                return [.. _dict.Values
+                    .SelectMany(x => x)
+                    .Where(x => x.Key == applicationContext)
+                    .SelectMany(x => x.Value)
+                    .Where(x => x.Key == section || section.IsAssignableFrom(x.Key))
+                    .SelectMany(x => x.Value)
+                    .Where(x => scopeSet.Contains(x.Key))
+                    .SelectMany(x => x.Value)
+                    .OrderBy(x => x.Order)];
+            }
         }
 
         /// <summary>
@@ -149,16 +193,21 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <returns>An enumeration of the filtered fragment items.</returns>
         public IEnumerable<FragmentItem> GetFragmentItems(IApplicationContext applicationContext, Type fragment, Type section, IEnumerable<Type> scopes)
         {
-            return _dict.Values
-                .SelectMany(x => x)
-                .Where(x => x.Key == applicationContext)
-                .SelectMany(x => x.Value)
-                .Where(x => x.Key == section || section.IsAssignableFrom(x.Key))
-                .SelectMany(x => x.Value)
-                .Where(x => scopes.Any(y => x.Key == y))
-                .SelectMany(x => x.Value)
-                .Where(x => x.FragmentClass == fragment || fragment.IsAssignableFrom(x.FragmentClass))
-                .OrderBy(x => x.Order);
+            var scopeSet = (scopes ?? []).ToHashSet();
+
+            lock (_lock)
+            {
+                return [.. _dict.Values
+                    .SelectMany(x => x)
+                    .Where(x => x.Key == applicationContext)
+                    .SelectMany(x => x.Value)
+                    .Where(x => x.Key == section || section.IsAssignableFrom(x.Key))
+                    .SelectMany(x => x.Value)
+                    .Where(x => scopeSet.Contains(x.Key))
+                    .SelectMany(x => x.Value)
+                    .Where(x => x.FragmentClass == fragment || fragment.IsAssignableFrom(x.FragmentClass))
+                    .OrderBy(x => x.Order)];
+            }
         }
 
         /// <summary>
@@ -168,12 +217,15 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <returns>An IEnumerable of fragment contexts.</returns>
         public IEnumerable<IFragmentContext> GetFragments(IPluginContext pluginContext)
         {
-            return _dict.Where(x => x.Key == pluginContext)
-                .SelectMany(x => x.Value.Values)
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x.Values)
-                .SelectMany(x => x)
-                .Select(x => x.FragmentContext);
+            lock (_lock)
+            {
+                return [.. _dict.Where(x => x.Key == pluginContext)
+                    .SelectMany(x => x.Value.Values)
+                    .SelectMany(x => x.Values)
+                    .SelectMany(x => x.Values)
+                    .SelectMany(x => x)
+                    .Select(x => x.FragmentContext)];
+            }
         }
 
         /// <summary>
@@ -183,14 +235,17 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <returns>An enumeration of the filtered fragment contexts.</returns>
         public IEnumerable<IFragmentContext> GetFragments(Type fragmentType)
         {
-            return _dict.Values
-                .SelectMany(x => x)
-                .SelectMany(x => x.Value)
-                .SelectMany(x => x.Value)
-                .SelectMany(x => x.Value)
-                .Where(x => x.FragmentClass == fragmentType)
-                .OrderBy(x => x.Order)
-                .Select(x => x.FragmentContext);
+            lock (_lock)
+            {
+                return [.. _dict.Values
+                    .SelectMany(x => x)
+                    .SelectMany(x => x.Value)
+                    .SelectMany(x => x.Value)
+                    .SelectMany(x => x.Value)
+                    .Where(x => x.FragmentClass == fragmentType)
+                    .OrderBy(x => x.Order)
+                    .Select(x => x.FragmentContext)];
+            }
         }
 
         /// <summary>
@@ -201,15 +256,18 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <returns>An enumeration of the filtered fragment contexts.</returns>
         public IEnumerable<IFragmentContext> GetFragments(IApplicationContext applicationContext, Type fragmentType)
         {
-            return _dict.Values
-                .SelectMany(x => x)
-                .Where(x => x.Key == applicationContext)
-                .SelectMany(x => x.Value)
-                .SelectMany(x => x.Value)
-                .SelectMany(x => x.Value)
-                .Where(x => x.FragmentClass == fragmentType)
-                .OrderBy(x => x.Order)
-                .Select(x => x.FragmentContext);
+            lock (_lock)
+            {
+                return [.. _dict.Values
+                    .SelectMany(x => x)
+                    .Where(x => x.Key == applicationContext)
+                    .SelectMany(x => x.Value)
+                    .SelectMany(x => x.Value)
+                    .SelectMany(x => x.Value)
+                    .Where(x => x.FragmentClass == fragmentType)
+                    .OrderBy(x => x.Order)
+                    .Select(x => x.FragmentContext)];
+            }
         }
 
         /// <summary>
@@ -223,16 +281,19 @@ namespace WebExpress.WebCore.WebFragment.Model
         {
             scope ??= typeof(IScope);
 
-            return _dict.Values
-                .SelectMany(x => x)
-                .Where(x => x.Key == applicationContext)
-                .SelectMany(x => x.Value)
-                .Where(x => x.Key == section || section.IsAssignableFrom(x.Key))
-                .SelectMany(x => x.Value)
-                .Where(x => x.Key == scope)
-                .SelectMany(x => x.Value)
-                .OrderBy(x => x.Order)
-                .Select(x => x.FragmentContext);
+            lock (_lock)
+            {
+                return [.. _dict.Values
+                    .SelectMany(x => x)
+                    .Where(x => x.Key == applicationContext)
+                    .SelectMany(x => x.Value)
+                    .Where(x => x.Key == section || section.IsAssignableFrom(x.Key))
+                    .SelectMany(x => x.Value)
+                    .Where(x => x.Key == scope)
+                    .SelectMany(x => x.Value)
+                    .OrderBy(x => x.Order)
+                    .Select(x => x.FragmentContext)];
+            }
         }
 
         /// <summary>
@@ -242,7 +303,10 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <returns>True if the plugin context exists in the dictionary, otherwise false.</returns>
         public bool Contains(IPluginContext pluginContext)
         {
-            return _dict.ContainsKey(pluginContext);
+            lock (_lock)
+            {
+                return pluginContext is not null && _dict.ContainsKey(pluginContext);
+            }
         }
 
         /// <summary>
@@ -253,7 +317,11 @@ namespace WebExpress.WebCore.WebFragment.Model
         /// <returns>True if the plugin context and application context exist in the dictionary, otherwise false.</returns>
         public bool Contains(IPluginContext pluginContext, IApplicationContext applicationContext)
         {
-            return _dict.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
+            lock (_lock)
+            {
+                return pluginContext is not null && applicationContext is not null
+                    && _dict.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
+            }
         }
     }
 }

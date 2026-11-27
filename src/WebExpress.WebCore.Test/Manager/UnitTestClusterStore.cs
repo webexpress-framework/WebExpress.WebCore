@@ -230,5 +230,34 @@ namespace WebExpress.WebCore.Test.Manager
 
             Assert.Single(store.List("session"));
         }
+
+        /// <summary>
+        /// Tests that a compare-and-delete removes the entry only while it holds the expected
+        /// value: the release of an expired lock must leave the lock of its new owner alone.
+        /// </summary>
+        /// <param name="kind">The store kind.</param>
+        [Theory]
+        [MemberData(nameof(Kinds))]
+        public void RemoveIfLeavesAnotherOwnersEntry(string kind)
+        {
+            // arrange
+            var store = Create(kind);
+            var first = new byte[] { 1 };
+            var second = new byte[] { 2 };
+            store.TryAdd("lock", "packages", first, TimeSpan.FromSeconds(10));
+            _clock.Now += TimeSpan.FromSeconds(11);
+            store.TryAdd("lock", "packages", second, TimeSpan.FromSeconds(10));
+
+            // act
+            var stale = store.RemoveIf("lock", "packages", first);
+            var owner = store.Get("lock", "packages");
+            var own = store.RemoveIf("lock", "packages", second);
+
+            // validation
+            Assert.False(stale);
+            Assert.Equal(second, owner);
+            Assert.True(own);
+            Assert.Null(store.Get("lock", "packages"));
+        }
     }
 }

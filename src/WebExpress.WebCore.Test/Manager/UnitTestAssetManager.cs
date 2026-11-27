@@ -22,7 +22,9 @@ namespace WebExpress.WebCore.Test.Manager
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
 
             // act
-            Assert.Equal(12, componentHub.AssetManager.Assets.Count());
+            // every script, stylesheet and image is mounted twice: on its plain and on its versioned
+            // address, and so are the two bundles of the bundled include in each of the three applications
+            Assert.Equal(48, componentHub.AssetManager.Assets.Count());
         }
 
         /// <summary>
@@ -140,6 +142,82 @@ namespace WebExpress.WebCore.Test.Manager
             Assert.Null(componentHub.AssetManager.GetAssetRoute(application, plugin, null));
             Assert.Null(componentHub.AssetManager.GetAssetRoute(application, null, "/assets/css/mycss.css"));
             Assert.Null(componentHub.AssetManager.GetAssetRoute(null, plugin, "/assets/css/mycss.css"));
+            Assert.Null(componentHub.AssetManager.GetVersionedAssetRoute(application, plugin, null));
+            Assert.Null(componentHub.AssetManager.GetVersionedAssetRoute(application, null, "/assets/css/mycss.css"));
+            Assert.Null(componentHub.AssetManager.GetVersionedAssetRoute(null, plugin, "/assets/css/mycss.css"));
+        }
+
+        /// <summary>
+        /// Tests that the versioned route of a file carries a hash of its content in the file
+        /// name and is mounted, so a page can link it.
+        /// </summary>
+        [Theory]
+        [InlineData(typeof(TestApplicationA), "/assets/css/mycss.css", @"^/server/appa/assets/css/mycss\.[0-9a-f]{12}\.css$")]
+        [InlineData(typeof(TestApplicationA), "/assets/js/myjavascript.mini.js", @"^/server/appa/assets/js/myjavascript\.mini\.[0-9a-f]{12}\.js$")]
+        [InlineData(typeof(TestApplicationC), "/assets/css/mycss.css", @"^/server/assets/css/mycss\.[0-9a-f]{12}\.css$")]
+        public void VersionedAssetRoute(Type applicationType, string file, string pattern)
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var application = componentHub.ApplicationManager.GetApplications(applicationType)?.FirstOrDefault();
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+
+            // act
+            var route = componentHub.AssetManager.GetVersionedAssetRoute(application, plugin, file)?.ToString();
+
+            // validation
+            Assert.Matches(pattern, route);
+            Assert.Contains(route, componentHub.AssetManager.GetAssets(application).Select(x => x.Route.ToString()));
+            Assert.Equal(route, componentHub.AssetManager.GetVersionedAssetRoute(application, plugin, file)?.ToString());
+        }
+
+        /// <summary>
+        /// Tests that a versioned address is served with a cache lifetime of a year and marked
+        /// immutable, while the plain address of the same file stays revalidated: only the
+        /// versioned one changes when the content does.
+        /// </summary>
+        [Fact]
+        public void VersionedAssetIsCachedLong()
+        {
+            // arrange
+            var embeddedResource = UnitTestFixture.GetEmbeddedResource("css/mycss.css");
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).First();
+            var plugin = componentHub.PluginManager?.GetPlugin(typeof(TestPlugin));
+            var versioned = "http://localhost:8080" + componentHub.AssetManager.GetVersionedAssetRoute(application, plugin, "/assets/css/mycss.css");
+            var plain = "http://localhost:8080/server/appa/assets/css/mycss.css";
+            componentHub.SitemapManager.Refresh();
+
+            // act
+            var versionedResponse = Send(componentHub, versioned);
+            var plainResponse = Send(componentHub, plain);
+
+            // validation
+            Assert.Equal(embeddedResource, Encoding.UTF8.GetString(versionedResponse.Content as byte[]));
+            Assert.Equal("public, max-age=31536000, immutable", versionedResponse.Header.CacheControl);
+            Assert.Equal("no-cache", plainResponse.Header.CacheControl);
+            Assert.Equal(plainResponse.Header.CustomHeader["ETag"], versionedResponse.Header.CustomHeader["ETag"]);
+        }
+
+        /// <summary>
+        /// Sends a request for a uri through the sitemap to the asset registered there.
+        /// </summary>
+        /// <param name="componentHub">The component hub.</param>
+        /// <param name="uri">The uri.</param>
+        /// <returns>The response.</returns>
+        private static IResponse Send(IComponentHub componentHub, string uri)
+        {
+            var httpServerContext = UnitTestFixture.CreateHttpServerContextMock();
+            var searchResult = componentHub.SitemapManager.SearchResource(new System.Uri(uri), new SearchContext()
+            {
+                HttpServerContext = httpServerContext,
+                Culture = httpServerContext.Culture,
+                HttpContext = UnitTestFixture.CreateHttpContextMock()
+            });
+
+            return componentHub
+                .EndpointManager
+                .HandleRequest(UnitTestFixture.CreateRequestMock("", uri), searchResult.EndpointContext);
         }
 
         /// <summary>

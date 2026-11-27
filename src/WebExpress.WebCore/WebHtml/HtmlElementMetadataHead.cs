@@ -14,6 +14,7 @@ namespace WebExpress.WebCore.WebHtml
         private readonly HtmlElementMetadataBase _elementBase = new HtmlElementMetadataBase();
         private IEnumerable<HtmlElementMetadataLink> _elementFavicons = [];
         private IEnumerable<HtmlElementMetadataStyle> _elementStyles = [];
+        private IReadOnlyList<string> _scripts = [];
         private IEnumerable<HtmlElementScriptingScript> _elementScripts = [];
         private IEnumerable<HtmlElementScriptingScript> _elementScriptLinks = [];
         private IEnumerable<HtmlElementMetadataLink> _elementCssLinks = [];
@@ -64,17 +65,30 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// Gets or sets the scripts.
+        /// Gets or sets the code of scripts that are not files of their own. They run after the
+        /// <see cref="ScriptLinks"/> and in the order given, as they did while the files were
+        /// loaded synchronously: a script such as a set of translations calls the framework the
+        /// files define, which written inline would run before any deferred file.
         /// </summary>
         public IEnumerable<string> Scripts
         {
-            get => _elementScriptLinks.Select(x => x.Code);
-            set { _elementScripts = value.Select(x => new HtmlElementScriptingScript(x)); }
+            get => _scripts;
+            set
+            {
+                _scripts = [.. value ?? []];
+                _elementScripts = [.. _scripts.Select(HtmlElementScriptingScript.CreateDeferred)];
+            }
         }
 
         /// <summary>
-        /// Gets or sets the text/javascript.
+        /// Gets or sets the links to script files.
         /// </summary>
+        /// <remarks>
+        /// Every file is deferred: a script in the head stops the parser until it is loaded and
+        /// run, and a page links several hundred, so the page showed nothing before all of them
+        /// had arrived. Deferred, they load while the page is parsed and still run in the order
+        /// they are linked, before DOMContentLoaded, where the controls are built.
+        /// </remarks>
         public IEnumerable<string> ScriptLinks
         {
             get => _elementScriptLinks.Select(x => x.Src);
@@ -84,7 +98,8 @@ namespace WebExpress.WebCore.WebHtml
                 {
                     Language = "javascript",
                     Src = x,
-                    Type = "text/javascript"
+                    Type = "text/javascript",
+                    Defer = true
                 });
             }
         }

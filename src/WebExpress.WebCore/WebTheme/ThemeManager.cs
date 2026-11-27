@@ -150,7 +150,7 @@ namespace WebExpress.WebCore.WebTheme
 
             foreach (var themeType in themeTypes)
             {
-                var id = themeType.FullName?.ToLower();
+                var id = themeType.FullName?.ToLowerInvariant();
                 var image = default(string);
                 var name = default(string);
                 var description = default(string);

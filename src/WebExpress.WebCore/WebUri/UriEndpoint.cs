@@ -442,7 +442,18 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>true if successful, false otherwise.</returns>
         public virtual bool Contains(string segment)
         {
-            return PathSegments.Any(x => x.Value.Equals(segment, StringComparison.OrdinalIgnoreCase));
+            // an unbound variable has no value yet
+            return PathSegments.Any(x => string.Equals(x.Value, segment, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Percent-encodes a decoded parameter value for a path segment or a query value.
+        /// </summary>
+        /// <param name="value">The value.</param>
+        /// <returns>The encoded value, or null.</returns>
+        private static string Escape(string value)
+        {
+            return value is null ? null : Uri.EscapeDataString(value);
         }
 
         /// <summary>
@@ -463,7 +474,7 @@ namespace WebExpress.WebCore.WebUri
 
             for (int i = 0; i < a.Count; i++)
             {
-                if (!a[i].Value.Equals(b[i].Value, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(a[i].Value, b[i].Value, StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
                 }
@@ -504,7 +515,9 @@ namespace WebExpress.WebCore.WebUri
                         variable.VariableName.Equals(key, StringComparison.OrdinalIgnoreCase))
                     {
                         var copy = variable.Copy() as IUriPathSegmentVariable;
-                        copy.Value = parameter.Value;
+                        // a parameter holds the decoded value; written as it stands, a "/", "?"
+                        // or "#" in it - or a line break, in a Location header - changed the uri
+                        copy.Value = Escape(parameter.Value);
 
                         return copy;
                     }
@@ -533,7 +546,7 @@ namespace WebExpress.WebCore.WebUri
                 // keep the uri's declared query key; only its value is replaced when a parameter matches
                 boundQuery.Add(string.IsNullOrWhiteSpace(parameter.key)
                     ? new UriQuery(query.Key, query.Value)
-                    : new UriQuery(query.Key, parameter.Value));
+                    : new UriQuery(query.Key, Escape(parameter.Value)));
             }
 
             return new UriEndpoint(this, [.. pathSegments])

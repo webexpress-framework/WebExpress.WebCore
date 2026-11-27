@@ -226,6 +226,20 @@ namespace WebExpress.WebCore.Test.Message
         }
 
         /// <summary>
+        /// Tests that a 401 challenges for a bearer token and never for Basic credentials, which
+        /// the server does not accept: a browser answers a Basic challenge with a login dialog and
+        /// then sends the typed credentials with every request in place of the sign-in cookie.
+        /// </summary>
+        [Fact]
+        public async Task UnauthorizedChallengesBearerNotBasic()
+        {
+            var feature = await Send("HTTP/1.1", new ResponseUnauthorized());
+
+            Assert.Equal("Bearer", feature.Headers.WWWAuthenticate.ToString());
+            Assert.Equal("WWW-Authenticate: Bearer", new ResponseUnauthorized().Header.ToString().Split(Environment.NewLine).Single(x => x.StartsWith("WWW-Authenticate")));
+        }
+
+        /// <summary>
         /// A minimal <see cref="IHttpContext"/> backed by an explicit feature collection, used to
         /// drive the sender without constructing a full request pipeline.
         /// </summary>

@@ -95,6 +95,7 @@ namespace WebExpress.WebCore.WebIdentity
             state.Identity = snapshot;
             state.Pair = pair;
             state.Changed = true;
+            RegenerateSession(request);
             Metrics?.Logins.Increment("success");
             Metrics?.RecordActiveUser(snapshot.Id);
             return pair;
@@ -139,7 +140,25 @@ namespace WebExpress.WebCore.WebIdentity
             state.Identity = null;
             state.Pair = null;
             state.Changed = true;
+            RegenerateSession(request);
             Metrics?.Logouts.Increment();
+        }
+
+        /// <summary>
+        /// Gives the session of a request a new id when its privilege changes.
+        /// </summary>
+        /// <remarks>
+        /// The session id survived the sign-in, so an id an attacker planted in the victim's
+        /// browser before - or observed - named the authenticated session afterwards (session
+        /// fixation). The old id stops resolving; the response carries the new one.
+        /// </remarks>
+        /// <param name="request">The request that signs in or out.</param>
+        private void RegenerateSession(IRequest request)
+        {
+            if (request is RequestBase concrete && concrete.ExistingSession is { } session)
+            {
+                _componentHub?.SessionManager?.RegenerateId(session);
+            }
         }
 
         /// <summary>

@@ -138,7 +138,7 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an info message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Info(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null);
@@ -147,17 +147,17 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an info message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Info(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args);
 
         /// <summary>
         /// Logs a warning message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Warning(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null);
@@ -166,17 +166,17 @@ namespace WebExpress.WebCore.WebLog
         /// Logs a warning message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Warning(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args);
 
         /// <summary>
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Error(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null);
@@ -185,17 +185,17 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Error(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args);
 
         /// <summary>
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void FatalError(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null);
@@ -204,17 +204,17 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void FatalError(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args);
 
         /// <summary>
         /// Logs an exception message.
         /// </summary>
         /// <param name="ex">The exception</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Exception(Exception ex, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null);
@@ -223,7 +223,7 @@ namespace WebExpress.WebCore.WebLog
         /// Logs a debug message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null);
@@ -232,10 +232,10 @@ namespace WebExpress.WebCore.WebLog
         /// Logs a debug message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args);
 
         /// <summary>

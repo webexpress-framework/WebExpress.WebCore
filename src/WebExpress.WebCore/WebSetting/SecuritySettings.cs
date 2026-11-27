@@ -80,5 +80,13 @@ namespace WebExpress.WebCore.WebSetting
         /// Meant for development only.
         /// </summary>
         public bool? DetailedErrors { get; set; }
+
+        /// <summary>
+        /// Serves endpoints without a policy to callers who are not signed in. Off by default:
+        /// an endpoint without a policy requires a signed-in caller, so an endpoint that forgot its
+        /// policy does not become public. Meant only for migrating an application whose public
+        /// endpoints are not yet marked with <c>PublicAccessPolicy</c> or <c>IPublicEndpoint</c>.
+        /// </summary>
+        public bool? PublicByDefault { get; set; }
     }
 }

@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseConflict(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>409</title></head><body>409 - Conflict</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>409</title></head><body>409 - Conflict</body></html>");
             Reason = "Conflict";
 
             Header.ContentType = "text/html";

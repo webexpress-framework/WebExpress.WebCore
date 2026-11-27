@@ -37,6 +37,17 @@ namespace WebExpress.WebCore.WebInclude
         IEnumerable<IncludeFile> Files { get; }
 
         /// <summary>
+        /// Gets the files a page links for the include, in the order they are to be linked.
+        /// </summary>
+        /// <remarks>
+        /// With bundling switched on, each run of mounted files of one type becomes one bundle,
+        /// and a file that stands alone or is not mounted keeps its own entry, so its route is
+        /// still resolved when the page renders. With bundling switched off, these are the
+        /// <see cref="Files"/> themselves.
+        /// </remarks>
+        IEnumerable<IncludeFile> LinkedFiles { get; }
+
+        /// <summary>
         /// Gets the collection of scopes associated with the current context.
         /// </summary>
         /// <remarks>

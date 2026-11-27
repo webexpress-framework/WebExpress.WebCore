@@ -12,7 +12,7 @@ namespace WebExpress.WebCore.WebUri
         /// <summary>
         /// Gets or sets the id.
         /// </summary>
-        public string Id => Value?.ToLower();
+        public string Id => Value?.ToLowerInvariant();
 
         /// <summary>
         /// Gets or sets the path text.

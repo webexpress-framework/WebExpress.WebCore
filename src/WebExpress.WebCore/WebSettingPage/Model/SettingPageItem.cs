@@ -116,7 +116,7 @@ namespace WebExpress.WebCore.WebSettingPage.Model
         /// <summary>
         /// Gets the group context to which the setting page belongs.
         /// </summary>
-        public ISettingGroupContext SettingGroup { get; internal set; }
+        public ISettingGroupContext SettingGroup => SettingPageContext?.SettingGroup;
 
         /// <summary>
         /// Initializes a new instance of the class.

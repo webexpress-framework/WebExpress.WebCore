@@ -81,7 +81,7 @@ namespace WebExpress.WebCore.WebIdentity.Model
         /// <returns>The event element in its string representation.</returns>
         public override string ToString()
         {
-            return $"Permission: '{PermissionClass.FullName.ToLower()}'";
+            return $"Permission: '{PermissionClass.FullName.ToLowerInvariant()}'";
         }
     }
 }

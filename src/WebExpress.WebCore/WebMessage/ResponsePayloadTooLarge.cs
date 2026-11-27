@@ -27,8 +27,8 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user-defined status message, or <c>null</c> to use a default HTML body.</param>
         public ResponsePayloadTooLarge(StatusMessage message)
         {
-            var content = message?.Message
-                ?? "<html><head><title>413 Payload Too Large</title></head><body>413 - Payload Too Large</body></html>";
+            var content = StatusMessage.ToHtml(message,
+                "<html><head><title>413 Payload Too Large</title></head><body>413 - Payload Too Large</body></html>");
 
             Reason = "Payload Too Large";
 

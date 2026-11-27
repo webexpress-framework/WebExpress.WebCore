@@ -44,7 +44,9 @@ namespace WebExpress.WebCore.WebHtml
             builder.Append(ElementName);
             builder.Append(">");
 
-            builder.Append(Title);
+            // the title is text - a page names itself after a record a user named - so it is
+            // encoded; written verbatim, a "</title><script>" in it was markup
+            HtmlText.Encode(builder, Title);
 
             builder.Append("</");
             builder.Append(ElementName);

@@ -319,7 +319,7 @@ namespace WebExpress.WebCore.WebPage
                 .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
                 .Where(x => x.GetInterface(typeof(IPage<>).Name) is not null))
             {
-                var id = pageType.FullName?.ToLower();
+                var id = pageType.FullName?.ToLowerInvariant();
                 var segment = default(ISegmentAttribute);
                 var icon = default(Type);
                 var title = pageType.Name;
@@ -329,6 +329,12 @@ namespace WebExpress.WebCore.WebPage
                 var cache = false;
                 var domains = new List<Type>();
                 var policies = new List<IIdentityPolicy>();
+                // a class that answers callers who are not signed in says so; an endpoint
+                // without a policy requires a signed-in caller
+                if (typeof(WebEndpoint.IPublicEndpoint).IsAssignableFrom(pageType))
+                {
+                    policies.Add(new WebPolicies.PublicAccessPolicy());
+                }
                 var attributes = pageType.CustomAttributes
                     .Where(x => !x.AttributeType.GetInterfaces().Contains(typeof(IEndpointAttribute)) &&
                     !x.AttributeType.GetInterfaces().Contains(typeof(IPageAttribute)));

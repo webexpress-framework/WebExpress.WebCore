@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseUnsupportedMediaType(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>415</title></head><body>415 - Unsupported Media Type</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>415</title></head><body>415 - Unsupported Media Type</body></html>");
             Reason = "Unsupported Media Type";
 
             Header.ContentType = "text/html";

@@ -317,6 +317,27 @@ namespace WebExpress.WebCore.Test.WebUri
         }
 
         /// <summary>
+        /// Tests that a bound value is percent-encoded: written as it stands, a "/", "?" or "#"
+        /// in it - or a line break, in a Location header - changed the uri it was bound into.
+        /// </summary>
+        [Fact]
+        public void BindParametersEncodesTheValue()
+        {
+            // arrange
+            var uri = new UriEndpoint(new IUriPathSegment[]
+            {
+                new UriPathSegmentConstant("a"),
+                new UriPathSegmentVariableString<TestParameterA>("testparametera")
+            });
+
+            // act
+            var bind = uri.BindParameters(new TestParameterA { Value = "x/../admin?y#z" });
+
+            // validation
+            Assert.Equal("/a/x%2F..%2Fadmin%3Fy%23z", bind.ToString());
+        }
+
+        /// <summary>
         /// Tests the BindParameters method to verify that parameters are correctly 
         /// bound to the URI endpoint.
         /// </summary>

@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseNotImplemented(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>501</title></head><body>501 - Not Implemented</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>501</title></head><body>501 - Not Implemented</body></html>");
             Reason = "Not Implemented";
 
             Header.ContentType = "text/html";

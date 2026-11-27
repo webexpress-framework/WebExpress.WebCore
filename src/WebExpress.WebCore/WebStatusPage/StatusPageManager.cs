@@ -474,12 +474,18 @@ namespace WebExpress.WebCore.WebStatusPage
 
             lock (_guard)
             {
-                if (!_dictionary.ContainsKey(pluginContext))
+                if (!_dictionary.Remove(pluginContext, out var appDict))
                 {
                     return;
                 }
 
-                _dictionary.Remove(pluginContext);
+                // announced like the removal of an application, so a listener does not keep a
+                // status page of a plugin that is gone
+                foreach (var statusPageItem in appDict.Values.SelectMany(x => x.Values))
+                {
+                    OnRemoveStatusPage(statusPageItem.StatusPageContext);
+                    statusPageItem.Dispose();
+                }
             }
         }
 

@@ -37,6 +37,12 @@ namespace WebExpress.WebCore.WebJob
         private readonly IHttpServerContext _httpServerContext;
         private readonly ScheduleDictionary _staticScheduleDictionary = [];
         private readonly List<ScheduleItem> _dynamicScheduleList = [];
+
+        // the package scan registers and removes jobs on its own thread while the scheduler walks
+        // them every minute; a collection changed during that walk threw out of the loop and
+        // ended the scheduling of the whole process. every access is taken under this lock and
+        // the scheduler works on a copy.
+        private readonly Lock _lock = new();
         private readonly CancellationTokenSource _tokenSource = new();
         private readonly Clock _clock = new();
 
@@ -53,12 +59,7 @@ namespace WebExpress.WebCore.WebJob
         /// <summary>
         /// Gets all job contextes.
         /// </summary>
-        public IEnumerable<IJobContext> Jobs => _staticScheduleDictionary
-            .SelectMany(x => x.Value)
-            .SelectMany(x => x.Value)
-            .SelectMany(x => x.Value)
-            .Select(x => x.JobContext)
-            .Union(_dynamicScheduleList.Select(x => x.JobContext));
+        public IEnumerable<IJobContext> Jobs => [.. Snapshot().Select(x => x.JobContext)];
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -91,9 +92,12 @@ namespace WebExpress.WebCore.WebJob
         /// <param name="pluginContext">The context of the plugin whose jobs are to be associated.</param>
         private void Register(IPluginContext pluginContext)
         {
-            if (_staticScheduleDictionary.ContainsKey(pluginContext))
+            lock (_lock)
             {
-                return;
+                if (pluginContext is null || _staticScheduleDictionary.ContainsKey(pluginContext))
+                {
+                    return;
+                }
             }
 
             Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
@@ -107,7 +111,14 @@ namespace WebExpress.WebCore.WebJob
         {
             foreach (var pluginContext in _componentHub?.PluginManager?.GetPlugins(applicationContext))
             {
-                if (_staticScheduleDictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext))
+                bool known;
+
+                lock (_lock)
+                {
+                    known = _staticScheduleDictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
+                }
+
+                if (known)
                 {
                     continue;
                 }
@@ -133,7 +144,7 @@ namespace WebExpress.WebCore.WebJob
                     x.GetInterface(typeof(IJob).Name) is not null
                 ))
             {
-                var id = job.FullName?.ToLower();
+                var id = job.FullName?.ToLowerInvariant();
 
                 var minute = "*";
                 var hour = "*";
@@ -186,12 +197,19 @@ namespace WebExpress.WebCore.WebJob
 
                     if (job != default)
                     {
-                        if (_staticScheduleDictionary.AddScheduleItem
-                        (
-                            pluginContext,
-                            applicationContext,
-                            new ScheduleItem(_componentHub, _httpServerContext, pluginContext, applicationContext, jobContext, job)
-                        ))
+                        bool added;
+
+                        lock (_lock)
+                        {
+                            added = _staticScheduleDictionary.AddScheduleItem
+                            (
+                                pluginContext,
+                                applicationContext,
+                                new ScheduleItem(_componentHub, _httpServerContext, pluginContext, applicationContext, jobContext, job)
+                            );
+                        }
+
+                        if (added)
                         {
                             OnAddJob(jobContext);
 
@@ -244,21 +262,25 @@ namespace WebExpress.WebCore.WebJob
                 return;
             }
 
-            // the plugin has not been registered in the manager
-            if (_staticScheduleDictionary.TryGetValue(pluginContext, out var value))
+            List<ScheduleItem> scheduleItems;
+
+            lock (_lock)
             {
-                var scheduleItems = value.Values
-                    .SelectMany(x => x.Values)
-                    .SelectMany(x => x)
-                    .ToList();
-
-                _staticScheduleDictionary.Remove(pluginContext);
-
-                foreach (var scheduleItem in scheduleItems)
+                // the plugin has not been registered in the manager
+                if (!_staticScheduleDictionary.Remove(pluginContext, out var value))
                 {
-                    OnRemoveJob(scheduleItem.JobContext);
-                    Release(scheduleItem);
+                    return;
                 }
+
+                scheduleItems = [.. value.Values
+                    .SelectMany(x => x.Values)
+                    .SelectMany(x => x)];
+            }
+
+            foreach (var scheduleItem in scheduleItems)
+            {
+                OnRemoveJob(scheduleItem.JobContext);
+                Release(scheduleItem);
             }
         }
 
@@ -275,11 +297,14 @@ namespace WebExpress.WebCore.WebJob
 
             var scheduleItems = new List<ScheduleItem>();
 
-            foreach (var pluginDict in _staticScheduleDictionary.Values)
+            lock (_lock)
             {
-                if (pluginDict.Remove(applicationContext, out var appDict))
+                foreach (var pluginDict in _staticScheduleDictionary.Values)
                 {
-                    scheduleItems.AddRange(appDict.Values.SelectMany(x => x));
+                    if (pluginDict.Remove(applicationContext, out var appDict))
+                    {
+                        scheduleItems.AddRange(appDict.Values.SelectMany(x => x));
+                    }
                 }
             }
 
@@ -296,11 +321,14 @@ namespace WebExpress.WebCore.WebJob
         /// <param name="job">The job to remove.</param>
         public void Remove(IJob job)
         {
-            var scheduleItems = _dynamicScheduleList
-                .Where(x => x.Instance == job)
-                .ToList();
+            List<ScheduleItem> scheduleItems;
 
-            _dynamicScheduleList.RemoveAll(scheduleItems.Contains);
+            lock (_lock)
+            {
+                scheduleItems = [.. _dynamicScheduleList.Where(x => x.Instance == job)];
+
+                _dynamicScheduleList.RemoveAll(scheduleItems.Contains);
+            }
 
             foreach (var scheduleItem in scheduleItems)
             {
@@ -395,7 +423,17 @@ namespace WebExpress.WebCore.WebJob
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(stopping, _tokenSource.Token);
                 while (!linked.IsCancellationRequested)
                 {
-                    Update();
+                    // one failing minute - a broken cron expression, an unreachable cluster store -
+                    // is logged and the next minute is scheduled; an exception leaving the loop
+                    // ended the scheduling of every job of the process without a trace
+                    try
+                    {
+                        Update();
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _httpServerContext?.Log?.Exception(ex);
+                    }
 
                     var secondsLeft = 60 - DateTime.Now.Second;
                     await Task.Delay(TimeSpan.FromSeconds(secondsLeft), linked.Token).ConfigureAwait(false);
@@ -411,11 +449,7 @@ namespace WebExpress.WebCore.WebJob
         {
             foreach (var clock in _clock.Synchronize())
             {
-                foreach (var scheduleItemValue in _staticScheduleDictionary
-                    .SelectMany(x => x.Value)
-                    .SelectMany(x => x.Value)
-                    .SelectMany(x => x.Value)
-                    .Union(_dynamicScheduleList.Select(x => x)))
+                foreach (var scheduleItemValue in Snapshot())
                 {
                     if (scheduleItemValue.JobContext.Cron.Matching(_clock) && Claim(scheduleItemValue.JobContext, _clock))
                     {
@@ -495,12 +529,25 @@ namespace WebExpress.WebCore.WebJob
         /// <returns>A JobContext instance.</returns>
         public IJobContext GetJob(IApplicationContext applicationContext, Type jobType)
         {
-            return _staticScheduleDictionary
-                .SelectMany(x => x.Value)
-                .SelectMany(x => x.Value)
-                .SelectMany(x => x.Value)
-                .Union(_dynamicScheduleList.Select(x => x))
+            return Snapshot()
                 .FirstOrDefault(x => x.JobContext.ApplicationContext == applicationContext && x.JobClass == jobType)?.JobContext;
+        }
+
+        /// <summary>
+        /// Copies the scheduled items under the lock, so the scheduler and the callers walk a list
+        /// that no registration can change underneath them.
+        /// </summary>
+        /// <returns>The static and dynamic schedule items.</returns>
+        private List<ScheduleItem> Snapshot()
+        {
+            lock (_lock)
+            {
+                return [.. _staticScheduleDictionary
+                    .SelectMany(x => x.Value)
+                    .SelectMany(x => x.Value)
+                    .SelectMany(x => x.Value)
+                    .Union(_dynamicScheduleList)];
+            }
         }
 
         /// <summary>
@@ -515,14 +562,18 @@ namespace WebExpress.WebCore.WebJob
 
             _tokenSource.Cancel();
 
-            foreach (var item in _staticScheduleDictionary.Values.SelectMany(x => x.Values)
-                .SelectMany(x => x.Values).SelectMany(x => x).Concat(_dynamicScheduleList).Distinct())
+            var items = Snapshot();
+
+            lock (_lock)
+            {
+                _staticScheduleDictionary.Clear();
+                _dynamicScheduleList.Clear();
+            }
+
+            foreach (var item in items)
             {
                 Release(item);
             }
-
-            _staticScheduleDictionary.Clear();
-            _dynamicScheduleList.Clear();
         }
     }
 }

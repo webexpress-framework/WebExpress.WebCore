@@ -4,24 +4,18 @@ using System.Linq;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebEndpoint;
-using WebExpress.WebCore.WebPlugin;
 
 namespace WebExpress.WebCore.WebSettingPage.Model
 {
     /// <summary>
     /// Represents a dictionary for managing setting pages, organized by plugin and application contexts.
     /// </summary>
-    internal class SettingPageDictionary
+    internal class SettingPageDictionary : SettingItemRegistry<SettingPageItem>
     {
-        private readonly Dictionary<IPluginContext, Dictionary<IApplicationContext, List<SettingPageItem>>> _dict = [];
-
         /// <summary>
         /// Gets the collection of setting pages.
         /// </summary>
-        public IEnumerable<ISettingPageContext> All => _dict.Values
-            .SelectMany(a => a.Values)
-            .SelectMany(x => x)
-            .Select(x => x.SettingPageContext);
+        public IEnumerable<ISettingPageContext> All => [.. Items().Select(x => x.SettingPageContext)];
 
         /// <summary>
         /// Adds a settings page.
@@ -30,58 +24,7 @@ namespace WebExpress.WebCore.WebSettingPage.Model
         /// <returns>True if the settings page was added successfully; otherwise, false.</returns>
         public bool AddSettingPageItem(SettingPageItem item)
         {
-            if (!_dict.TryGetValue(item.PluginContext, out var appDict))
-            {
-                appDict = [];
-                _dict.Add(item.PluginContext, appDict);
-            }
-
-            if (!appDict.TryGetValue(item.ApplicationContext, out var list))
-            {
-                list = [];
-                appDict.Add(item.ApplicationContext, list);
-            }
-
-            list.Add(item);
-
-            return true;
-        }
-
-        /// <summary>
-        /// Removes all elemets associated with the specified plugin context.
-        /// </summary>
-        /// <param name="pluginContext">The context of the plugin that contains the elemets to remove.</param>
-        public void Remove(IPluginContext pluginContext)
-        {
-            _dict.Remove(pluginContext);
-        }
-
-        /// <summary>
-        /// Removes all setting pages associated with the specified application context.
-        /// </summary>
-        /// <param name="applicationContext">The context of the application that contains the fragments to remove.</param>
-        /// <returns>An enumerable collection of setting page contexts that were removed.</returns>
-        public IEnumerable<ISettingPageContext> Remove(IApplicationContext applicationContext)
-        {
-            if (applicationContext is null)
-            {
-                yield break;
-            }
-
-            foreach (var pluginDict in _dict.Values)
-            {
-                var removed = pluginDict
-                    .Where(x => x.Key == applicationContext)
-                    .SelectMany(x => x.Value)
-                    .ToList();
-
-                pluginDict.Remove(applicationContext);
-
-                foreach (var page in removed)
-                {
-                    yield return page.SettingPageContext;
-                }
-            }
+            return Add(item.PluginContext, item.ApplicationContext, item);
         }
 
         /// <summary>
@@ -91,11 +34,9 @@ namespace WebExpress.WebCore.WebSettingPage.Model
         /// <returns>An enumeration of setting page contextes.</returns>
         public IEnumerable<ISettingPageContext> GetSettingPages(Type settingPageType)
         {
-            return _dict.Values
-                .SelectMany(a => a.Values)
-                .SelectMany(x => x)
+            return [.. Items()
                 .Where(x => x.SettingPageClass.Equals(settingPageType))
-                .Select(x => x.SettingPageContext);
+                .Select(x => x.SettingPageContext)];
         }
 
         /// <summary>
@@ -106,68 +47,63 @@ namespace WebExpress.WebCore.WebSettingPage.Model
         /// <returns>An enumeration of setting page contextes.</returns>
         public IEnumerable<ISettingPageContext> GetSettingPages(Type settingPageType, IApplicationContext applicationContext)
         {
-            return _dict.Values
-                .SelectMany(a => a)
-                .Where(a => a.Key.Equals(applicationContext))
-                .SelectMany(x => x.Value)
+            return [.. Items(applicationContext)
                 .Where(x => x.SettingPageClass.Equals(settingPageType))
-                .Select(x => x.SettingPageContext);
-        }
-
-        /// <summary>
-        /// Determines whether the dictionary contains the specified plugin context.
-        /// </summary>
-        /// <param name="pluginContext">The context of the plugin to locate in the dictionary.</param>
-        /// <returns>True if the dictionary contains an element with the specified plugin context; otherwise, false.</returns>
-        public bool Contains(IPluginContext pluginContext)
-        {
-            return _dict.ContainsKey(pluginContext);
-        }
-
-        /// <summary>
-        /// Determines whether the dictionary contains the specified apllication context.
-        /// </summary>
-        /// <param name="applicationContext">The context of the application to locate in the dictionary.</param>
-        /// <returns>True if the dictionary contains an element with the specified application context; otherwise, false.</returns>
-        public bool Contains(IApplicationContext applicationContext)
-        {
-            return _dict.Values.Any(x => x.ContainsKey(applicationContext));
+                .Select(x => x.SettingPageContext)];
         }
 
         /// <summary>
         /// Creates a new setting page instance or returns an existing cached instance.
         /// </summary>
+        /// <remarks>
+        /// The instance is created outside the lock, so a slow page constructor does not hold up
+        /// other requests; when two requests create a cached page at once, both use the one kept.
+        /// </remarks>
         /// <param name="settingPageContext">The context used for setting page creation.</param>
         /// <param name="componentHub">The central management hub for components.</param>
         /// <param name="httpServerContext">The context of the HTTP server.</param>
         /// <returns>The created or cached setting page instance.</returns>
         public IEndpoint CreateSettingPageInstance(ISettingPageContext settingPageContext, IComponentHub componentHub, IHttpServerContext httpServerContext)
         {
-            var settingPageItem = _dict.Values
-                .SelectMany(a => a.Values)
-                .SelectMany(x => x)
-                .FirstOrDefault(x => x.SettingPageContext.Equals(settingPageContext));
+            var settingPageItem = Items().FirstOrDefault(x => x.SettingPageContext.Equals(settingPageContext));
 
-            if (settingPageItem is not null && settingPageItem.Instance is null)
+            if (settingPageItem is null)
             {
-                var instance = ComponentActivator.CreateInstance<IEndpoint, ISettingPageContext>
-                (
-                    settingPageItem.SettingPageClass,
-                    settingPageContext,
-                    httpServerContext,
-                    componentHub,
-                    settingPageContext.ApplicationContext
-                );
+                return null;
+            }
 
-                if (settingPageItem.Cache)
-                {
-                    settingPageItem.Instance = instance;
-                }
+            var cached = WithItem(x => x == settingPageItem, x => x?.Instance);
 
+            if (cached is not null)
+            {
+                return cached;
+            }
+
+            var instance = ComponentActivator.CreateInstance<IEndpoint, ISettingPageContext>
+            (
+                settingPageItem.SettingPageClass,
+                settingPageContext,
+                httpServerContext,
+                componentHub,
+                settingPageContext.ApplicationContext
+            );
+
+            if (!settingPageItem.Cache)
+            {
                 return instance;
             }
 
-            return settingPageItem?.Instance;
+            return WithItem(x => x == settingPageItem, x =>
+            {
+                if (x is null)
+                {
+                    return instance;
+                }
+
+                x.Instance ??= instance;
+
+                return x.Instance;
+            });
         }
 
         /// <summary>
@@ -178,12 +114,9 @@ namespace WebExpress.WebCore.WebSettingPage.Model
         /// <returns>An enumeration of setting page contexts.</returns>
         public IEnumerable<ISettingPageContext> GetSettingPages(IApplicationContext applicationContext, ISettingCategoryContext categoryContext)
         {
-            return _dict.Values
-                 .SelectMany(a => a)
-                 .Where(a => a.Key == applicationContext)
-                 .SelectMany(x => x.Value)
-                 .Where(x => x.SettingPageContext?.SettingCategory == categoryContext)
-                 .Select(x => x.SettingPageContext);
+            return [.. Items(applicationContext)
+                .Where(x => x.SettingPageContext?.SettingCategory == categoryContext)
+                .Select(x => x.SettingPageContext)];
         }
 
         /// <summary>
@@ -194,12 +127,9 @@ namespace WebExpress.WebCore.WebSettingPage.Model
         /// <returns>An enumeration of setting page contexts.</returns>
         public IEnumerable<ISettingPageContext> GetSettingPages(IApplicationContext applicationContext, ISettingGroupContext groupContext)
         {
-            return _dict.Values
-                 .SelectMany(a => a)
-                 .Where(a => a.Key == applicationContext)
-                 .SelectMany(x => x.Value)
-                 .Where(x => x.SettingPageContext?.SettingGroup == groupContext)
-                 .Select(x => x.SettingPageContext);
+            return [.. Items(applicationContext)
+                .Where(x => x.SettingPageContext?.SettingGroup == groupContext)
+                .Select(x => x.SettingPageContext)];
         }
     }
 }

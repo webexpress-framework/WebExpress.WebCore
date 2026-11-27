@@ -245,11 +245,9 @@ namespace WebExpress.WebCore.WebCluster
                 {
                     return new Subscription(() =>
                     {
-                        // only the owner releases; a lock that expired and was taken over stays with its new owner
-                        if (store.Get(LockScope, name)?.AsSpan().SequenceEqual(token) == true)
-                        {
-                            store.Remove(LockScope, name);
-                        }
+                        // only the owner releases, in one step: a lock that expired and was taken over
+                        // between a check and the removal stays with its new owner
+                        store.RemoveIf(LockScope, name, token);
                     });
                 }
 

@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -101,7 +102,7 @@ namespace WebExpress.WebCore.Internationalization
         /// <param name="pluginId">The id of the plugin to which the internationalization data will be assigned.</param>
         public void Register(Assembly assembly, string pluginId)
         {
-            var assemblyName = assembly.GetName().Name.ToLower();
+            var assemblyName = assembly.GetName().Name.ToLowerInvariant();
             var name = assemblyName + ".internationalization.";
             // resource names are identifiers, not text: a culture-aware comparison would be slow
             // over the thousands of names a plugin embeds, and wrong under e.g. a turkish culture
@@ -109,7 +110,7 @@ namespace WebExpress.WebCore.Internationalization
 
             foreach (var languageResource in resources)
             {
-                var language = languageResource.Split('.').LastOrDefault()?.ToLower();
+                var language = languageResource.Split('.').LastOrDefault()?.ToLowerInvariant();
 
                 var dictItem = Dictionary.GetOrAdd(language, _ => new());
 
@@ -121,7 +122,7 @@ namespace WebExpress.WebCore.Internationalization
                     if (!line.StartsWith('#') && !string.IsNullOrWhiteSpace(line))
                     {
                         var split = line.Split('=');
-                        var key = pluginId?.ToLower() + ":" + split[0]?.Trim().ToLower();
+                        var key = pluginId?.ToLowerInvariant() + ":" + split[0]?.Trim().ToLowerInvariant();
 
                         dictItem.TryAdd(key, string.Join("=", split.Skip(1)));
                     }
@@ -173,7 +174,7 @@ namespace WebExpress.WebCore.Internationalization
         /// <returns>The value of the key in the current language.</returns>
         public string Translate(string key, params object[] args)
         {
-            return string.Format(Translate(DefaultCulture, null, key), args);
+            return Format(Translate(DefaultCulture, null, key), args);
         }
 
         /// <summary>
@@ -196,7 +197,7 @@ namespace WebExpress.WebCore.Internationalization
         /// <returns>The value of the key in the current language.</returns>
         public string Translate(IRequest request, string key, params object[] args)
         {
-            return string.Format(Translate(request, key), args);
+            return Format(Translate(request, key), args);
         }
 
         /// <summary>
@@ -219,7 +220,7 @@ namespace WebExpress.WebCore.Internationalization
         /// <returns>The value of the key in the current language.</returns>
         public string Translate(CultureInfo culture, string key, params object[] args)
         {
-            return string.Format(Translate(culture, key), args);
+            return Format(Translate(culture, key), args);
         }
 
         /// <summary>
@@ -232,7 +233,7 @@ namespace WebExpress.WebCore.Internationalization
         public string Translate(CultureInfo culture, string pluginId, string key)
         {
             var language = culture?.TwoLetterISOLanguageName;
-            var k = string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(pluginId) || key.StartsWith($"{pluginId?.ToLower()}:") ? key?.ToLower() : $"{pluginId?.ToLower()}:{key?.ToLower()}";
+            var k = string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(pluginId) || key.StartsWith($"{pluginId?.ToLowerInvariant()}:") ? key?.ToLowerInvariant() : $"{pluginId?.ToLowerInvariant()}:{key?.ToLowerInvariant()}";
 
             if (string.IsNullOrWhiteSpace(key))
             {
@@ -270,7 +271,7 @@ namespace WebExpress.WebCore.Internationalization
         /// <returns>The value of the key in the current language.</returns>
         public string Translate(CultureInfo culture, string pluginId, string key, params object[] args)
         {
-            return string.Format(Translate(culture, pluginId, key), args);
+            return Format(Translate(culture, pluginId, key), args);
         }
 
         /// <summary>
@@ -286,6 +287,29 @@ namespace WebExpress.WebCore.Internationalization
         /// </summary>
         public void Dispose()
         {
+        }
+
+        /// <summary>
+        /// Inserts the arguments into a translation.
+        /// </summary>
+        /// <remarks>
+        /// A key without a translation is returned as it stands and becomes the format, and keys are
+        /// often built from data - a stored status, a name a user chose. A brace in it made
+        /// string.Format throw and failed the whole request; such a text is returned unformatted.
+        /// </remarks>
+        /// <param name="format">The translation.</param>
+        /// <param name="args">The arguments.</param>
+        /// <returns>The formatted text, or the translation itself when it is no valid format.</returns>
+        private static string Format(string format, object[] args)
+        {
+            try
+            {
+                return string.Format(format, args);
+            }
+            catch (FormatException)
+            {
+                return format;
+            }
         }
     }
 }

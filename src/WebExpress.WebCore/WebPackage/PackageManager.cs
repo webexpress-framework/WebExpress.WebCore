@@ -57,6 +57,27 @@ namespace WebExpress.WebCore.WebPackage
         private CancellationTokenSource TokenSource { get; } = new CancellationTokenSource();
 
         /// <summary>
+        /// Gets or sets the largest package file taken in when the caller sets no limit of its
+        /// own - the scan of the package directory among them.
+        /// </summary>
+        public long MaxPackageBytes { get; set; } = 256L * 1024 * 1024;
+
+        /// <summary>
+        /// Gets or sets the most bytes a package may unpack to.
+        /// </summary>
+        /// <remarks>
+        /// A small archive can declare - or inflate to - gigabytes (a zip bomb) and fill the disk
+        /// the server extracts to; the declared sizes are checked on validation, the bytes actually
+        /// written on extraction.
+        /// </remarks>
+        public long MaxExtractedBytes { get; set; } = 1024L * 1024 * 1024;
+
+        /// <summary>
+        /// Gets or sets the most entries a package archive may hold.
+        /// </summary>
+        public int MaxPackageEntries { get; set; } = 10_000;
+
+        /// <summary>
         /// Gets the catalog of installed packages.
         /// </summary>
         public PackageCatalog Catalog { get; } = new PackageCatalog();
@@ -733,6 +754,11 @@ namespace WebExpress.WebCore.WebPackage
                 return result;
             }
 
+            if (maxPackageBytes <= 0)
+            {
+                maxPackageBytes = MaxPackageBytes;
+            }
+
             if (maxPackageBytes > 0)
             {
                 var fileInfo = new FileInfo(packageFile);
@@ -756,6 +782,19 @@ namespace WebExpress.WebCore.WebPackage
             try
             {
                 using var zip = ZipFile.OpenRead(packageFile);
+
+                if (zip.Entries.Count > MaxPackageEntries)
+                {
+                    result.Add(Text("validation.entries", MaxPackageEntries));
+                    return result;
+                }
+
+                if (zip.Entries.Sum(x => x.Length) > MaxExtractedBytes)
+                {
+                    result.Add(Text("validation.extracted", MaxExtractedBytes));
+                    return result;
+                }
+
                 var specEntry = zip.Entries.FirstOrDefault(x => Path.GetExtension(x.FullName).Equals(".spec", StringComparison.OrdinalIgnoreCase));
                 if (specEntry is null)
                 {
@@ -1409,27 +1448,23 @@ namespace WebExpress.WebCore.WebPackage
         /// <returns>The package information as a catalog entry.</returns>
         private PackageCatalogItem LoadPackage(string file)
         {
-            try
+            // a file placed in the package directory - copied by hand, synced from a share - is
+            // held to the checks an upload passes; the scan took it in with no check at all
+            if (File.Exists(file))
             {
-                if (File.Exists(file))
+                var validation = ValidatePackage(file);
+
+                if (validation.IsValid)
                 {
-                    using var zip = ZipFile.Open(file, ZipArchiveMode.Read);
-
-                    var specEntry = zip.Entries
-                        .FirstOrDefault(x => Path.GetExtension(x.FullName).Equals(".spec", StringComparison.OrdinalIgnoreCase));
-                    if (specEntry is null)
-                    {
-                        _httpServerContext?.Log?.Warning($"package spec was not found in '{file}'");
-                        return null;
-                    }
-
-                    var spec = ReadSpec(specEntry);
-                    return CreateCatalogItem(file, spec, zip);
+                    return validation.Package;
                 }
-            }
-            catch (Exception ex)
-            {
-                _httpServerContext?.Log?.Exception(ex);
+
+                _httpServerContext?.Log?.Warning
+                (
+                    I18N.Translate("webexpress.webcore:packagemanager.refused", Path.GetFileName(file), string.Join(" ", validation.Messages))
+                );
+
+                return null;
             }
 
             _httpServerContext?.Log?.Debug
@@ -1510,7 +1545,7 @@ namespace WebExpress.WebCore.WebPackage
             Catalog.DisabledPlugins.Clear();
             Catalog.DisabledPlugins.AddRange(disabled);
 
-            using (var fs = new FileStream(temporary, FileMode.CreateNew))
+            using (var fs = PrivateStorage.Create(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read))
             using (var writer = new XmlTextWriter(fs, Encoding.Unicode))
             {
                 var serializer = new XmlSerializer(typeof(PackageCatalog));
@@ -1804,6 +1839,7 @@ namespace WebExpress.WebCore.WebPackage
                 .Select(x => ConfigurationPath.Combine(HttpServerSettings.PluginSection, x))
                 .ToList();
             var deployedSettings = false;
+            var budget = MaxExtractedBytes;
 
             foreach (var entry in zip.Entries)
             {
@@ -1863,7 +1899,13 @@ namespace WebExpress.WebCore.WebPackage
                     Directory.CreateDirectory(targetDir);
                 }
 
-                entry.ExtractToFile(targetFilePath, true);
+                // the declared size was checked on validation; the bytes written are counted
+                // here, since an entry may inflate to more than it declares
+                using (var source = entry.Open())
+                using (var target = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    budget = CopyBounded(source, target, budget, entry.FullName);
+                }
             }
 
             // the configuration everyone holds is reloaded in place, so the plugin about to
@@ -1949,7 +1991,8 @@ namespace WebExpress.WebCore.WebPackage
                 Directory.CreateDirectory(settingsPath);
 
                 // create-new, so of several instances deploying the same package only one writes
-                using var target = new FileStream(targetFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                // settings deployed from a package often carry credentials
+                using var target = PrivateStorage.Create(targetFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                 target.Write(content);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -2105,7 +2148,7 @@ namespace WebExpress.WebCore.WebPackage
                     .Select(x => x as TargetFrameworkAttribute)
                     .SingleOrDefault();
 
-            return targetFrameworkAttribute.FrameworkDisplayName.Replace(" ", "").ToLower().Replace(".net", "net");
+            return targetFrameworkAttribute.FrameworkDisplayName.Replace(" ", "").ToLowerInvariant().Replace(".net", "net");
         }
 
         /// <summary>
@@ -2690,9 +2733,69 @@ namespace WebExpress.WebCore.WebPackage
         /// assemblies another instance has loaded, and removing a package on one instance would
         /// pull them from under the others. Decided once, before the first package is extracted.
         /// </summary>
+        /// <remarks>
+        /// The cluster directory lay under the shared temp directory, where on a multi-user host
+        /// anybody may create "webexpress" first - or a link of that name - and place assemblies
+        /// the server would then load. It lies in the server's data directory instead, or in the
+        /// local application data of the account the server runs as, created private to it.
+        /// </remarks>
         private string ExtractionRoot => _extractionRoot ??= Cluster is { } cluster
-            ? Path.Combine(Path.GetTempPath(), "webexpress", "packages", string.Concat(cluster.NodeId.Select(x => char.IsLetterOrDigit(x) || x is '-' or '.' ? x : '_')))
+            ? CreatePrivateDirectory(Path.Combine(
+                string.IsNullOrWhiteSpace(_httpServerContext?.DataPath)
+                    ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.Create), "WebExpress")
+                    : _httpServerContext.DataPath,
+                "packages",
+                string.Concat(cluster.NodeId.Select(x => char.IsLetterOrDigit(x) || x is '-' or '.' ? x : '_'))))
             : _httpServerContext?.PackagePath;
+
+        /// <summary>
+        /// Creates a directory only the account of the server may enter, and refuses one that is
+        /// a link, since a link planted before the server started could point anywhere.
+        /// </summary>
+        /// <param name="path">The directory.</param>
+        /// <returns>The directory.</returns>
+        private static string CreatePrivateDirectory(string path)
+        {
+            var directory = OperatingSystem.IsWindows()
+                ? Directory.CreateDirectory(path)
+                : Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+            if (directory.LinkTarget is not null)
+            {
+                throw new IOException($"The package extraction directory '{path}' is a link.");
+            }
+
+            return path;
+        }
+
+        /// <summary>
+        /// Copies an archive entry, refusing it once the bytes written exceed what is left of the
+        /// extraction budget.
+        /// </summary>
+        /// <param name="source">The entry stream.</param>
+        /// <param name="target">The file stream.</param>
+        /// <param name="budget">The bytes still allowed.</param>
+        /// <param name="name">The entry name, for the error.</param>
+        /// <returns>The bytes still allowed after the copy.</returns>
+        private static long CopyBounded(Stream source, Stream target, long budget, string name)
+        {
+            var buffer = new byte[81920];
+            int read;
+
+            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                budget -= read;
+
+                if (budget < 0)
+                {
+                    throw new InvalidDataException($"The package entry '{name}' unpacks to more than the allowed size.");
+                }
+
+                target.Write(buffer, 0, read);
+            }
+
+            return budget;
+        }
 
         /// <summary>
         /// Runs a change of the package set so that no other instance changes the shared catalog

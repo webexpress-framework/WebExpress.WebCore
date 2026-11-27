@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http.Features;
 using System;
 using System.Net;
 using System.Text;
+using System.Threading;
 
 namespace WebExpress.WebCore.WebMessage
 {
@@ -63,7 +64,27 @@ namespace WebExpress.WebCore.WebMessage
         /// </summary>
         /// <param name="contextFeatures">Initial set of features.</param>
         /// <param name="httpServerContext">The context of the Web server.</param>
+        /// <remarks>
+        /// The request body is read here, synchronously. That suits a body already held in
+        /// memory; the server itself builds its contexts without the body and reads it
+        /// asynchronously once the request is being processed.
+        /// </remarks>
         public HttpContext(IFeatureCollection contextFeatures, IHttpServerContext httpServerContext)
+            : this(contextFeatures, httpServerContext, readContent: true)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the class.
+        /// </summary>
+        /// <param name="contextFeatures">Initial set of features.</param>
+        /// <param name="httpServerContext">The context of the Web server.</param>
+        /// <param name="readContent">
+        /// True to read the request body right away; false leaves it to
+        /// <see cref="WebMessage.Request.ReadContentAsync"/>, as a context Kestrel creates
+        /// must not block on a body that is still arriving.
+        /// </param>
+        internal HttpContext(IFeatureCollection contextFeatures, IHttpServerContext httpServerContext, bool readContent)
         {
             var connectionFeature = contextFeatures.Get<IHttpConnectionFeature>();
             var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
@@ -75,13 +96,42 @@ namespace WebExpress.WebCore.WebMessage
             Id = connectionFeature.ConnectionId;
             LocalEndPoint = new IPEndPoint(connectionFeature.LocalIpAddress, connectionFeature.LocalPort);
             RemoteEndPoint = new IPEndPoint(connectionFeature.RemoteIpAddress, connectionFeature.RemotePort);
+            Uri = ResolveTarget(baseUri, requestFeature.RawTarget);
 
-            Encoding = requestFeature.Headers.ContentEncoding.Count != 0
-                ? Encoding.GetEncoding(requestFeature.Headers.ContentEncoding)
-                : Encoding.Default;
-            Uri = new Uri(baseUri, requestFeature.RawTarget);
+            var request = new Request(contextFeatures, header, httpServerContext);
 
-            Request = new Request(contextFeatures, header, httpServerContext);
+            if (readContent)
+            {
+                request.ReadContentAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+
+            Request = request;
+        }
+
+        /// <summary>
+        /// Resolves the request target against the authority the request was addressed to.
+        /// </summary>
+        /// <remarks>
+        /// The target is never resolved as a relative reference: one that starts with "//"
+        /// ("//evil.com/admin") would then be read as a network-path reference and replace the
+        /// host, so the routing would see "/admin" while a proxy in front saw a different path.
+        /// An absolute-form target only contributes its path and query, and anything else
+        /// (the asterisk of "OPTIONS *") addresses the root.
+        /// </remarks>
+        /// <param name="baseUri">The scheme, host and port of the request.</param>
+        /// <param name="rawTarget">The request target as the client sent it.</param>
+        /// <returns>The uri of the request.</returns>
+        internal static Uri ResolveTarget(Uri baseUri, string rawTarget)
+        {
+            var target = rawTarget switch
+            {
+                null or "" => "/",
+                _ when rawTarget.StartsWith('/') => rawTarget,
+                _ when Uri.TryCreate(rawTarget, UriKind.Absolute, out var absolute) => absolute.PathAndQuery,
+                _ => "/"
+            };
+
+            return new Uri(baseUri.GetLeftPart(UriPartial.Authority) + target);
         }
 
         /// <summary>

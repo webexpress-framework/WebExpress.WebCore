@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
-using System.Threading.Tasks;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebEndpoint;
 using WebExpress.WebCore.WebParameter;
@@ -23,6 +22,16 @@ namespace WebExpress.WebCore.WebMessage
     public abstract class RequestBase : IRequest
     {
         private readonly ParameterDictionary _param = [];
+
+        /// <summary>
+        /// Gets or sets the most distinct parameters one request may carry.
+        /// </summary>
+        /// <remarks>
+        /// Query, form and text bodies are split into parameters by the client's say; without a
+        /// bound a single body of short pairs grew a dictionary of hundreds of thousands of
+        /// entries. Further keys are dropped; a repeated key still replaces its earlier value.
+        /// </remarks>
+        public static int MaxParameters { get; set; } = 1024;
         private Session _session;
 
         internal Session ExistingSession { get => _session; set => _session = value; }
@@ -79,6 +88,18 @@ namespace WebExpress.WebCore.WebMessage
         public EndPoint RemoteEndPoint { get; private set; }
 
         /// <summary>
+        /// Gets the address of the client the request came from, resolved by the server through
+        /// its trusted proxies; without a resolution, the address of the connection.
+        /// </summary>
+        public IPAddress ClientAddress
+        {
+            get => _clientAddress ?? (RemoteEndPoint as IPEndPoint)?.Address;
+            internal set => _clientAddress = value;
+        }
+
+        private IPAddress _clientAddress;
+
+        /// <summary>
         /// Gets a boolean value that indicates whether the tcp connection used to send the request uses the secure sockets layer (ssl) protocol.
         /// </summary>
         public bool IsSecureConnection { get; private set; }
@@ -96,24 +117,15 @@ namespace WebExpress.WebCore.WebMessage
         /// <summary>
         /// Gets the culture.
         /// </summary>
-        public CultureInfo Culture
-        {
-            get
-            {
-                try
-                {
-                    // see RFC 5646 
-                    var languages = Header?.AcceptLanguage.FirstOrDefault();
-                    var language = languages?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        /// <remarks>
+        /// Every translation and every date or number format of a render reads it, hundreds of
+        /// times per page, so it is resolved once per request. The instance is the shared,
+        /// read-only one of <see cref="CultureInfo.GetCultureInfo(string)"/>, since it is handed
+        /// to code the request does not control.
+        /// </remarks>
+        public CultureInfo Culture => _culture ??= ResolveCulture();
 
-                    return new CultureInfo(language);
-                }
-                catch
-                {
-                    return HttpServerContext.Culture ?? CultureInfo.CurrentCulture;
-                }
-            }
-        }
+        private CultureInfo _culture;
 
         /// <summary>
         /// Gets the collection of parameters associated with the request.
@@ -131,13 +143,12 @@ namespace WebExpress.WebCore.WebMessage
             var connectionFeature = contextFeatures.Get<IHttpConnectionFeature>();
             var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
             var requestIdentifierFeature = contextFeatures.Get<IHttpRequestIdentifierFeature>();
-            //var sessionFeature = contextFeatures.Get<ISessionFeature>();
 
             HttpServerContext = httpServerContext;
             RequestTraceIdentifier = requestIdentifierFeature.TraceIdentifier;
             Protocol = requestFeature.Protocol;
 
-            Scheme = requestFeature.Scheme.ToLower() switch
+            Scheme = requestFeature.Scheme.ToLowerInvariant() switch
             {
                 "http" => UriScheme.Http,
                 "https" => UriScheme.Https,
@@ -148,7 +159,7 @@ namespace WebExpress.WebCore.WebMessage
                 _ => UriScheme.Http
 
             };
-            Method = requestFeature.Method.ToUpper() switch
+            Method = requestFeature.Method.ToUpperInvariant() switch
             {
                 "GET" => RequestMethod.GET,
                 "POST" => RequestMethod.POST,
@@ -156,7 +167,9 @@ namespace WebExpress.WebCore.WebMessage
                 "DELETE" => RequestMethod.DELETE,
                 "HEAD" => RequestMethod.HEAD,
                 "PATCH" => RequestMethod.PATCH,
-                _ => RequestMethod.GET
+                // a method the framework does not implement must not reach a GET handler, which
+                // would answer an OPTIONS preflight or a PROPFIND with the resource itself
+                _ => RequestMethod.NONE
             };
 
             Header = header;
@@ -190,7 +203,8 @@ namespace WebExpress.WebCore.WebMessage
         {
             query = query.TrimStart('?');
 
-            Parallel.ForEach(query.Split('&'), (param) =>
+            // in order, so a repeated key always resolves to its last occurrence
+            foreach (var param in query.Split('&'))
             {
                 if (!string.IsNullOrWhiteSpace(param))
                 {
@@ -202,7 +216,39 @@ namespace WebExpress.WebCore.WebMessage
 
                     AddParameter(new Parameter(key, value, ParameterScope.Parameter));
                 }
-            });
+            }
+        }
+
+        /// <summary>
+        /// Determines the culture from the first language the client accepts (see RFC 5646),
+        /// falling back to the culture of the server.
+        /// </summary>
+        /// <remarks>
+        /// curl, health checks and many XHR calls send no Accept-Language; such a request is
+        /// answered from the fallback without an exception, which was thrown and swallowed on
+        /// every read before.
+        /// </remarks>
+        /// <returns>The culture of the request.</returns>
+        private CultureInfo ResolveCulture()
+        {
+            var language = Header?.AcceptLanguage?.FirstOrDefault()?
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+
+            // "*" is the wildcard of the header, not a language
+            if (!string.IsNullOrWhiteSpace(language) && language != "*")
+            {
+                try
+                {
+                    return CultureInfo.GetCultureInfo(language);
+                }
+                catch (CultureNotFoundException)
+                {
+                    // a tag the client may send but the runtime does not know
+                }
+            }
+
+            return HttpServerContext?.Culture ?? CultureInfo.CurrentCulture;
         }
 
         /// <summary>
@@ -215,7 +261,7 @@ namespace WebExpress.WebCore.WebMessage
             {
                 foreach (var param in property.Params)
                 {
-                    AddParameter(new Parameter(param.Key?.ToLower(), param.Value.Value, ParameterScope.Session));
+                    AddParameter(new Parameter(param.Key?.ToLowerInvariant(), param.Value.Value, ParameterScope.Session));
                 }
             }
         }
@@ -238,9 +284,14 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="param">The parameter.</param>
         public void AddParameter(Parameter param)
         {
-            var key = param.Key.ToLower();
+            var key = param.Key?.ToLowerInvariant();
 
-            if (!_param.TryAdd(key, param))
+            if (key is null)
+            {
+                return;
+            }
+
+            if (_param.ContainsKey(key) || _param.Count < MaxParameters)
             {
                 _param[key] = param;
             }
@@ -255,7 +306,7 @@ namespace WebExpress.WebCore.WebMessage
         {
             if (!string.IsNullOrWhiteSpace(name) && HasParameter(name))
             {
-                return _param[name.ToLower()];
+                return _param[name.ToLowerInvariant()];
             }
 
             return null;
@@ -273,7 +324,7 @@ namespace WebExpress.WebCore.WebMessage
 
             if (!string.IsNullOrWhiteSpace(key) && HasParameter(key))
             {
-                var p = _param[key.ToLower()];
+                var p = _param[key.ToLowerInvariant()];
 
                 var parameter = new TParameter
                 {
@@ -299,7 +350,7 @@ namespace WebExpress.WebCore.WebMessage
                 return false;
             }
 
-            return _param.ContainsKey(name.ToLower());
+            return _param.ContainsKey(name.ToLowerInvariant());
         }
     }
 }

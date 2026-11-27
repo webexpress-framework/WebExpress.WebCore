@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
@@ -25,21 +26,44 @@ namespace WebExpress.WebCore.WebIdentity
         private readonly IdentityPermissionDictionary _permissionDictionary = [];
         private readonly IdentityPolicyDictionary _policyDictionary = [];
 
+        // the package scan registers and removes policies on its own thread while every request
+        // checks access against them; a dictionary written during that read can throw or loop
+        // forever, so both dictionaries are only touched under this lock
+        private readonly Lock _lock = new();
+
         /// <summary>
         /// Gets all permissions.
         /// </summary>
-        public IEnumerable<IIdentityPermissionContext> Permissions => _permissionDictionary.Values
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x)
-            .Select(x => x.PermissionContext);
+        public IEnumerable<IIdentityPermissionContext> Permissions
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return [.. _permissionDictionary.Values
+                        .SelectMany(x => x.Values)
+                        .SelectMany(x => x)
+                        .Select(x => x.PermissionContext)];
+                }
+            }
+        }
 
         /// <summary>
         /// Gets all policies.
         /// </summary>
-        public IEnumerable<IIdentityPolicyContext> Policies => _policyDictionary.Values
-            .SelectMany(x => x.Values)
-            .SelectMany(x => x)
-            .Select(x => x.PolicyContext);
+        public IEnumerable<IIdentityPolicyContext> Policies
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return [.. _policyDictionary.Values
+                        .SelectMany(x => x.Values)
+                        .SelectMany(x => x)
+                        .Select(x => x.PolicyContext)];
+                }
+            }
+        }
 
         /// <summary>
         /// Initializes a new instance of the class.
@@ -73,9 +97,12 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="pluginContext">The context of the plugin whose jobs are to be associated.</param>
         private void Register(IPluginContext pluginContext)
         {
-            if (_permissionDictionary.ContainsKey(pluginContext))
+            lock (_lock)
             {
-                return;
+                if (pluginContext is null || _permissionDictionary.ContainsKey(pluginContext))
+                {
+                    return;
+                }
             }
 
             Register(pluginContext, _componentHub.GetBoundApplications(pluginContext));
@@ -89,7 +116,14 @@ namespace WebExpress.WebCore.WebIdentity
         {
             foreach (var pluginContext in _componentHub?.PluginManager?.GetPlugins(applicationContext))
             {
-                if (_permissionDictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext))
+                bool known;
+
+                lock (_lock)
+                {
+                    known = _permissionDictionary.TryGetValue(pluginContext, out var appDict) && appDict.ContainsKey(applicationContext);
+                }
+
+                if (known)
                 {
                     continue;
                 }
@@ -151,12 +185,19 @@ namespace WebExpress.WebCore.WebIdentity
                         Permission = permissionType
                     };
 
-                    if (_permissionDictionary.AddPermissionItem
-                    (
-                        pluginContext,
-                        applicationContext,
-                        new IdentityPermissionItem(_componentHub, _httpServerContext, pluginContext, applicationContext, permissionType, permissionContext, policyTypes)
-                    ))
+                    bool added;
+
+                    lock (_lock)
+                    {
+                        added = _permissionDictionary.AddPermissionItem
+                        (
+                            pluginContext,
+                            applicationContext,
+                            new IdentityPermissionItem(_componentHub, _httpServerContext, pluginContext, applicationContext, permissionType, permissionContext, policyTypes)
+                        );
+                    }
+
+                    if (added)
                     {
                         _httpServerContext?.Log?.Debug
                         (
@@ -225,12 +266,19 @@ namespace WebExpress.WebCore.WebIdentity
                         Policy = policyType
                     };
 
-                    if (_policyDictionary.AddPolicyItem
-                    (
-                        pluginContext,
-                        applicationContext,
-                        new IdentityPolicyItem(_componentHub, _httpServerContext, pluginContext, applicationContext, policyType, policyContext, permissionTypes)
-                    ))
+                    bool added;
+
+                    lock (_lock)
+                    {
+                        added = _policyDictionary.AddPolicyItem
+                        (
+                            pluginContext,
+                            applicationContext,
+                            new IdentityPolicyItem(_componentHub, _httpServerContext, pluginContext, applicationContext, policyType, policyContext, permissionTypes)
+                        );
+                    }
+
+                    if (added)
                     {
                         _httpServerContext?.Log?.Debug
                         (
@@ -264,26 +312,29 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="pluginContext">The context of the plugin that contains the identities to remove.</param>
         internal void Remove(IPluginContext pluginContext)
         {
-            // remove permissions
-            if (_permissionDictionary.TryGetValue(pluginContext, out var permissionValue))
+            if (pluginContext is null)
             {
-                foreach (var permissionItem in permissionValue.SelectMany(x => x.Value))
-                {
-                    permissionItem.Dispose();
-                }
-
-                _permissionDictionary.Remove(pluginContext);
+                return;
             }
 
-            // remove policies
-            if (_policyDictionary.TryGetValue(pluginContext, out var policyValue))
+            var removed = new List<Action>();
+
+            lock (_lock)
             {
-                foreach (var permissionItem in policyValue.SelectMany(x => x.Value))
+                if (_permissionDictionary.Remove(pluginContext, out var permissionValue))
                 {
-                    permissionItem.Dispose();
+                    removed.AddRange(permissionValue.SelectMany(x => x.Value).Select(item => (Action)item.Dispose));
                 }
 
-                _policyDictionary.Remove(pluginContext);
+                if (_policyDictionary.Remove(pluginContext, out var policyValue))
+                {
+                    removed.AddRange(policyValue.SelectMany(x => x.Value).Select(item => (Action)item.Dispose));
+                }
+            }
+
+            foreach (var dispose in removed)
+            {
+                dispose();
             }
         }
 
@@ -298,32 +349,30 @@ namespace WebExpress.WebCore.WebIdentity
                 return;
             }
 
-            // remove permissions
-            foreach (var pluginDict in _permissionDictionary.Values)
+            var removed = new List<Action>();
+
+            lock (_lock)
             {
-                foreach (var appDict in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
+                foreach (var pluginDict in _permissionDictionary.Values)
                 {
-                    foreach (var permissionItem in appDict)
+                    if (pluginDict.Remove(applicationContext, out var appDict))
                     {
-                        permissionItem.Dispose();
+                        removed.AddRange(appDict.Select(item => (Action)item.Dispose));
                     }
                 }
 
-                pluginDict.Remove(applicationContext);
+                foreach (var pluginDict in _policyDictionary.Values)
+                {
+                    if (pluginDict.Remove(applicationContext, out var appDict))
+                    {
+                        removed.AddRange(appDict.Select(item => (Action)item.Dispose));
+                    }
+                }
             }
 
-            // remove policies
-            foreach (var pluginDict in _policyDictionary.Values)
+            foreach (var dispose in removed)
             {
-                foreach (var appDict in pluginDict.Where(x => x.Key == applicationContext).Select(x => x.Value))
-                {
-                    foreach (var policyItem in appDict)
-                    {
-                        policyItem.Dispose();
-                    }
-                }
-
-                pluginDict.Remove(applicationContext);
+                dispose();
             }
         }
 
@@ -441,9 +490,18 @@ namespace WebExpress.WebCore.WebIdentity
         /// <param name="identity">The identity to check.</param>
         /// <param name="endpointContext">The endpoint context containing the policies to evaluate.</param>
         /// <returns>True if the identity has the permission, false otherwise.</returns>
+        /// <remarks>
+        /// An endpoint without a policy requires a signed-in caller; a policy that could not be
+        /// created (null) denies access. Access is never granted by the absence of a rule.
+        /// </remarks>
         public bool CheckAccess(IIdentity identity, IEndpointContext endpointContext)
         {
-            var policies = endpointContext.Policies ?? [];
+            var policies = endpointContext?.Policies?.ToList() ?? [];
+
+            if (policies.Count == 0)
+            {
+                return identity is not null;
+            }
 
             return policies.All(x => CheckAccess(identity, x));
         }
@@ -456,6 +514,12 @@ namespace WebExpress.WebCore.WebIdentity
         /// <returns>True if the identity is assigned to a group that contains the policy, false otherwise.</returns>
         public bool CheckAccess(IIdentity identity, IIdentityPolicy policy)
         {
+            // a public endpoint answers everybody, signed in or not
+            if (policy is WebPolicies.PublicAccessPolicy)
+            {
+                return true;
+            }
+
             if (identity is null || policy is null)
             {
                 return false;
@@ -557,7 +621,7 @@ namespace WebExpress.WebCore.WebIdentity
         /// <returns>True if the identity policy has the permission, false otherwise.</returns>
         public bool CheckAccess(IApplicationContext applicationContext, Type policyType, Type permissionType)
         {
-            return CheckAccess(applicationContext, policyType.FullName.ToLower(), permissionType);
+            return CheckAccess(applicationContext, policyType.FullName, permissionType);
         }
 
         /// <summary>
@@ -569,33 +633,33 @@ namespace WebExpress.WebCore.WebIdentity
         /// <returns>True if the identity policy has the permission, false otherwise.</returns>
         private bool CheckAccess(IApplicationContext applicationContext, string policyName, Type permissionType)
         {
-            // verify policies to permissions
-            var policies = _policyDictionary.Values
-                .SelectMany(x => x)
-                .Where(x => x.Key == applicationContext)
-                .SelectMany(entry => entry.Value);
-
-            if (policies.Any(policy =>
-                policy.PolicyClass.FullName.Equals(policyName, StringComparison.CurrentCultureIgnoreCase) &&
-                policy.Permissions.Contains(permissionType)))
+            // a policy name is an identifier, so it compares ordinally: a culture-aware comparison
+            // let the same name match or not depending on the culture of the request thread
+            lock (_lock)
             {
-                return true;
+                // verify policies to permissions
+                var policies = _policyDictionary.Values
+                    .SelectMany(x => x)
+                    .Where(x => x.Key == applicationContext)
+                    .SelectMany(entry => entry.Value);
+
+                if (policies.Any(policy =>
+                    policy.PolicyClass.FullName.Equals(policyName, StringComparison.OrdinalIgnoreCase) &&
+                    policy.Permissions.Contains(permissionType)))
+                {
+                    return true;
+                }
+
+                // verify permissions to policies
+                var permissions = _permissionDictionary.Values
+                    .SelectMany(x => x)
+                    .Where(x => x.Key == applicationContext)
+                    .SelectMany(entry => entry.Value);
+
+                return permissions.Any(permission =>
+                    permission.PermissionClass == permissionType &&
+                    permission.Policies.Any(x => x.FullName.Equals(policyName, StringComparison.OrdinalIgnoreCase)));
             }
-
-            // verify permissions to policies
-            var permissions = _permissionDictionary.Values
-                .SelectMany(x => x)
-                .Where(x => x.Key == applicationContext)
-                .SelectMany(entry => entry.Value);
-
-            if (permissions.Any(permission =>
-                permission.PermissionClass == permissionType &&
-                permission.Policies.Any(x => x.FullName.Equals(policyName, StringComparison.CurrentCultureIgnoreCase))))
-            {
-                return true;
-            }
-
-            return false;
         }
 
         /// <summary>

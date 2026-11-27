@@ -25,7 +25,6 @@ namespace WebExpress.WebCore.WebMessage
         public HttpExceptionContext(Exception exception, IFeatureCollection contextFeatures)
         {
             var connectionFeature = contextFeatures.Get<IHttpConnectionFeature>();
-            //var requestFeature = contextFeatures.Get<IHttpRequestFeature>();
 
             Features = contextFeatures;
             Id = connectionFeature.ConnectionId;

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Hosting.Server;
+﻿using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -66,7 +66,8 @@ namespace WebExpress.WebCore.Test.Server
             var socketContext = Assert.IsType<HttpWebSocketContext>(result);
             Assert.IsType<RequestWebSocket>(socketContext.Request);
             Assert.Equal(expectedHost, socketContext.Uri.Host);
-            Assert.Equal(localPort, socketContext.Uri.Port);
+            // the public port of the host header, never the listener port behind a port mapping
+            Assert.Equal(new HostString(host).Port ?? (scheme == "https" ? 443 : 80), socketContext.Uri.Port);
             Assert.Equal(target, socketContext.Uri.PathAndQuery);
             Assert.Equal("updates", socketContext.Request.GetParameter("domains")?.Value);
             Assert.Equal(key, socketContext.WebSocketKey);
@@ -123,7 +124,7 @@ namespace WebExpress.WebCore.Test.Server
             var previousHub = WebEx.ComponentHub;
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock(externalUri: externalUri))
             {
-                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }] }
+                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }], Security = new SecuritySettings { PublicByDefault = true } }
             };
             var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock(server.HttpServerContext);
             using var client = new ClientWebSocket();
@@ -199,6 +200,53 @@ namespace WebExpress.WebCore.Test.Server
 
                 // validation
                 Assert.Equal(HttpStatusCode.Unauthorized, client.HttpStatusCode);
+            }
+            finally
+            {
+                client.Abort();
+                server.Stop();
+                componentHub.IdentityProviderManager.Dispose();
+                UnitTestFixture.BindComponentHub(previousHub);
+            }
+        }
+
+        /// <summary>
+        /// Verifies that an upgrade to an endpoint that is no socket is refused as a bad request,
+        /// without the handshake being attempted: the socket manager would otherwise run against
+        /// an endpoint without socket metadata and fail with an internal error.
+        /// </summary>
+        /// <returns>A task that completes after the refused handshake has been verified.</returns>
+        [Fact]
+        public async Task ConnectAsync_ToResourceThatIsNoSocket_IsBadRequest()
+        {
+            // arrange
+            var previousHub = WebEx.ComponentHub;
+            var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock())
+            {
+                Settings = new HttpServerSettings { Endpoints = [new() { Uri = "http://127.0.0.1:0/" }], Security = new SecuritySettings { PublicByDefault = true } }
+            };
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock(server.HttpServerContext);
+            using var client = new ClientWebSocket();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            try
+            {
+                var application = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).First();
+                componentHub.SitemapManager.Refresh();
+                var resource = componentHub.SitemapManager.GetUri(typeof(WWW.Resources.TestResourceA), application);
+                Assert.True(server.Start());
+                var kestrel = (IServer)typeof(HttpServer).GetProperty("Kestrel", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(server);
+                var address = kestrel.Features.Get<IServerAddressesFeature>().Addresses.Single();
+                var target = new UriBuilder(address) { Scheme = "ws", Path = new Uri(new Uri("http://localhost/"), resource.ToString()).AbsolutePath }.Uri;
+                client.Options.CollectHttpResponseDetails = true;
+
+                // act
+                await Assert.ThrowsAsync<WebSocketException>(() => client.ConnectAsync(target, timeout.Token));
+
+                // validation
+                Assert.Equal(HttpStatusCode.BadRequest, client.HttpStatusCode);
+                Assert.False(client.HttpResponseHeaders?.ContainsKey("Sec-WebSocket-Accept") ?? false);
             }
             finally
             {

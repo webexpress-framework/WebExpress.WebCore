@@ -6,7 +6,7 @@
     public class HtmlElementMultimediaAudio : HtmlElement, IHtmlElementMultimedia
     {
         /// <summary>
-        /// Liefert oder setzt die Audio-Url
+        /// Gets or sets the audio URL.
         /// </summary>
         public string Src
         {

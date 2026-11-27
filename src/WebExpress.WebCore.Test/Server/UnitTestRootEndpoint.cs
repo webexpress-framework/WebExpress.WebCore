@@ -178,6 +178,9 @@ namespace WebExpress.WebCore.Test.Server
                 { "WebExpress": { "Root": { "RedirectEnabled": {{redirectEnabled.ToString().ToLowerInvariant()}}, "ApplicationId": "{{application.ApplicationId}}" } } }
                 """))).Build();
             var server = new HttpServer(UnitTestFixture.CreateHttpServerContextMock()) { Settings = configuration.GetServerSettings() };
+            // the application endpoints under test carry no policy; the root, not the access, is tested
+            server.Settings.Security ??= new SecuritySettings();
+            server.Settings.Security.PublicByDefault = true;
             _hub.SitemapManager.Refresh();
             var context = UnitTestFixture.CreateHttpContextMock($"{method} / HTTP/1.1\r\nCookie:\r\n\r\n");
             var headers = new HttpResponseFeature();

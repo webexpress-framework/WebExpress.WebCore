@@ -54,5 +54,32 @@ namespace WebExpress.WebCore.WebAsset
         /// <param name="file">The file path relative to the plugin's mount, as declared on the asset attribute.</param>
         /// <returns>The route of the file, or null when the arguments do not describe one.</returns>
         IRoute GetAssetRoute(IApplicationContext applicationContext, IPluginContext pluginContext, string file);
+
+        /// <summary>
+        /// Returns the route to link a script or stylesheet of a plugin from. It carries a hash
+        /// of the content in the file name (for example <c>/site.4af3e7.js</c>), so the file is
+        /// served with <c>Cache-Control: public, max-age=31536000, immutable</c>: a browser
+        /// loads it again only when the content, and with it the address, has changed.
+        /// </summary>
+        /// <param name="applicationContext">The context of the application the file is addressed in.</param>
+        /// <param name="pluginContext">The context of the plugin the file belongs to.</param>
+        /// <param name="file">The file path relative to the plugin's mount, as declared on the asset attribute.</param>
+        /// <returns>
+        /// The versioned route of the file; the route of <see cref="GetAssetRoute"/> when the file
+        /// has no versioned address; or null when the arguments do not describe a file.
+        /// </returns>
+        IRoute GetVersionedAssetRoute(IApplicationContext applicationContext, IPluginContext pluginContext, string file);
+
+        /// <summary>
+        /// Returns the route that carries the hash of the content of the file mounted on a plain
+        /// route. A link composed from a plain route - a theme stylesheet, an application icon -
+        /// is turned into one the browser may keep for good.
+        /// </summary>
+        /// <param name="route">The route a file is linked by.</param>
+        /// <returns>
+        /// The versioned route, or null when no file with a versioned route is mounted on the route
+        /// - it addresses something else, such as an endpoint that generates its content.
+        /// </returns>
+        IRoute GetVersionedAssetRoute(string route);
     }
 }

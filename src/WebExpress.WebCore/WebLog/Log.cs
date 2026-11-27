@@ -6,7 +6,6 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using WebExpress.WebCore.WebSetting;
 
@@ -50,19 +49,20 @@ namespace WebExpress.WebCore.WebLog
 
         // the console is slow and serialized, so a request thread only queues its line; one
         // background writer drains the queue. Bounded so a console that cannot keep up slows the
-        // callers down instead of growing memory without limit.
-        private static readonly Channel<ConsoleLine> _console = Channel.CreateBounded<ConsoleLine>
-        (
-            new BoundedChannelOptions(10_000) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait }
-        );
+        // callers down instead of growing memory without limit. A blocking collection and not a
+        // channel: its waits are synchronous, while a channel resumes a waiting reader through
+        // the thread pool - and a saturated pool (a loaded host, a parallel test run) then left
+        // the queue undrained until every flush ran into its timeout.
+        private static readonly BlockingCollection<ConsoleLine> _console = new(10_000);
         private static readonly TimeSpan _consoleDrainTimeout = TimeSpan.FromSeconds(5);
         private const int _consoleBatchSize = 256;
 
         // the background writer and the direct fallback must not interleave their color changes
         private static readonly Lock _consoleWriteLock = new();
 
-        // started last, so everything the writer touches is initialized before it runs
-        private static readonly Task _consoleWriter = Task.Run(WriteConsoleAsync);
+        // started last, so everything the writer touches is initialized before it runs; on a
+        // thread of its own, so it never waits for the pool it would otherwise share
+        private static readonly Task _consoleWriter = Task.Factory.StartNew(WriteConsole, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         // the class part of the origin column comes from the caller's file name; resolving it once
         // per file keeps the string work off the logging path
@@ -335,7 +335,7 @@ namespace WebExpress.WebCore.WebLog
         /// <returns>True if the item was queued, false if the writer cannot take it.</returns>
         private static bool Enqueue(ConsoleLine line)
         {
-            if (_console.Writer.TryWrite(line))
+            if (_console.TryAdd(line))
             {
                 return true;
             }
@@ -345,18 +345,8 @@ namespace WebExpress.WebCore.WebLog
                 return false;
             }
 
-            // a canceled write is never queued, so a timed-out entry cannot show up twice
-            using var timeout = new CancellationTokenSource(_consoleDrainTimeout);
-
-            try
-            {
-                _console.Writer.WriteAsync(line, timeout.Token).AsTask().GetAwaiter().GetResult();
-                return true;
-            }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
+            // a timed-out add is never queued, so a dropped entry cannot show up twice
+            return _console.TryAdd(line, _consoleDrainTimeout);
         }
 
         /// <summary>
@@ -378,11 +368,7 @@ namespace WebExpress.WebCore.WebLog
 
             try
             {
-                if (!_console.Writer.TryWrite(marker))
-                {
-                    _console.Writer.WriteAsync(marker, timeout.Token).AsTask().GetAwaiter().GetResult();
-                }
-
+                _console.Add(marker, timeout.Token);
                 done.Task.Wait(timeout.Token);
             }
             catch (OperationCanceledException)
@@ -395,15 +381,16 @@ namespace WebExpress.WebCore.WebLog
         /// color are written as a single block, so the color is switched once per block and not
         /// once per entry.
         /// </summary>
-        private static async Task WriteConsoleAsync()
+        private static void WriteConsole()
         {
-            var reader = _console.Reader;
             var batch = new List<ConsoleLine>(_consoleBatchSize);
             var block = new StringBuilder();
 
-            while (await reader.WaitToReadAsync().ConfigureAwait(false))
+            foreach (var first in _console.GetConsumingEnumerable())
             {
-                while (batch.Count < _consoleBatchSize && reader.TryRead(out var line))
+                batch.Add(first);
+
+                while (batch.Count < _consoleBatchSize && _console.TryTake(out var line))
                 {
                     batch.Add(line);
                 }
@@ -627,7 +614,7 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an info message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Info(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
@@ -646,10 +633,10 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an info message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Info(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args)
         {
             try
@@ -666,7 +653,7 @@ namespace WebExpress.WebCore.WebLog
         /// Logs a warning message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Warning(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
@@ -686,10 +673,10 @@ namespace WebExpress.WebCore.WebLog
         /// Logs a warning message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Warning(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args)
         {
             try
@@ -707,7 +694,7 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Error(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
@@ -727,10 +714,10 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Error(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args)
         {
             try
@@ -748,7 +735,7 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void FatalError(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
@@ -768,10 +755,10 @@ namespace WebExpress.WebCore.WebLog
         /// Logs an error message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void FatalError(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args)
         {
             try
@@ -789,7 +776,7 @@ namespace WebExpress.WebCore.WebLog
         /// Preserves exception types, nested causes and stack traces for failure diagnosis.
         /// </summary>
         /// <param name="exception">The exception whose complete diagnostic details are required.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Exception(Exception exception, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
@@ -810,7 +797,7 @@ namespace WebExpress.WebCore.WebLog
         /// Logs a debug message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null)
@@ -835,10 +822,10 @@ namespace WebExpress.WebCore.WebLog
         /// Logs a debug message.
         /// </summary>
         /// <param name="message">The log message.</param>
-        /// <param name="instance">>Method/ function that wants to log.</param>
+        /// <param name="instance">The method or function that wants to log.</param>
         /// <param name="line">The line number.</param>
         /// <param name="file">The source file.</param>
-        /// <param name="args">Parameter für die Formatierung der Nachricht</param>
+        /// <param name="args">The arguments used to format the message.</param>
         public void Debug(string message, [CallerMemberName] string instance = null, [CallerLineNumber] int? line = null, [CallerFilePath] string file = null, params object[] args)
         {
             // see the parameterless-args overload: avoid the formatting unless debug output is on

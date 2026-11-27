@@ -24,7 +24,9 @@ namespace WebExpress.WebCore.WebUri
         /// <returns>A compiled, case-insensitive regular expression.</returns>
         public static Regex Get(string pattern)
         {
-            return _cache.GetOrAdd(pattern, p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled));
+            // the pattern is the developer's, the path segment the client's: a pattern that
+            // backtracks badly must not let one request hold a thread for as long as it likes
+            return _cache.GetOrAdd(pattern, p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(250)));
         }
     }
 
@@ -42,7 +44,7 @@ namespace WebExpress.WebCore.WebUri
         /// <summary>
         /// Gets or sets the id.
         /// </summary>
-        public string Id => VariableName?.ToLower();
+        public string Id => VariableName?.ToLowerInvariant();
 
         /// <summary>
         /// Gets or sets the variable name.

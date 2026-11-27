@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.IO;
+using System.Reflection;
 using System.Runtime.Loader;
 
 namespace WebExpress.WebCore.WebPlugin.Model
@@ -17,11 +18,12 @@ namespace WebExpress.WebCore.WebPlugin.Model
         /// <summary>
         /// Initializes a new instance of the class. The context is collectible, because a plugin
         /// removed at runtime unloads it; a non-collectible context refuses to unload and would
-        /// keep the plugin's assemblies in the process until it ends.
+        /// keep the plugin's assemblies in the process until it ends. It is named after the
+        /// plugin, so a log that reports where a type was loaded from names the plugin.
         /// </summary>
         /// <param name="pluginPath">The base path of the plugin.</param>
         public PluginLoadContext(string pluginPath)
-            : base(isCollectible: true)
+            : base(Path.GetFileNameWithoutExtension(pluginPath), isCollectible: true)
         {
             Resolver = new AssemblyDependencyResolver(pluginPath);
         }

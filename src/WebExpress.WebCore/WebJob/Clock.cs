@@ -126,7 +126,7 @@ namespace WebExpress.WebCore.WebJob
         /// </summary>
         /// <param name="obj1">The first time.</param>
         /// <param name="obj2">The second time.</param>
-        /// <returns>True wenn die linke Uhrzeit kleiner ist als die Rechte, false sonst</returns>
+        /// <returns>True if the left time is earlier than the right one; otherwise, false.</returns>
         public static bool operator <(Clock obj1, Clock obj2)
         {
             return obj1._dateTime < obj2._dateTime;

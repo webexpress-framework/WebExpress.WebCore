@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseGone(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>410</title></head><body>410 - Gone</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>410</title></head><body>410 - Gone</body></html>");
             Reason = "Gone";
 
             Header.ContentType = "text/html";

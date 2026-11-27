@@ -55,6 +55,67 @@ namespace WebExpress.WebCore.Test.Server
         }
 
         /// <summary>
+        /// A message within the declared maximum size is delivered, while one beyond it closes
+        /// the connection with the close code for a message too big, before it is handed on.
+        /// </summary>
+        /// <returns>A task that completes after both messages have been verified.</returns>
+        [Fact]
+        public async Task MessageOverMaxSizeClosesTheConnection()
+        {
+            // arrange
+            var componentHub = UnitTestFixture.CreateAndRegisterComponentHubMock();
+            var applicationContext = componentHub.ApplicationManager.GetApplications(typeof(TestApplicationA)).First();
+            var socketContext = (SocketContext)componentHub.SocketManager.GetSockets<TestSocketA>(applicationContext).First();
+            socketContext.MaxMessageSize = 16;
+            var toServer = new System.IO.Pipelines.Pipe();
+            var toClient = new System.IO.Pipelines.Pipe();
+            using var connection = new SocketConnection(new DuplexStream(toServer.Reader.AsStream(), toClient.Writer.AsStream()), socketContext);
+            using var client = System.Net.WebSockets.WebSocket.CreateFromStream(new DuplexStream(toClient.Reader.AsStream(), toServer.Writer.AsStream()),
+                new System.Net.WebSockets.WebSocketCreationOptions { IsServer = false });
+            var received = new List<string>();
+            var closed = new TaskCompletionSource<SocketCloseInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+            connection.TextMessageReceived += received.Add;
+            connection.Disconnected += info => closed.TrySetResult(info);
+            var cancellation = TestContext.Current.CancellationToken;
+
+            // act
+            var loop = connection.ReceiveLoopAsync(cancellation);
+            await client.SendAsync("short"u8.ToArray(), System.Net.WebSockets.WebSocketMessageType.Text, true, cancellation);
+            await client.SendAsync(new byte[100], System.Net.WebSockets.WebSocketMessageType.Text, true, cancellation);
+            var answer = await client.ReceiveAsync(new ArraySegment<byte>(new byte[256]), cancellation).WaitAsync(TimeSpan.FromSeconds(5), cancellation);
+            var info = await closed.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellation);
+            await loop.WaitAsync(TimeSpan.FromSeconds(5), cancellation);
+
+            // validation
+            Assert.Equal(["short"], received);
+            Assert.Equal(System.Net.WebSockets.WebSocketMessageType.Close, answer.MessageType);
+            Assert.Equal(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, answer.CloseStatus);
+            Assert.Equal(System.Net.WebSockets.WebSocketCloseStatus.MessageTooBig, info.Status);
+        }
+
+        /// <summary>
+        /// Joins a read and a write stream into the one stream a websocket runs on.
+        /// </summary>
+        private sealed class DuplexStream(Stream read, Stream write) : Stream
+        {
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => true;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override void Flush() => write.Flush();
+            public override Task FlushAsync(CancellationToken cancellationToken) => write.FlushAsync(cancellationToken);
+            public override int Read(byte[] buffer, int offset, int count) => read.Read(buffer, offset, count);
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => read.ReadAsync(buffer, cancellationToken);
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => read.ReadAsync(buffer, offset, count, cancellationToken);
+            public override void Write(byte[] buffer, int offset, int count) => write.Write(buffer, offset, count);
+            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => write.WriteAsync(buffer, cancellationToken);
+            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => write.WriteAsync(buffer, offset, count, cancellationToken);
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+        }
+
+        /// <summary>
         /// A write-only stream whose writes stay pending until the test opens it, and that
         /// records how many writes overlapped.
         /// </summary>

@@ -9,16 +9,63 @@ namespace WebExpress.WebCore.Test.Message
     public class UnitTestRequestContent
     {
         /// <summary>
-        /// Tests that a missing or non-positive content length yields no content.
+        /// Tests that a non-positive content length yields no content.
         /// </summary>
         [Theory]
-        [InlineData(null)]
         [InlineData(0L)]
         [InlineData(-1L)]
-        public void NoContentLength(long? contentLength)
+        public async Task NonPositiveContentLength(long contentLength)
         {
             // act
-            var content = Request.GetContent(new MemoryStream([1, 2, 3]), contentLength);
+            var content = await Request.GetContentAsync(new MemoryStream([1, 2, 3]), contentLength, CancellationToken.None);
+
+            // validation
+            Assert.Null(content);
+        }
+
+        /// <summary>
+        /// Tests that a body sent without a content length - chunked over HTTP/1.1, or over
+        /// HTTP/2 and HTTP/3 without the header - is read to the end of the stream instead of
+        /// being dropped.
+        /// </summary>
+        [Fact]
+        public async Task MissingContentLengthReadsToTheEnd()
+        {
+            // arrange
+            var body = CreateBody(Request.InitialContentBufferSize + 5);
+
+            // act
+            var content = await Request.GetContentAsync(new FragmentedStream(body, 4096), null, CancellationToken.None);
+
+            // validation
+            Assert.Equal(body, content);
+        }
+
+        /// <summary>
+        /// Tests that the body is read asynchronously, so a server that disallows synchronous IO
+        /// still receives it.
+        /// </summary>
+        [Fact]
+        public async Task BodyIsReadWithoutSynchronousIo()
+        {
+            // arrange
+            var body = CreateBody(100);
+
+            // act
+            var content = await Request.GetContentAsync(new FragmentedStream(body, 7, allowSynchronousIo: false), body.Length, CancellationToken.None);
+
+            // validation
+            Assert.Equal(body, content);
+        }
+
+        /// <summary>
+        /// Tests that a request without a body yields no content.
+        /// </summary>
+        [Fact]
+        public async Task NoBody()
+        {
+            // act
+            var content = await Request.GetContentAsync(null, null, CancellationToken.None);
 
             // validation
             Assert.Null(content);
@@ -32,13 +79,13 @@ namespace WebExpress.WebCore.Test.Message
         [InlineData(1)]
         [InlineData(4096)]
         [InlineData(Request.InitialContentBufferSize)]
-        public void BodyLargerThanInitialBuffer(int maxReadSize)
+        public async Task BodyLargerThanInitialBuffer(int maxReadSize)
         {
             // arrange
             var body = CreateBody(Request.InitialContentBufferSize * 3 + 17);
 
             // act
-            var content = Request.GetContent(new FragmentedStream(body, maxReadSize), body.Length);
+            var content = await Request.GetContentAsync(new FragmentedStream(body, maxReadSize), body.Length, CancellationToken.None);
 
             // validation
             Assert.Equal(body, content);
@@ -49,13 +96,13 @@ namespace WebExpress.WebCore.Test.Message
         /// those bytes, without the server reserving memory for the announced size.
         /// </summary>
         [Fact]
-        public void AnnouncedLengthExceedsBody()
+        public async Task AnnouncedLengthExceedsBody()
         {
             // arrange
             var body = CreateBody(5);
 
             // act
-            var content = Request.GetContent(new MemoryStream(body), long.MaxValue);
+            var content = await Request.GetContentAsync(new MemoryStream(body), long.MaxValue, CancellationToken.None);
 
             // validation
             Assert.Equal(body, content);
@@ -65,13 +112,13 @@ namespace WebExpress.WebCore.Test.Message
         /// Tests that bytes beyond the announced content length are not read.
         /// </summary>
         [Fact]
-        public void BodyExceedsAnnouncedLength()
+        public async Task BodyExceedsAnnouncedLength()
         {
             // arrange
             var body = CreateBody(100);
 
             // act
-            var content = Request.GetContent(new MemoryStream(body), 40);
+            var content = await Request.GetContentAsync(new MemoryStream(body), 40, CancellationToken.None);
 
             // validation
             Assert.Equal(body[..40], content);
@@ -81,10 +128,10 @@ namespace WebExpress.WebCore.Test.Message
         /// Tests that an announced body that never arrives yields no content.
         /// </summary>
         [Fact]
-        public void EmptyBody()
+        public async Task EmptyBody()
         {
             // act
-            var content = Request.GetContent(new MemoryStream(), 1024);
+            var content = await Request.GetContentAsync(new MemoryStream(), 1024, CancellationToken.None);
 
             // validation
             Assert.Null(content);
@@ -105,13 +152,31 @@ namespace WebExpress.WebCore.Test.Message
 
         /// <summary>
         /// A stream that returns at most a fixed number of bytes per read, as a network
-        /// stream does when the client sends its body in several packets.
+        /// stream does when the client sends its body in several packets. Like Kestrel's request
+        /// body with AllowSynchronousIO off, it can refuse synchronous reads.
         /// </summary>
-        private sealed class FragmentedStream(byte[] data, int maxReadSize) : MemoryStream(data)
+        private sealed class FragmentedStream(byte[] data, int maxReadSize, bool allowSynchronousIo = true)
+            : MemoryStream(data, 0, data.Length, writable: false, publiclyVisible: true)
         {
             public override int Read(byte[] buffer, int offset, int count)
             {
+                if (!allowSynchronousIo)
+                {
+                    throw new InvalidOperationException("Synchronous operations are disallowed.");
+                }
+
                 return base.Read(buffer, offset, Math.Min(count, maxReadSize));
+            }
+
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                // copied by hand: the base implementation of a derived memory stream falls back
+                // to the synchronous read
+                var count = (int)Math.Min(Math.Min(buffer.Length, maxReadSize), Length - Position);
+                GetBuffer().AsSpan((int)Position, count).CopyTo(buffer.Span);
+                Position += count;
+
+                return ValueTask.FromResult(count);
             }
         }
     }

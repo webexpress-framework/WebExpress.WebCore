@@ -131,5 +131,22 @@ namespace WebExpress.WebCore.Test.Manager
             // act
             Assert.True(typeof(IComponentManager).IsAssignableFrom(componentHub.InternationalizationManager.GetType()));
         }
+
+        /// <summary>
+        /// Tests that a key without a translation that holds a brace - keys are often built from
+        /// data - is returned as it stands instead of failing the request in string.Format.
+        /// </summary>
+        [Fact]
+        public void UntranslatedKeyWithBraceIsNoFormat()
+        {
+            // arrange
+            _ = UnitTestFixture.CreateAndRegisterComponentHubMock();
+
+            // act
+            var result = I18N.Translate("status.{broken", "x");
+
+            // validation
+            Assert.Equal("status.{broken", result);
+        }
     }
 }

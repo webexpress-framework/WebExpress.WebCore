@@ -12,8 +12,9 @@ namespace WebExpress.WebCore.WebSetting
     public sealed class KestrelSettings
     {
         /// <summary>
-        /// Allows synchronous IO on the request and response streams. WebExpress renders and sends
-        /// responses synchronously, which is why this defaults to <c>true</c> when not specified.
+        /// Allows synchronous IO on the request and response streams. WebExpress reads requests
+        /// and sends responses asynchronously; a blocking read lets a slow client hold a pool
+        /// thread for as long as it likes, so this defaults to <c>false</c> when not specified.
         /// </summary>
         public bool? AllowSynchronousIO { get; set; }
 
@@ -24,7 +25,7 @@ namespace WebExpress.WebCore.WebSetting
 
         /// <summary>
         /// Controls whether the <c>Server</c> response header is emitted. Disabling it reduces the
-        /// information exposed about the host. Defaults to <c>true</c> when not specified.
+        /// information exposed about the host. Defaults to <c>false</c> when not specified.
         /// </summary>
         public bool? AddServerHeader { get; set; }
 

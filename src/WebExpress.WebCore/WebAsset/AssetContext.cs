@@ -51,6 +51,13 @@ namespace WebExpress.WebCore.WebAsset
         public IRoute Route { get; internal set; }
 
         /// <summary>
+        /// Gets the hash of the content the address of this asset carries, or null for an asset
+        /// whose address has no version. A versioned address never serves another content, so
+        /// the asset is delivered with a cache lifetime of a year.
+        /// </summary>
+        public string Version { get; internal set; }
+
+        /// <summary>
         /// Gets the attributes associated with the page.
         /// </summary>
         public IEnumerable<Attribute> Attributes => [];
@@ -58,7 +65,13 @@ namespace WebExpress.WebCore.WebAsset
         /// <summary>
         /// Gets the collection of identity policies for the endpoint.
         /// </summary>
-        public IEnumerable<IIdentityPolicy> Policies => [];
+        /// <remarks>
+        /// Assets are the scripts, styles and images of the framework and its plugins, which a
+        /// login page needs before anybody is signed in, so they are public.
+        /// </remarks>
+        public IEnumerable<IIdentityPolicy> Policies => [_public];
+
+        private static readonly IIdentityPolicy _public = new WebPolicies.PublicAccessPolicy();
 
         /// <summary>
         /// Initializes a new instance of the class with the specified endpoint manager, parent type, context path, and path segment.

@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseTooManyRequests(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>429</title></head><body>429 - Too Many Requests</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>429</title></head><body>429 - Too Many Requests</body></html>");
             Reason = "Too Many Requests";
 
             Header.ContentType = "text/html";

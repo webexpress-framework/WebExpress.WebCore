@@ -23,7 +23,7 @@ namespace WebExpress.WebCore.WebMessage
         /// <param name="message">The user defined status message or null.</param>
         public ResponseGatewayTimeout(StatusMessage message)
         {
-            var content = message?.Message ?? "<html><head><title>504</title></head><body>504 - Gateway Timeout</body></html>";
+            var content = StatusMessage.ToHtml(message, "<html><head><title>504</title></head><body>504 - Gateway Timeout</body></html>");
             Reason = "Gateway Timeout";
 
             Header.ContentType = "text/html";

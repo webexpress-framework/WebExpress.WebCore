@@ -43,7 +43,11 @@ namespace WebExpress.WebCore.WebSetting
         /// <summary>
         /// Gets or sets whether termination waits for admitted requests and background work.
         /// </summary>
-        public ShutdownMode Shutdown { get; set; } = ShutdownMode.Immediate;
+        /// <remarks>
+        /// Graceful by default: an immediate stop aborted requests half way - a save written in
+        /// part, a session never committed - on every deployment that did not opt out.
+        /// </remarks>
+        public ShutdownMode Shutdown { get; set; } = ShutdownMode.Graceful;
 
         /// <summary>
         /// Gets or sets the shared drain budget in seconds. Cleanup requires additional time
@@ -153,6 +157,12 @@ namespace WebExpress.WebCore.WebSetting
         /// is not served.
         /// </summary>
         public MetricsSettings Metrics { get; set; }
+
+        /// <summary>
+        /// Optional settings of the delivery of scripts and stylesheets. When the block is omitted
+        /// the files of an include are bundled.
+        /// </summary>
+        public AssetSettings Assets { get; set; }
 
         /// <summary>
         /// The log settings. A missing block keeps logging switched off.

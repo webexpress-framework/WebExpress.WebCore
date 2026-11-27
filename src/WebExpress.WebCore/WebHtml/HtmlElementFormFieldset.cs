@@ -20,7 +20,7 @@ namespace WebExpress.WebCore.WebHtml
 
 
         /// <summary>
-        /// Liefert oder setzt die Label-Eigenschaft
+        /// Gets or sets a value indicating whether the fieldset and its controls are disabled.
         /// </summary>
         public bool Disable
         {
