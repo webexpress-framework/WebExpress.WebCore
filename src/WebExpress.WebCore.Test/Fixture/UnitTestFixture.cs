@@ -39,8 +39,9 @@ namespace WebExpress.WebCore.Test.Fixture
         /// </param>
         /// <param name="configuration">The configuration. Defaults to an empty one.</param>
         /// <param name="externalUri">The optional public base URI.</param>
+        /// <param name="log">The log, for a test that inspects what was logged. Defaults to one that writes nothing.</param>
         /// <returns>The server context.</returns>
-        public static IHttpServerContext CreateHttpServerContextMock(string settingsPath = null, IConfigurationRoot configuration = null, string externalUri = null)
+        public static IHttpServerContext CreateHttpServerContextMock(string settingsPath = null, IConfigurationRoot configuration = null, string externalUri = null, Log log = null)
         {
             return new HttpServerContext
             (
@@ -52,7 +53,7 @@ namespace WebExpress.WebCore.Test.Fixture
                 settingsPath ?? Path.Combine(Environment.CurrentDirectory, Guid.NewGuid().ToString()),
                 configuration ?? new ConfigurationBuilder().Build(),
                 CultureInfo.GetCultureInfo("en"),
-                new Log() { LogMode = LogMode.Off },
+                log ?? new Log() { LogMode = LogMode.Off },
                 null,
                 externalUri: externalUri
             );

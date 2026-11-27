@@ -61,5 +61,24 @@ namespace WebExpress.WebCore.WebSettingPage.Model
                 .Select(x => x.SettingGroupContext)
                 .FirstOrDefault();
         }
+
+        /// <summary>
+        /// Returns the registered group class of an application that bears the name of the
+        /// given class, whether or not it is the same type.
+        /// </summary>
+        /// <remarks>
+        /// A plugin that carries its own copy of a framework assembly sees a type of the same
+        /// name that is not the registered one; finding it tells that case apart from a group
+        /// that is not registered at all.
+        /// </remarks>
+        /// <param name="applicationContext">The context of the application.</param>
+        /// <param name="groupType">The group class.</param>
+        /// <returns>The registered class of that name, or null.</returns>
+        public Type GetSettingGroupClassByName(IApplicationContext applicationContext, Type groupType)
+        {
+            return Items(applicationContext)
+                .Select(x => x.SettingGroupClass)
+                .FirstOrDefault(x => x.FullName == groupType?.FullName);
+        }
     }
 }

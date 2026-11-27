@@ -1,4 +1,5 @@
-﻿using WebExpress.WebCore.WebPage;
+﻿using System;
+using WebExpress.WebCore.WebPage;
 
 namespace WebExpress.WebCore.WebSettingPage
 {
@@ -14,9 +15,21 @@ namespace WebExpress.WebCore.WebSettingPage
         public ISettingCategoryContext SettingCategory => SettingGroup?.SettingCategory;
 
         /// <summary>
-        /// Gets the group context to which the setting page belongs.
+        /// Gets the group context to which the setting page belongs, or null while no plugin
+        /// of the application provides the group.
         /// </summary>
-        public ISettingGroupContext SettingGroup { get; internal set; }
+        /// <remarks>
+        /// Resolved on every read: the group often lives in another plugin (a framework group
+        /// such as the general settings), and the plugins of an application register in no
+        /// fixed order. A group taken once at registration would stay missing for good when the
+        /// page happened to register first.
+        /// </remarks>
+        public ISettingGroupContext SettingGroup => ResolveSettingGroup?.Invoke();
+
+        /// <summary>
+        /// Gets or sets the lookup of the group in the current registrations.
+        /// </summary>
+        internal Func<ISettingGroupContext> ResolveSettingGroup { get; set; }
 
         /// <summary>  
         /// Gets the section of the setting page.  

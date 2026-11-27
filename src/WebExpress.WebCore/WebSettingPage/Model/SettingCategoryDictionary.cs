@@ -48,5 +48,23 @@ namespace WebExpress.WebCore.WebSettingPage.Model
                 .Select(x => x.SettingCategoryContext)
                 .FirstOrDefault();
         }
+
+        /// <summary>
+        /// Returns the registered category class of an application that bears the name of the
+        /// given class, whether or not it is the same type.
+        /// </summary>
+        /// <remarks>
+        /// Tells a category from a second copy of its assembly apart from one that is not
+        /// registered at all.
+        /// </remarks>
+        /// <param name="applicationContext">The context of the application.</param>
+        /// <param name="categoryType">The category class.</param>
+        /// <returns>The registered class of that name, or null.</returns>
+        public Type GetSettingCategoryClassByName(IApplicationContext applicationContext, Type categoryType)
+        {
+            return Items(applicationContext)
+                .Select(x => x.SettingCategoryClass)
+                .FirstOrDefault(x => x.FullName == categoryType?.FullName);
+        }
     }
 }

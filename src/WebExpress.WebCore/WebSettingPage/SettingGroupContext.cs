@@ -1,4 +1,5 @@
-﻿using WebExpress.WebCore.WebApplication;
+﻿using System;
+using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebComponent;
 using WebExpress.WebCore.WebIcon;
 using WebExpress.WebCore.WebPlugin;
@@ -21,9 +22,19 @@ namespace WebExpress.WebCore.WebSettingPage
         public IApplicationContext ApplicationContext { get; internal set; }
 
         /// <summary>
-        /// Gets the setting category context to which the setting group belongs.
+        /// Gets the setting category context to which the setting group belongs, or null while
+        /// no plugin of the application provides the category.
         /// </summary>
-        public ISettingCategoryContext SettingCategory { get; internal set; }
+        /// <remarks>
+        /// Resolved on every read for the same reason as <see cref="SettingPageContext.SettingGroup"/>:
+        /// the category may come from a plugin that registers after the group.
+        /// </remarks>
+        public ISettingCategoryContext SettingCategory => ResolveSettingCategory?.Invoke();
+
+        /// <summary>
+        /// Gets or sets the lookup of the category in the current registrations.
+        /// </summary>
+        internal Func<ISettingCategoryContext> ResolveSettingCategory { get; set; }
 
         /// <summary>
         /// Gets the group id.

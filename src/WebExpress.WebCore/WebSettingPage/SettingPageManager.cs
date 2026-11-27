@@ -5,6 +5,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.Loader;
+using System.Threading;
 using WebExpress.WebCore.Internationalization;
 using WebExpress.WebCore.WebApplication;
 using WebExpress.WebCore.WebAttribute;
@@ -31,6 +33,8 @@ namespace WebExpress.WebCore.WebSettingPage
         private readonly SettingCategoryDictionary _categoryDictionary = new();
         private readonly SettingGroupDictionary _groupDictionary = new();
         private readonly SettingPageDictionary _pageDictionary = new();
+        private readonly HashSet<(IPluginContext PluginContext, IApplicationContext ApplicationContext)> _registered = [];
+        private readonly Lock _registeredLock = new();
 
         // use a concurrent dictionary for delegate cache to avoid concurrent write corruption
         private static readonly ConcurrentDictionary<Type, Delegate> _delegateCache = new ConcurrentDictionary<Type, Delegate>();
@@ -224,14 +228,11 @@ namespace WebExpress.WebCore.WebSettingPage
         /// <param name="pluginContext">The context of the plugin whose setting pages are to be associated.</param>
         private void Register(IPluginContext pluginContext)
         {
-            if (_pageDictionary.Contains(pluginContext))
-            {
-                return;
-            }
-
-            RegisterCategory(pluginContext, _componentHub.GetBoundApplications(pluginContext));
-            RegisterGroup(pluginContext, _componentHub.GetBoundApplications(pluginContext));
-            RegisterPage(pluginContext, _componentHub.GetBoundApplications(pluginContext));
+            Register
+            (
+                [(pluginContext, pluginContext.Assembly.GetTypes())],
+                [.. _componentHub?.GetBoundApplications(pluginContext) ?? []]
+            );
         }
 
         /// <summary>
@@ -240,17 +241,112 @@ namespace WebExpress.WebCore.WebSettingPage
         /// <param name="applicationContext">The context of the application whose pages are to be associated.</param>
         private void Register(IApplicationContext applicationContext)
         {
-            if (_pageDictionary.Contains(applicationContext))
+            Register
+            (
+                (_componentHub?.PluginManager?.GetPlugins(applicationContext) ?? [])
+                    .Select(x => (x, (IEnumerable<Type>)x.Assembly.GetTypes())),
+                [applicationContext]
+            );
+        }
+
+        /// <summary>
+        /// Registers the categories, groups and pages of plugins in applications as one pass.
+        /// </summary>
+        /// <remarks>
+        /// The plugins of an application arrive in dependency order, but a plugin need not
+        /// declare the framework plugin whose group it names, and a plugin loaded later comes in
+        /// a pass of its own. Pages and groups therefore find their group and category when they
+        /// are read, so neither the order of the plugins nor that of the passes decides where a
+        /// page appears. An unresolved reference is reported only at the end of the pass, once
+        /// every plugin of the pass had the chance to provide it.
+        /// </remarks>
+        /// <param name="plugins">The plugins with the types to scan.</param>
+        /// <param name="applicationContexts">The applications to register them in.</param>
+        internal void Register(IEnumerable<(IPluginContext PluginContext, IEnumerable<Type> Types)> plugins, IReadOnlyCollection<IApplicationContext> applicationContexts)
+        {
+            var groups = new List<SettingGroupItem>();
+            var pages = new List<SettingPageItem>();
+
+            foreach (var (pluginContext, types) in plugins)
             {
-                return;
+                var claimed = Claim(pluginContext, applicationContexts);
+
+                if (claimed.Count == 0)
+                {
+                    continue;
+                }
+
+                var candidates = types
+                    .Where(x => x.IsClass && x.IsSealed && x.IsPublic)
+                    .ToList();
+
+                RegisterCategory(pluginContext, claimed, candidates);
+                groups.AddRange(RegisterGroup(pluginContext, claimed, candidates));
+                pages.AddRange(RegisterPage(pluginContext, claimed, candidates));
             }
 
-            foreach (var pluginContext in _componentHub?.PluginManager?.GetPlugins(applicationContext))
+            ReportUnresolved(groups, pages);
+        }
+
+        /// <summary>
+        /// Claims the applications in which a plugin is not registered yet.
+        /// </summary>
+        /// <remarks>
+        /// A plugin reaches the manager twice - with the application that is added and with
+        /// the plugin that is added - and a plugin without setting pages left no trace to tell
+        /// the second time apart, so its categories and groups were listed twice.
+        /// </remarks>
+        /// <param name="pluginContext">The plugin context.</param>
+        /// <param name="applicationContexts">The applications.</param>
+        /// <returns>The applications this call registers the plugin in.</returns>
+        private List<IApplicationContext> Claim(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts)
+        {
+            lock (_registeredLock)
             {
-                RegisterCategory(pluginContext, new[] { applicationContext });
-                RegisterGroup(pluginContext, new[] { applicationContext });
-                RegisterPage(pluginContext, new[] { applicationContext });
+                return [.. applicationContexts.Where(x => x is not null && _registered.Add((pluginContext, x)))];
             }
+        }
+
+        /// <summary>
+        /// Warns about groups and pages whose category or group is not registered.
+        /// </summary>
+        /// <remarks>
+        /// Such a page stays reachable by its route but is missing from every settings
+        /// navigation, which is invisible without the warning.
+        /// </remarks>
+        /// <param name="groups">The groups registered in the pass.</param>
+        /// <param name="pages">The pages registered in the pass.</param>
+        private void ReportUnresolved(IEnumerable<SettingGroupItem> groups, IEnumerable<SettingPageItem> pages)
+        {
+            foreach (var group in groups.Where(x => x.Category is not null && x.SettingGroupContext?.SettingCategory is null))
+            {
+                var registered = _categoryDictionary.GetSettingCategoryClassByName(group.ApplicationContext, group.Category);
+
+                _httpServerContext?.Log?.Warning(registered is not null
+                    ? I18N.Translate("webexpress.webcore:settingpagemanager.foreign.category", group.SettingGroupClass.FullName, group.PluginContext?.PluginId, group.Category.FullName, Origin(group.Category), group.ApplicationContext?.ApplicationId, Origin(registered))
+                    : I18N.Translate("webexpress.webcore:settingpagemanager.unresolved.category", group.SettingGroupClass.FullName, group.PluginContext?.PluginId, group.Category.FullName, Origin(group.Category), group.ApplicationContext?.ApplicationId));
+            }
+
+            foreach (var page in pages.Where(x => x.SettingGroupType is not null && x.SettingGroup is null))
+            {
+                var registered = _groupDictionary.GetSettingGroupClassByName(page.ApplicationContext, page.SettingGroupType);
+
+                _httpServerContext?.Log?.Warning(registered is not null
+                    ? I18N.Translate("webexpress.webcore:settingpagemanager.foreign.group", page.SettingPageClass.FullName, page.PluginContext?.PluginId, page.SettingGroupType.FullName, Origin(page.SettingGroupType), page.ApplicationContext?.ApplicationId, Origin(registered))
+                    : I18N.Translate("webexpress.webcore:settingpagemanager.unresolved.group", page.SettingPageClass.FullName, page.PluginContext?.PluginId, page.SettingGroupType.FullName, Origin(page.SettingGroupType), page.ApplicationContext?.ApplicationId));
+            }
+        }
+
+        /// <summary>
+        /// Describes where a type was loaded from, for the log.
+        /// </summary>
+        /// <param name="type">The type.</param>
+        /// <returns>The assembly and its load context.</returns>
+        private static string Origin(Type type)
+        {
+            var loadContext = AssemblyLoadContext.GetLoadContext(type.Assembly);
+
+            return $"{type.Assembly.GetName().Name}, {loadContext?.Name ?? loadContext?.ToString()}";
         }
 
         /// <summary>
@@ -258,12 +354,10 @@ namespace WebExpress.WebCore.WebSettingPage
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContexts">The application context (optional).</param>
-        private void RegisterCategory(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts)
+        /// <param name="types">The candidate types of the plugin.</param>
+        private void RegisterCategory(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts, IEnumerable<Type> types)
         {
-            var assembly = pluginContext.Assembly;
-
-            foreach (var settingCategoryType in assembly.GetTypes()
-                .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
+            foreach (var settingCategoryType in types
                 .Where(x => x.GetInterface(typeof(ISettingCategory).Name) is not null))
             {
                 var id = settingCategoryType.FullName?.ToLowerInvariant();
@@ -337,12 +431,13 @@ namespace WebExpress.WebCore.WebSettingPage
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContexts">The application context (optional).</param>
-        private void RegisterGroup(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts)
+        /// <param name="types">The candidate types of the plugin.</param>
+        /// <returns>The registered groups.</returns>
+        private List<SettingGroupItem> RegisterGroup(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts, IEnumerable<Type> types)
         {
-            var assembly = pluginContext.Assembly;
+            var registered = new List<SettingGroupItem>();
 
-            foreach (var settingGroupType in assembly.GetTypes()
-                .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
+            foreach (var settingGroupType in types
                 .Where(x => x.GetInterface(typeof(ISettingGroup).Name) is not null))
             {
                 var id = settingGroupType.FullName?.ToLowerInvariant();
@@ -395,7 +490,9 @@ namespace WebExpress.WebCore.WebSettingPage
                         Icon = icon,
                         Name = name,
                         Description = description,
-                        SettingCategory = _categoryDictionary.GetSettingCategory(applicationContext, category),
+                        ResolveSettingCategory = category is not null
+                            ? () => _categoryDictionary.GetSettingCategory(applicationContext, category)
+                            : null,
                         Section = section
                     };
 
@@ -408,19 +505,21 @@ namespace WebExpress.WebCore.WebSettingPage
                         SettingGroupClass = settingGroupType,
                         Name = name,
                         Description = description,
-                        Category = category?.GetType(),
+                        Category = category,
                         Section = section
                     };
 
-                    // insert the settings category into the dictionary
                     if (_groupDictionary.AddSettingGroupItem(settingGroupItem))
                     {
+                        registered.Add(settingGroupItem);
                         OnAddSettingGroup(settingGroupContext);
 
                         _httpServerContext?.Log?.Debug(I18N.Translate("webexpress.webcore:settingpagemanager.register.group", id, applicationContext.ApplicationId));
                     }
                 }
             }
+
+            return registered;
         }
 
         /// <summary>
@@ -428,12 +527,13 @@ namespace WebExpress.WebCore.WebSettingPage
         /// </summary>
         /// <param name="pluginContext">The plugin context.</param>
         /// <param name="applicationContexts">The application context (optional).</param>
-        private void RegisterPage(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts)
+        /// <param name="types">The candidate types of the plugin.</param>
+        /// <returns>The registered pages.</returns>
+        private List<SettingPageItem> RegisterPage(IPluginContext pluginContext, IEnumerable<IApplicationContext> applicationContexts, IEnumerable<Type> types)
         {
-            var assembly = pluginContext.Assembly;
+            var registered = new List<SettingPageItem>();
 
-            foreach (var settingPageType in assembly.GetTypes()
-                .Where(x => x.IsClass == true && x.IsSealed && x.IsPublic)
+            foreach (var settingPageType in types
                 .Where(x => x.GetInterface(typeof(ISettingPage<>).Name) is not null))
             {
                 var id = settingPageType.FullName?.ToLowerInvariant();
@@ -616,7 +716,9 @@ namespace WebExpress.WebCore.WebSettingPage
                         PageIcon = GetIcon(icon),
                         Scopes = scopes,
                         Domains = domains,
-                        SettingGroup = _groupDictionary.GetSettingGroup(applicationContext, group),
+                        ResolveSettingGroup = group is not null
+                            ? () => _groupDictionary.GetSettingGroup(applicationContext, group)
+                            : null,
                         Section = section,
                         Policies = policies,
                         Hide = hide
@@ -630,21 +732,22 @@ namespace WebExpress.WebCore.WebSettingPage
                         ApplicationContext = applicationContext,
                         SettingPageContext = settingPageContext,
                         SettingPageClass = settingPageType,
-                        SettingGroup = settingPageContext.SettingGroup,
-                        SettingGroupType = group?.GetType(),
+                        SettingGroupType = group,
                         IncludeSubPaths = includeSubPaths,
                         Attributes = attributes.Select(x => x.AttributeType)
                     };
 
-                    // insert the settings page into the dictionary
                     if (_pageDictionary.AddSettingPageItem(settingPageItem))
                     {
+                        registered.Add(settingPageItem);
                         OnAddSettingPage(settingPageItem.SettingPageContext);
 
                         _httpServerContext?.Log?.Debug(I18N.Translate("webexpress.webcore:settingpagemanager.register.page", id, applicationContext.ApplicationId));
                     }
                 }
             }
+
+            return registered;
         }
 
         /// <summary>
@@ -655,6 +758,11 @@ namespace WebExpress.WebCore.WebSettingPage
         {
             // categories and groups go with their plugin, and every removed page is announced, so
             // the endpoint registration drops the route of a setting page whose plugin is gone
+            lock (_registeredLock)
+            {
+                _registered.RemoveWhere(x => x.PluginContext == pluginContext);
+            }
+
             _categoryDictionary.Remove(pluginContext);
             _groupDictionary.Remove(pluginContext);
 
@@ -670,6 +778,11 @@ namespace WebExpress.WebCore.WebSettingPage
         /// <param name="applicationContext">The context of the application that contains the fragments to remove.</param>
         internal void Remove(IApplicationContext applicationContext)
         {
+            lock (_registeredLock)
+            {
+                _registered.RemoveWhere(x => x.ApplicationContext == applicationContext);
+            }
+
             _categoryDictionary.Remove(applicationContext);
             _groupDictionary.Remove(applicationContext);
 
