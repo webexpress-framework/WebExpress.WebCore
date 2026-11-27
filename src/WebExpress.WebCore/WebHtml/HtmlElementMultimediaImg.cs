@@ -10,7 +10,7 @@ namespace WebExpress.WebCore.WebHtml
     public class HtmlElementMultimediaImg : HtmlElement, IHtmlElementMultimedia
     {
         /// <summary>
-        /// Gets or sets the alternate text., wenn das Bild nicht angezeigt werden kann
+        /// Gets or sets the alternate text shown when the image cannot be displayed.
         /// </summary>
         public string Alt
         {

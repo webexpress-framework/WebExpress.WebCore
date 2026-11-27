@@ -61,7 +61,7 @@ namespace WebExpress.WebCore.WebHtml
         /// Removes a style.
         /// </summary>
         /// <param name="html">The HTML node.</param>
-        /// <param name="cssStyle">Der Style, welcher entfernt werden soll</param>
+        /// <param name="cssStyle">The style to remove.</param>
         /// <returns>The HTML element reduced by the checkout.</returns>
         public static IHtmlNode RemoveStyle(this IHtmlNode html, string cssStyle)
         {

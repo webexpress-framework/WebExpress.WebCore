@@ -3,7 +3,7 @@
 namespace WebExpress.WebCore.WebAttribute
 {
     /// <summary>
-    /// Indicates that a status page ist default
+    /// Indicates that a status page is the default.
     /// </summary>
     [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
     public class DefaultAttribute : Attribute, IStatusPageAttribute

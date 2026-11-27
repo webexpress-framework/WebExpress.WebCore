@@ -4,9 +4,7 @@ using WebExpress.WebCore.WebComponent;
 namespace WebExpress.WebCore.WebPlugin.Model
 {
     /// <summary>
-    /// Verzeichnis über die registrieten Plugins
-    /// Key = PluginId
-    /// Value = Plugin-Metadaten
+    /// Directory of the registered plugins, keyed by plugin id.
     /// </summary>
     /// <remarks>
     /// Concurrent, because the package scan loads and unloads plugins while requests and the other

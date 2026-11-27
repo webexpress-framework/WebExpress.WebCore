@@ -29,7 +29,7 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// Liefert oder setzt die Anzahl der gleichzeitig sichtbaren Elemente der Auswahlliste
+        /// Gets or sets the number of options of the selection list that are visible at the same time.
         /// </summary>
         public string Size
         {
@@ -47,7 +47,7 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// Liefert oder setzt ob das Eingabefeld verwendet werden kann
+        /// Gets or sets a value indicating whether the input field is disabled.
         /// </summary>
         public bool Disabled
         {

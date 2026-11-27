@@ -635,7 +635,7 @@ namespace WebExpress.WebCore.WebHtml
         /// Checks if a user-defined attribute is set.
         /// </summary>
         /// <param name="name">The attribute name.</param>
-        /// <returns>True wenn Attribut vorhanden, false sonst</returns>
+        /// <returns>True if the attribute is set; otherwise, false.</returns>
         public bool HasUserAttribute(string name)
         {
             return HasAttribute(name);

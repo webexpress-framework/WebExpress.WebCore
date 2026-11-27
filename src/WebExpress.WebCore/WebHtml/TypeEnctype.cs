@@ -66,7 +66,7 @@
         }
 
         /// <summary>
-        /// Conversion to string.repräsentation
+        /// Converts the encoding to its string representation.
         /// </summary>
         /// <param name="enctype">The coding.</param>
         /// <returns>The converted encoding.</returns>

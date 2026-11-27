@@ -18,7 +18,7 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// Gets or sets the value. des Eingabefeldes
+        /// Gets or sets the value of the input field.
         /// </summary>
         public string Value
         {

@@ -27,7 +27,7 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// Liefert oder setzt die untere Grenze der Skala
+        /// Gets or sets the lower bound of the scale.
         /// </summary>
         public string Min
         {
@@ -36,7 +36,7 @@ namespace WebExpress.WebCore.WebHtml
         }
 
         /// <summary>
-        /// Liefert oder setzt die obere Grenze der Skala
+        /// Gets or sets the upper bound of the scale.
         /// </summary>
         public string Max
         {
